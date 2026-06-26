@@ -301,8 +301,7 @@ function updateDynamicPlatforms() {
                 mesh.position.y = basePosition.y + amount + motion.distance;
             } else if (motion.axis === "x") {
                 if (player.getActiveDynamicCollider()?.source === mesh && player.getIsOnGround()) {
-                    const delta = entry.lastMotionTime === undefined ? 0 : t - entry.lastMotionTime;
-                    entry.motionElapsed = (entry.motionElapsed ?? 0) + delta;
+                    entry.motionElapsed = (entry.motionElapsed ?? 0) + player.getCurrentDelta();
 
                     const phase = (entry.motionElapsed * motion.speed / Math.PI) % 2;
                     const rawProgress = phase <= 1 ? phase : 2 - phase;
@@ -310,7 +309,6 @@ function updateDynamicPlatforms() {
 
                     setPositionOnXPath(mesh, progress);
                 }
-                entry.lastMotionTime = t;
             }
         }
         // 更新体积云
