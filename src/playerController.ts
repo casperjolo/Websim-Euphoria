@@ -53,6 +53,7 @@ export class playerController {
     playerIsOnGround = false; // 是否在地面
     isupdate = true; // 帧更新开关
     timeScale = 1; // 时间缩放系数
+    currentDelta = 0; // 本帧实际使用的 delta（已钳制 + timeScale）
     isFlying = false; // 飞行状态
     isChangeControllerTransitionTimer: any = null; // 模式切换计时器
     enableToward = true; // 启用朝向输入
@@ -70,8 +71,15 @@ export class playerController {
     activeDynamicCollider: DynamicColliderEntry | null = null; // 当前站立的动态碰撞体
 
     // ==================== 碰撞阈值 ====================
-    private readonly slopeAngleThreshold = 50; // 斜坡阈值（度）
-    private readonly maxStepHeight = 40; // 可跨越台阶/立面高度阈值
+    private readonly rideHeight = 40; // 悬空胶囊离地高度
+    // 站立 / 落地阈值
+    private snapH = 0; // 站立时胶囊原点应离地的高度
+    private maxH = 0;  // 离地超过此值判为悬空、施加重力
+
+    // ==================== 台阶视觉平滑 ====================
+    private stepSmoothFactor = 20; // 插值追赶速度，越大追得越快
+    private modelBaseY = 0; // 模型相对胶囊的基准 Y
+    private readonly minFloorNormalY = Math.cos(8 * Math.PI / 180);// 最小法线 Y 分量，地面法线与竖直夹角 ≤ 8° 视为台阶/平地（注入平滑）
 
     // ==================== 移动端 ====================
     mobileControls: MobileControls | null = null; // 移动端控件
@@ -318,9 +326,13 @@ export class playerController {
             const r = this.playerCapsuleRadius * s * this.playerCapsuleRadiusRatio;
             const h = this.playerCapsuleHeight * s;
 
+            // 悬空胶囊：碰撞椭球底部永久离脚 rideHeight
+            const rideHeightScaled = this.rideHeight * s;   // 当前缩放下的实际悬空高度
+            const colliderHeight = h - rideHeightScaled;    // 缩短后胶囊总高
+
             // 创建胶囊体网格
             this.playerCapsule = new THREE.Mesh(
-                new RoundedBoxGeometry(r * 2, h, r * 2, 1, 75),
+                new RoundedBoxGeometry(r * 2, colliderHeight, r * 2, 1, 75),
                 new THREE.MeshStandardMaterial({
                     color: new THREE.Color(1, 0, 0),
                     shadowSide: THREE.DoubleSide,
@@ -329,12 +341,13 @@ export class playerController {
                     depthWrite: false,
                 }),
             );
-            const segmentLength = h - 2 * r;
+            const segmentLength = colliderHeight - 2 * r;
             this.playerCapsule.geometry.translate(0, -segmentLength / 2, 0);
             this.playerCapsule.capsuleInfo = {
                 radius: r,
                 segment: new THREE.Line3(new THREE.Vector3(), new THREE.Vector3(0, -segmentLength, 0)),
             };
+            this.recomputeGroundThresholds();
             this.playerCapsule.name = "capsule";
             (this.playerCapsule.material as THREE.Material).visible = this.displayPlayer;
             this.scene.add(this.playerCapsule);
@@ -343,7 +356,8 @@ export class playerController {
 
             // 挂载模型到胶囊
             this.playerModel.scale.multiplyScalar(modelScale * s);
-            this.playerModel.position.set(0, -segmentLength - r, 0);
+            this.modelBaseY = -segmentLength - r - rideHeightScaled;
+            this.playerModel.position.set(0, this.modelBaseY, 0);
             this.playerModel.traverse((child: any) => {
                 if (child.name === this.playerModelConfig?.headBoneName) this.playerModelHead = child;
             });
@@ -603,31 +617,13 @@ export class playerController {
         }
     }
 
-    // 判断是否跳过三角面碰撞
-    private shouldSkipTriCollision(tri: any, dir: THREE.Vector3): boolean {
-        const normal = tri.getNormal(new THREE.Vector3());
-        const normalYAangle = normal.angleTo(this.upVector) * 180 / Math.PI;
-        // 小于 slopeAngleThreshold° 斜坡，不处理碰撞
-        if (normalYAangle < this.slopeAngleThreshold) return true;
-        // 忽略立面阈值高度以下的碰撞
-        if (normalYAangle > 80 && normalYAangle < 100) {
-            const triHeight = Math.max(tri.a.y, tri.b.y, tri.c.y) - Math.min(tri.a.y, tri.b.y, tri.c.y); // 三角面y高度
-            if (triHeight < this.maxStepHeight * this.playerModelConfig.scale) return true; // 阈值高度
-            // else {
-            //     // console.log('被挡住：', '当前三角面高度', triHeight, "阈值", this.maxStepHeight * this.playerModelConfig.scale);
-            // }
-        }
-        // console.log('碰撞三角面法线与世界上方向夹角：', normalYAangle.toFixed(2), '°');
-        // console.log('碰撞三角面：', tri, "推开方向向量：", dir);
-        return false;
-    }
-
     // ==================== 主循环 ====================
 
     // 主循环
     async update(delta = clock.getDelta()) {
         if (!this.isupdate || !this.playerCapsule || !this.collider) return;
         delta = Math.min(delta, 1 / 40) * this.timeScale;
+        this.currentDelta = delta;
         if (this.controllerMode === 1) {
             this.vehicle.updateVehicle(delta);
         } else {
@@ -721,7 +717,6 @@ export class playerController {
         }
 
         // 地面检测
-        const s = this.playerModelConfig.scale;
         this.groundRaycaster.ray.origin.copy(this.playerCapsule.position);
         const staticHits = this.groundRaycaster.intersectObject(this.collider!, false);
 
@@ -740,17 +735,14 @@ export class playerController {
 
         if (!this.isFlying) {
             if (bestHit) {
-                const capsuleInfo = this.playerCapsule.capsuleInfo;
-                const snapH = parseFloat((-capsuleInfo.segment.end.y + capsuleInfo.radius).toFixed(6));
-                const maxH = parseFloat((snapH * 1.2).toFixed(6));
-                const snapY = bestHit.point.y + snapH;
-                const dist = parseFloat((this.playerCapsule.position.y - bestHit.point.y).toFixed(6));
-                if (dist > maxH) {
+                const snapY = bestHit.point.y + this.snapH;
+                const dist = this.playerCapsule.position.y - bestHit.point.y;
+                if (dist > this.maxH) {
                     this.applyGravity(delta);
                 } else if (this.playerVelocity.y <= 0) {
                     if (this.playerIsOnGround) {
-                        // 已在地面：直接跟随地形（斜坡、动态平台）
-                        this.snapToGround(snapY);
+                        // 已在地面：跟随地形（斜坡、动态平台）。仅当脚下是水平台面（台阶/平地）才注入平滑
+                        this.snapToGround(snapY, this.isFlatFloor(bestHit), delta);
                     } else {
                         // 从空中落下：只有本帧速度能到达落点才 snap，否则继续应用重力
                         const predictedY = this.playerCapsule.position.y + this.playerVelocity.y * delta;
@@ -787,7 +779,6 @@ export class playerController {
                     capsuleInfo,
                     this.collider!,
                     this.staticTemps,
-                    (tri: any, dir: THREE.Vector3) => !this.isFlying && this.playerIsOnGround && this.shouldSkipTriCollision(tri, dir),
                 );
 
                 // 动态碰撞检测
@@ -798,7 +789,6 @@ export class playerController {
                         capsuleInfo,
                         dynEntry.mesh,
                         this.dynTemps,
-                        (tri: any, dir: THREE.Vector3) => !this.isFlying && this.playerIsOnGround && this.shouldSkipTriCollision(tri, dir),
                     );
                 }
             }
@@ -919,11 +909,35 @@ export class playerController {
         this.setOnGround(false);
     }
 
+    // 判断脚下地面是否为水平台面（法线接近竖直）
+    private isFlatFloor(hit: THREE.Intersection): boolean {
+        const n = hit.face?.normal;
+        if (!n) return true;
+        return n.y >= this.minFloorNormalY; // 大于等于最小法线 Y 分量时为水平台面
+    }
+
     // 吸附到地面
-    private snapToGround(groundY: number) {
+    private snapToGround(groundY: number, smooth = false, delta = 0) {
         this.playerVelocity.y = 0;
-        this.playerCapsule.position.y = groundY;
+        const dy = groundY - this.playerCapsule.position.y;
+        if (smooth && Math.abs(dy) <= this.rideHeight * this.playerModelConfig.scale) {
+            // 平滑吸附
+            this.playerCapsule.position.y += dy * Math.min(1, this.stepSmoothFactor * delta);
+        } else {
+        // 瞬时吸附
+            this.playerCapsule.position.y = groundY;
+        }
         this.setOnGround(true);
+    }
+
+    // 重算站立 / 落地阈值（snapH / maxH）。仅在胶囊创建、缩放后调用。
+    private recomputeGroundThresholds() {
+        const info = this.playerCapsule?.capsuleInfo;
+        if (!info) return;
+        const rideHeightScaled = this.rideHeight * this.playerModelConfig.scale;
+        // 悬空胶囊：snapH 补偿 rideHeight
+        this.snapH = -info.segment.end.y + info.radius + rideHeightScaled;
+        this.maxH = this.snapH + rideHeightScaled;
     }
 
     // 动态修改缩放
@@ -949,6 +963,7 @@ export class playerController {
         if (this.playerCapsule?.capsuleInfo) {
             this.playerCapsule.capsuleInfo.radius *= ratio;
             this.playerCapsule.capsuleInfo.segment.end.y *= ratio;
+            this.recomputeGroundThresholds(); // 几何随缩放变化，重算站立/落地阈值
         }
         if (this.isFirstPerson) this.cam.setFirstPerson();
     }
@@ -972,6 +987,8 @@ export class playerController {
     getIsFlying() { return this.isFlying; }
     // 获取落地状态
     getIsOnGround() { return this.playerIsOnGround; }
+    // 获取本帧实际使用的 delta（已钳制 + timeScale）
+    getCurrentDelta() { return this.currentDelta; }
     // 获取控制器模式
     getControllerMode() { return this.controllerMode; }
     // 获取玩家模型
