@@ -351,6 +351,7 @@ async function initPlayer() {
         minCamDistance: 50,
         maxCamDistance: 220,
         enableOverShoulderView: true,
+        springCameraTime: true,
     });
 
     player.getPlayerModel()?.traverse((child) => {
