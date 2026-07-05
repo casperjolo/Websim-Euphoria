@@ -36,7 +36,7 @@ export class playerController {
     private initPos: THREE.Vector3 = new THREE.Vector3(0, 0, 0); // 初始出生位置
     gravity = -2400; // 重力加速度
     jumpHeight = 600; // 跳跃初速度
-    playerSpeed = 300; // 行走速度
+    playerSpeed = 200; // 行走速度
     playerFlySpeed = 2100; // 飞行速度
     private curPlayerSpeed = 0; // 当前实际速度
     enableOverShoulderView = false; // 越肩视角开关
@@ -55,6 +55,7 @@ export class playerController {
     timeScale = 1; // 时间缩放系数
     currentDelta = 0; // 本帧实际使用的 delta（已钳制 + timeScale）
     isFlying = false; // 飞行状态
+    skipCapsuleCollision = false; // 临时跳过玩家胶囊碰撞检测
     isChangeControllerTransitionTimer: any = null; // 模式切换计时器
     enableToward = true; // 启用朝向输入
 
@@ -77,7 +78,7 @@ export class playerController {
     private maxH = 0;  // 离地超过此值判为悬空、施加重力
 
     // ==================== 台阶视觉平滑 ====================
-    private stepSmoothFactor = 20; // 插值追赶速度，越大追得越快
+    private stepSmoothFactor = 10; // 插值追赶速度，越大追得越快
     private modelBaseY = 0; // 模型相对胶囊的基准 Y
     private readonly minFloorNormalY = Math.cos(8 * Math.PI / 180);// 最小法线 Y 分量，地面法线与竖直夹角 ≤ 8° 视为台阶/平地（注入平滑）
 
@@ -689,7 +690,7 @@ export class playerController {
             if (this.input.space) this.moveDir.y += 1;
             this.curPlayerSpeed = this.input.shift ? this.playerFlySpeed * 2 : this.playerFlySpeed;
         } else {
-            this.curPlayerSpeed = this.input.shift ? this.playerSpeed * 2 : this.playerSpeed;
+            this.curPlayerSpeed = this.input.shift ? this.playerSpeed * 3 : this.playerSpeed;
         }
 
         this.moveDir.normalize(); // 归一化方向向量
@@ -772,7 +773,7 @@ export class playerController {
             this.playerCapsule.position.addScaledVector(this.xzDir, stepDist);
             this.playerCapsule.updateMatrixWorld();
 
-            if (!v.isMovingToBoarding) {
+            if (!v.isMovingToBoarding && !this.skipCapsuleCollision) {
                 // 静态碰撞检测
                 applyCapsuleCollision(
                     this.playerCapsule,
@@ -924,7 +925,7 @@ export class playerController {
             // 平滑吸附
             this.playerCapsule.position.y += dy * Math.min(1, this.stepSmoothFactor * delta);
         } else {
-        // 瞬时吸附
+            // 瞬时吸附
             this.playerCapsule.position.y = groundY;
         }
         this.setOnGround(true);
@@ -1040,6 +1041,8 @@ export class playerController {
         this.displayCollider = debug;
         this.syncDebugVisibility();
     }
+    // 临时跳过玩家胶囊碰撞检测
+    setSkipCapsuleCollision(skip: boolean) { this.skipCapsuleCollision = skip; }
 
     // --- 动画 ---
     // 按名播放动画
