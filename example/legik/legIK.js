@@ -214,15 +214,15 @@ function createDebugPanel() {
     sunDebugHelper.visible = params.sunDebug;
     sunShadowCameraHelper.visible = params.sunDebug;
 
-    gui = new GUI({ title: "调试", width: 240 });
+    gui = new GUI({ title: "Debug", width: 240 });
     gui.domElement.style.position = "fixed";
     gui.domElement.style.top = "12px";
     gui.domElement.style.right = "12px";
 
-    gui.add(params, "playerDebug").name("玩家碰撞体").onChange(value => {
+    gui.add(params, "playerDebug").name("Player Collider").onChange(value => {
         player?.setDebug(value);
     });
-    gui.add(params, "legIKEnabled").name("启用脚部 IK").onChange(value => {
+    gui.add(params, "legIKEnabled").name("Enable Leg IK").onChange(value => {
         legIKEnabled = value;
         if (!value) {
             legIK?.restore();
@@ -231,16 +231,16 @@ function createDebugPanel() {
             legIK?.setDebugEnabled(params.footIKDebug);
         }
     });
-    gui.add(params, "footIKDebug").name("脚部 IK 调试").onChange(value => {
+    gui.add(params, "footIKDebug").name("Foot IK Debug").onChange(value => {
         legIK?.setDebugEnabled(value && legIKEnabled);
     });
-    gui.add(params, "soleSampleDebug").name("脚上采样点调试").onChange(value => {
+    gui.add(params, "soleSampleDebug").name("Sole Sample Debug").onChange(value => {
         legIK?.setSoleSampleDebugEnabled(value);
     });
-    gui.add(params, "footPhaseDebug").name("脚步相位调试");
-    gui.add(params, "leftFootPhase").name("左脚相位").listen().disable();
-    gui.add(params, "rightFootPhase").name("右脚相位").listen().disable();
-    gui.add(params, "sunDebug").name("平行光调试").onChange(value => {
+    gui.add(params, "footPhaseDebug").name("Foot Phase Debug");
+    gui.add(params, "leftFootPhase").name("Left Foot Phase").listen().disable();
+    gui.add(params, "rightFootPhase").name("Right Foot Phase").listen().disable();
+    gui.add(params, "sunDebug").name("Sun Debug").onChange(value => {
         sunDebugHelper.visible = value;
         sunShadowCameraHelper.visible = value;
     });
