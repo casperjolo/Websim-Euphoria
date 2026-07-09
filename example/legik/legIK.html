@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Leg IK</title>
+        <style>
+            html,
+            body {
+                height: 100%;
+                margin: 0;
+                overflow: hidden;
+                background: #dfe8ef;
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+            }
+
+            #container {
+                width: 100vw;
+                height: 100vh;
+            }
+
+            .hud {
+                position: fixed;
+                left: 12px;
+                top: 12px;
+                z-index: 9999;
+                color: #fff;
+                background: rgba(0, 0, 0, 0.45);
+                padding: 10px 12px;
+                border-radius: 8px;
+                font-size: 16px;
+                line-height: 1.3;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+                backdrop-filter: blur(4px);
+            }
+
+            .hud .row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 6px;
+            }
+
+            .hud .row:last-child {
+                margin-bottom: 0;
+            }
+
+            .hint-text {
+                color: #e6eef6;
+                font-size: 13px;
+            }
+
+            .hint-group {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            kbd {
+                display: inline-block;
+                min-width: 20px;
+                padding: 4px 7px;
+                border-radius: 6px;
+                color: #111;
+                background: linear-gradient(#f6f6f6, #e3e3e3);
+                border: 1px solid rgba(0, 0, 0, 0.15);
+                border-bottom-width: 2px;
+                font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                text-align: center;
+                box-shadow:
+                    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+                    0 2px 4px rgba(0, 0, 0, 0.25);
+            }
+
+            .source {
+                position: fixed;
+                right: 16px;
+                bottom: 16px;
+                z-index: 10;
+                width: 44px;
+                height: 44px;
+                display: grid;
+                place-items: center;
+                border-radius: 50%;
+                background: rgba(255, 255, 255, 0.92);
+                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+            }
+
+            .source img {
+                width: 24px;
+                height: 24px;
+            }
+
+            @media (hover: none) and (pointer: coarse), (max-width: 768px) {
+                .hud,
+                .source {
+                    display: none !important;
+                }
+            }
+        </style>
+        <script src="../loader.js"></script>
+    </head>
+    <body>
+        <div id="container"></div>
+        <div class="hud" role="note" aria-label="操作提示">
+            <div class="row hint-group">
+                <span class="hint-text">移动:</span>
+                <kbd>W</kbd>
+                <kbd>A</kbd>
+                <kbd>S</kbd>
+                <kbd>D</kbd>
+            </div>
+            <div class="row hint-group">
+                <span class="hint-text">冲刺:</span>
+                <kbd>Shift</kbd>
+            </div>
+            <div class="row hint-group">
+                <span class="hint-text">跳跃:</span>
+                <kbd>Space</kbd>
+            </div>
+            <div class="row hint-group">
+                <span class="hint-text">切换视角:</span>
+                <kbd>V</kbd>
+            </div>
+        </div>
+        <script type="module" src="./legIK.js"></script>
+    </body>
+</html>
