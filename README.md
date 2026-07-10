@@ -32,7 +32,7 @@
 # 安装
 
 ```bash
-npm install three-player-controller three three-mesh-bvh
+npm install three-player-controller three-mesh-bvh
 ```
 
 ## 可选依赖
@@ -142,7 +142,7 @@ await player.init({
         // 物理参数（可选）
         gravity: -2400,     // 重力基准值，会按 scale 缩放
         jumpHeight: 600,    // 跳跃高度基准值，会按 scale 缩放
-        speed: 300,         // 移动速度基准值，会按 scale 缩放
+        speed: 200,         // 移动速度基准值，会按 scale 缩放
         flySpeed: 2100,     // 飞行速度基准值，会按 scale 缩放
         acceleration: 30,   // XZ 加速响应速度
         deceleration: 30,   // XZ 减速响应速度
@@ -246,6 +246,7 @@ await player.loadVehicleModel({
 | `getIsFirstPerson()` | 当前是否为第一人称。 |
 | `getIsFlying()` | 当前是否处于飞行模式。 |
 | `getIsOnGround()` | 当前是否在地面上。 |
+| `getCurrentDelta()` | 当前帧实际使用的时间步长，已进行帧长钳制并应用 `timeScale`。 |
 | `getControllerMode()` | 控制模式，`0` 为人物，`1` 为车辆。 |
 | `getPlayerModel()` | 当前加载的人物模型对象。 |
 | `getPlayerCapsule()` | 角色胶囊体网格。 |
@@ -277,6 +278,7 @@ await player.loadVehicleModel({
 | `setOverShoulderView(v)` | 开关过肩视角偏移。 |
 | `setDebug(v)` | 开关碰撞体调试显示。 |
 | `setEnableToward(v)` | 开关鼠标驱动的朝向 / 视角更新。 |
+| `setSkipCapsuleCollision(v)` | `v` 为 `true` 时临时跳过玩家胶囊体碰撞检测。 |
 
 ### 输入监听
 
@@ -464,7 +466,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `exitCarAnim` | `string` | 否 | — | 下车动画名；使用车辆功能时必须配置。 |
 | `gravity` | `number` | 否 | `-2400` | 重力基准值（按 `scale` 缩放）。 |
 | `jumpHeight` | `number` | 否 | `600` | 跳跃高度基准值（按 `scale` 缩放）。 |
-| `speed` | `number` | 否 | `300` | 移动速度基准值（按 `scale` 缩放）。 |
+| `speed` | `number` | 否 | `200` | 移动速度基准值（按 `scale` 缩放）。 |
 | `flySpeed` | `number` | 否 | `2100` | 飞行速度基准值（按 `scale` 缩放）。 |
 | `rotateY` | `number` | 否 | `0` | 人物初始朝向（弧度），用于改变模型初始化面朝方向。 |
 | `headBoneName` | `string` | 否 | — | 头部骨骼或节点名称，用于第一人称相机挂载。 |

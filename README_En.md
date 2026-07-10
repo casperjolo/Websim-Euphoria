@@ -32,7 +32,7 @@ A lightweight player controller for three.js, ready out of the box. It provides 
 # Installation
 
 ```bash
-npm install three-player-controller three three-mesh-bvh
+npm install three-player-controller three-mesh-bvh
 ```
 
 ## Optional Dependency
@@ -142,7 +142,7 @@ await player.init({
         // Physics params (optional)
         gravity: -2400,     // gravity base value, scaled by scale
         jumpHeight: 600,    // jump height base value, scaled by scale
-        speed: 300,         // move speed base value, scaled by scale
+        speed: 200,         // move speed base value, scaled by scale
         flySpeed: 2100,     // fly speed base value, scaled by scale
         acceleration: 30,   // XZ acceleration response speed
         deceleration: 30,   // XZ deceleration response speed
@@ -246,6 +246,7 @@ await player.loadVehicleModel({
 | `getIsFirstPerson()` | Whether first-person mode is active. |
 | `getIsFlying()` | Whether flight mode is active. |
 | `getIsOnGround()` | Whether the player is grounded. |
+| `getCurrentDelta()` | The time step used by the current frame, after frame-time clamping and `timeScale`. |
 | `getControllerMode()` | `0` for player mode, `1` for vehicle mode. |
 | `getPlayerModel()` | The loaded player model object. |
 | `getPlayerCapsule()` | The player capsule mesh. |
@@ -277,6 +278,7 @@ await player.loadVehicleModel({
 | `setOverShoulderView(v)` | Enable or disable over-shoulder view offset. |
 | `setDebug(v)` | Show or hide collider debug display. |
 | `setEnableToward(v)` | Enable or disable mouse-driven facing / look updates. |
+| `setSkipCapsuleCollision(v)` | Temporarily skip player capsule collision detection when `v` is `true`. |
 
 ### Input Listeners
 
@@ -464,7 +466,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // fired when look / facing i
 | `exitCarAnim` | `string` | No | — | Exit-vehicle clip; recommended when using vehicle support. |
 | `gravity` | `number` | No | `-2400` | Gravity base value (scaled by `scale`). |
 | `jumpHeight` | `number` | No | `600` | Jump height base value (scaled by `scale`). |
-| `speed` | `number` | No | `300` | Move speed base value (scaled by `scale`). |
+| `speed` | `number` | No | `200` | Move speed base value (scaled by `scale`). |
 | `flySpeed` | `number` | No | `2100` | Fly speed base value (scaled by `scale`). |
 | `rotateY` | `number` | No | `0` | Initial character facing (radians); changes the model's initial facing direction. |
 | `headBoneName` | `string` | No | — | Head bone or node name, used for first-person camera attachment. |

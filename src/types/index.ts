@@ -26,7 +26,7 @@ export type PlayerModelOptions = {
     exitCarAnim?: string; // 下车动画
     gravity?: number; // 重力基准值（按 scale 缩放），默认 -2400
     jumpHeight?: number; // 跳跃高度基准值（按 scale 缩放），默认 600
-    speed?: number; // 移动速度基准值（按 scale 缩放），默认 300
+    speed?: number; // 移动速度基准值（按 scale 缩放），默认 200
     flySpeed?: number; // 飞行速度基准值（按 scale 缩放），默认 2100
     rotateY?: number; // 人物初始朝向（弧度），默认 0
     headBoneName?: string; // 头部骨骼名，用于第一人称相机挂载
