@@ -24,6 +24,13 @@ export class InputSystem {
     space = false; // 跳跃键
     shift = false; // 加速键
 
+    private keyFwd = false;
+    private keyBkd = false;
+    private keyLft = false;
+    private keyRgt = false;
+    private analogMoveX = 0;
+    private analogMoveY = 0;
+
     private boundKeydown = async (e: KeyboardEvent) => this.onKeydown(e); // 键盘按下绑定
     private boundKeyup = (e: KeyboardEvent) => this.onKeyup(e); // 键盘抬起绑定
     private boundMouseMove = (e: MouseEvent) => this.onMouseMove(e); // 鼠标移动绑定
@@ -57,16 +64,33 @@ export class InputSystem {
 
     // 程序化输入接口
     setInput(input: Partial<{
-        moveX: 1 | 0 | -1; moveY: 1 | 0 | -1;
+        moveX: number; moveY: number;
         lookDeltaX: number; lookDeltaY: number;
         jump: boolean; shift: boolean;
         toggleView: boolean; toggleFly: boolean; toggleVehicle: boolean;
     }>) {
         const c = this.ctrl;
 
-        // 移动方向
-        if (typeof input.moveX === "number") { this.applyAction("left", input.moveX === -1); this.applyAction("right", input.moveX === 1); }
-        if (typeof input.moveY === "number") { this.applyAction("forward", input.moveY === 1); this.applyAction("backward", input.moveY === -1); }
+        // 连续移动轴，供摇杆或手柄输入使用
+        const prevFwd = this.fwd;
+        const prevBkd = this.bkd;
+        const prevLft = this.lft;
+        const prevRgt = this.rgt;
+        let moveChanged = false;
+        if (typeof input.moveX === "number") {
+            this.analogMoveX = Math.max(-1, Math.min(1, input.moveX));
+            moveChanged = true;
+        }
+        if (typeof input.moveY === "number") {
+            this.analogMoveY = Math.max(-1, Math.min(1, input.moveY));
+            moveChanged = true;
+        }
+        if (moveChanged) {
+            this.syncDirectionFlags();
+            if (prevFwd !== this.fwd || prevBkd !== this.bkd || prevLft !== this.lft || prevRgt !== this.rgt) {
+                c.animation.setAnimationByPressed();
+            }
+        }
 
         // 视角朝向
         if (typeof input.lookDeltaX === "number" && typeof input.lookDeltaY === "number") {
@@ -108,10 +132,13 @@ export class InputSystem {
     // 重置所有按键状态
     private resetKeys() {
         const c = this.ctrl;
-        this.fwd = false;
-        this.bkd = false;
-        this.lft = false;
-        this.rgt = false;
+        this.keyFwd = false;
+        this.keyBkd = false;
+        this.keyLft = false;
+        this.keyRgt = false;
+        this.analogMoveX = 0;
+        this.analogMoveY = 0;
+        this.syncDirectionFlags();
         this.space = false;
         this.shift = false;
         c.controls.mouseButtons = { LEFT: 0, MIDDLE: 1, RIGHT: 2 };
@@ -123,13 +150,13 @@ export class InputSystem {
         const c = this.ctrl;
         switch (action) {
             // 前进
-            case "forward": this.fwd = pressed; c.animation.setAnimationByPressed(); break;
+            case "forward": this.keyFwd = pressed; this.syncDirectionFlags(); c.animation.setAnimationByPressed(); break;
             // 后退
-            case "backward": this.bkd = pressed; c.animation.setAnimationByPressed(); break;
+            case "backward": this.keyBkd = pressed; this.syncDirectionFlags(); c.animation.setAnimationByPressed(); break;
             // 左移
-            case "left": this.lft = pressed; c.animation.setAnimationByPressed(); break;
+            case "left": this.keyLft = pressed; this.syncDirectionFlags(); c.animation.setAnimationByPressed(); break;
             // 右移
-            case "right": this.rgt = pressed; c.animation.setAnimationByPressed(); break;
+            case "right": this.keyRgt = pressed; this.syncDirectionFlags(); c.animation.setAnimationByPressed(); break;
             // 冲刺
             case "sprint":
                 this.shift = pressed;
@@ -177,6 +204,26 @@ export class InputSystem {
                 }
                 break;
         }
+    }
+
+    // 获取最终移动轴：模拟输入优先，否则使用键盘八方向
+    getMoveAxes() {
+        const hasAnalogInput = this.analogMoveX !== 0 || this.analogMoveY !== 0;
+        if (hasAnalogInput) return { x: this.analogMoveX, y: this.analogMoveY, isAnalog: true };
+        return {
+            x: Number(this.keyRgt) - Number(this.keyLft),
+            y: Number(this.keyFwd) - Number(this.keyBkd),
+            isAnalog: false,
+        };
+    }
+
+    // 合并键盘与模拟输入，供动画和车辆等现有布尔逻辑使用
+    private syncDirectionFlags() {
+        const threshold = 0.2;
+        this.fwd = this.keyFwd || this.analogMoveY > threshold;
+        this.bkd = this.keyBkd || this.analogMoveY < -threshold;
+        this.lft = this.keyLft || this.analogMoveX < -threshold;
+        this.rgt = this.keyRgt || this.analogMoveX > threshold;
     }
 
     // 键盘按下处理

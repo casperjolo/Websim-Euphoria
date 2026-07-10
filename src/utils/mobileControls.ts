@@ -1,13 +1,20 @@
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import breakIconModule from "../../assets/imgs/break.png";
-import flyIconModule from "../../assets/imgs/fly.png";
-import jumpIconModule from "../../assets/imgs/jump.png";
-import vehicleIconModule from "../../assets/imgs/vehicle.png";
-import viewIconModule from "../../assets/imgs/view.png";
+import type { MobileButtonOptions, MobileControlsOptions } from "../types";
+
+type MobileButtonName = "jump" | "fly" | "view" | "vehicle";
+type MobileIconName = MobileButtonName | "brake";
+
+const iconLabels: Record<MobileIconName, string> = {
+    jump: "JUMP",
+    brake: "BRAKE",
+    fly: "FLY",
+    view: "VIEW",
+    vehicle: "CAR",
+};
 
 type SetInputFn = (input: Partial<{
-    moveX: 1 | 0 | -1;
-    moveY: 1 | 0 | -1;
+    moveX: number;
+    moveY: number;
     lookDeltaX: number;
     lookDeltaY: number;
     jump: boolean;
@@ -129,10 +136,11 @@ class VirtualJoystick {
 export class MobileControls {
     setInput: SetInputFn;
     controls: OrbitControls;
+    private options: MobileControlsOptions = {};
 
     // 摇杆状态
     joystick: VirtualJoystick | null = null;
-    prevJoyState = { dirX: 0, dirY: 0, shift: false };
+    prevJoyState = { moveX: 0, moveY: 0, shift: false };
 
     // DOM 元素
     joystickZoneEl: HTMLDivElement | null = null;
@@ -154,12 +162,13 @@ export class MobileControls {
     }
 
     // 初始化移动端控制
-    async init(opts?: { joystick?: boolean; jump?: boolean; fly?: boolean; view?: boolean; vehicle?: boolean }) {
-        const showJoystick = opts?.joystick ?? true;
-        const showJump = opts?.jump ?? true;
-        const showFly = opts?.fly ?? true;
-        const showView = opts?.view ?? true;
-        const showVehicle = opts?.vehicle ?? true;
+    async init(opts: MobileControlsOptions = {}) {
+        this.options = opts;
+        const showJoystick = opts.joystick ?? true;
+        const showJump = opts.jump !== false;
+        const showFly = opts.fly !== false;
+        const showView = opts.view !== false;
+        const showVehicle = opts.vehicle !== false;
 
         this.controls.maxPolarAngle = Math.PI * (300 / 360);
         this.controls.touches = { ONE: null as any, TWO: null as any };
@@ -195,18 +204,19 @@ export class MobileControls {
                     const rawY = data.vector?.y ?? 0;
                     const distance = data.distance ?? 0;
                     const deadzone = 0.2;
-                    const dirX = rawX > deadzone ? 1 : rawX < -deadzone ? -1 : 0;
-                    const dirY = rawY > deadzone ? 1 : rawY < -deadzone ? -1 : 0;
+                    const magnitude = Math.hypot(rawX, rawY);
+                    const moveX = magnitude > deadzone ? rawX / magnitude : 0;
+                    const moveY = magnitude > deadzone ? rawY / magnitude : 0;
                     const isSprinting = distance >= JOY_SIZE / 2;
                     const prev = this.prevJoyState;
-                    if (dirX === prev.dirX && dirY === prev.dirY && isSprinting === prev.shift) return;
-                    this.prevJoyState = { dirX, dirY, shift: isSprinting };
-                    this.setInput({ moveX: dirX as any, moveY: dirY as any, shift: isSprinting });
+                    if (Math.abs(moveX - prev.moveX) < 0.0001 && Math.abs(moveY - prev.moveY) < 0.0001 && isSprinting === prev.shift) return;
+                    this.prevJoyState = { moveX, moveY, shift: isSprinting };
+                    this.setInput({ moveX, moveY, shift: isSprinting });
                 },
                 () => {
                     const prev = this.prevJoyState;
-                    if (prev.dirX !== 0 || prev.dirY !== 0 || prev.shift) {
-                        this.prevJoyState = { dirX: 0, dirY: 0, shift: false };
+                    if (prev.moveX !== 0 || prev.moveY !== 0 || prev.shift) {
+                        this.prevJoyState = { moveX: 0, moveY: 0, shift: false };
                         this.setInput({ moveX: 0, moveY: 0, shift: false });
                     }
                 },
@@ -237,21 +247,21 @@ export class MobileControls {
 
         // 创建操作按钮
         if (showJump) {
-            this.jumpBtnEl = this.createBtn(container, 14, 14, jumpIconModule);
+            this.jumpBtnEl = this.createBtn(container, "jump", 14, 14);
             this.jumpBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ jump: true }); }, { passive: false });
             this.jumpBtnEl.addEventListener("touchend", (e) => { e.preventDefault(); this.setInput({ jump: false }); }, { passive: false });
             this.jumpBtnEl.addEventListener("touchcancel", (e) => { e.preventDefault(); this.setInput({ jump: false }); }, { passive: false });
         }
         if (showFly) {
-            this.flyBtnEl = this.createBtn(container, 14, 14 + 80, flyIconModule);
+            this.flyBtnEl = this.createBtn(container, "fly", 14, 14 + 80);
             this.flyBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ toggleFly: true }); }, { passive: false });
         }
         if (showView) {
-            this.viewBtnEl = this.createBtn(container, 14, 14 + 200, viewIconModule);
+            this.viewBtnEl = this.createBtn(container, "view", 14, 14 + 200);
             this.viewBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ toggleView: true }); }, { passive: false });
         }
         if (showVehicle) {
-            this.vehicleBtnEl = this.createBtn(container, 14 + 100, 14 + 120, vehicleIconModule);
+            this.vehicleBtnEl = this.createBtn(container, "vehicle", 14 + 100, 14 + 120);
             this.vehicleBtnEl.style.display = "none";
             this.vehicleBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ toggleVehicle: true }); }, { passive: false });
         }
@@ -283,18 +293,18 @@ export class MobileControls {
 
     // 同步车辆按钮显隐
     syncVehicleBtn(show: boolean) {
-        if (this.vehicleBtnEl) this.vehicleBtnEl.style.display = show ? "block" : "none";
+        if (this.vehicleBtnEl) this.vehicleBtnEl.style.display = show ? "flex" : "none";
     }
 
     // 同步控制模式按钮
     syncControllerModeBtn(mode: 0 | 1) {
-        if (!this.flyBtnEl || !this.jumpBtnEl) return;
+        if (!this.jumpBtnEl) return;
         if (mode === 0) {
-            this.flyBtnEl.style.display = "block";
-            this.jumpBtnEl.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.5),rgba(0,0,0,0.5)),url("${jumpIconModule}")`;
+            if (this.flyBtnEl) this.flyBtnEl.style.display = "flex";
+            this.setButtonIcon(this.jumpBtnEl, "jump");
         } else {
-            this.flyBtnEl.style.display = "none";
-            this.jumpBtnEl.style.backgroundImage = `url(${breakIconModule})`;
+            if (this.flyBtnEl) this.flyBtnEl.style.display = "none";
+            this.setButtonIcon(this.jumpBtnEl, "brake");
         }
     }
 
@@ -335,35 +345,117 @@ export class MobileControls {
         });
     }
 
+    private getButtonOptions(name: MobileButtonName): MobileButtonOptions | undefined {
+        const options = this.options[name];
+        return typeof options === "object" ? options : undefined;
+    }
+
+    private getIconUrl(iconName: MobileIconName): string | undefined {
+        if (iconName === "brake") {
+            const jumpOptions = this.options.jump;
+            return typeof jumpOptions === "object" ? jumpOptions.brakeIcon : undefined;
+        }
+        return this.getButtonOptions(iconName)?.icon;
+    }
+
     // 创建圆形按钮
-    private createBtn(container: HTMLElement, rightPx: number, bottomPx: number, bgUrl: string): HTMLButtonElement {
+    private createBtn(container: HTMLElement, name: MobileButtonName, defaultRight: number, defaultBottom: number): HTMLButtonElement {
         const btn = document.createElement("button");
+        const layout = this.getButtonOptions(name);
+        const size = layout?.size ?? 56;
+        const idleShadow = "0 6px 12px rgba(0,0,0,0.45), 0 2px 4px rgba(0,0,0,0.35), inset 0 2px 2px rgba(255,255,255,0.24), inset 0 -2px 3px rgba(0,0,0,0.5)";
+        const pressedShadow = "0 2px 5px rgba(0,0,0,0.35), inset 0 2px 4px rgba(0,0,0,0.65), inset 0 -1px 1px rgba(255,255,255,0.12)";
         Object.assign(btn.style, {
             position: "absolute",
-            right: `${rightPx}px`,
-            bottom: `${bottomPx}px`,
-            width: "56px",
-            height: "56px",
+            right: `${layout?.right ?? defaultRight}px`,
+            bottom: `${layout?.bottom ?? defaultBottom}px`,
+            width: `${size}px`,
+            height: `${size}px`,
             zIndex: "1000",
             borderRadius: "50%",
-            border: "2px solid black",
-            padding: "20px",
+            border: "1px solid rgba(255,255,255,0.45)",
+            padding: "0",
             opacity: "0.95",
             touchAction: "none",
             fontSize: "14px",
             userSelect: "none",
             overflow: "hidden",
             boxSizing: "border-box",
-            backgroundColor: "transparent",
-            backgroundRepeat: "no-repeat, no-repeat",
-            backgroundPosition: "center center, center center",
-            backgroundSize: "80% 80%, 100% 100%",
-            backgroundImage: `url("${bgUrl}"),linear-gradient(rgba(0,0,0,0.5),rgba(0,0,0,0.5))`,
+            appearance: "none",
+            WebkitAppearance: "none",
+            WebkitTapHighlightColor: "transparent",
+            background: "linear-gradient(145deg, rgba(82,82,82,0.95) 0%, rgba(34,34,34,0.96) 55%, rgba(10,10,10,0.98) 100%)",
+            boxShadow: idleShadow,
+            color: "white",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transform: "translateY(0) scale(1)",
+            transition: "transform 80ms ease, box-shadow 80ms ease, background 80ms ease",
+            willChange: "transform",
         });
+        if (layout?.left !== undefined) {
+            btn.style.left = `${layout.left}px`;
+            if (layout.right === undefined) btn.style.right = "auto";
+        }
+        if (layout?.top !== undefined) {
+            btn.style.top = `${layout.top}px`;
+            if (layout.bottom === undefined) btn.style.bottom = "auto";
+        }
+        this.setButtonIcon(btn, name);
         container.appendChild(btn);
+
+        const setPressed = (pressed: boolean) => {
+            btn.style.transform = pressed ? "translateY(2px) scale(0.98)" : "translateY(0) scale(1)";
+            btn.style.boxShadow = pressed ? pressedShadow : idleShadow;
+            btn.style.background = pressed
+                ? "linear-gradient(145deg, rgba(22,22,22,0.98), rgba(52,52,52,0.96))"
+                : "linear-gradient(145deg, rgba(82,82,82,0.95) 0%, rgba(34,34,34,0.96) 55%, rgba(10,10,10,0.98) 100%)";
+        };
+        btn.addEventListener("pointerdown", () => setPressed(true));
+        ["pointerup", "pointercancel", "pointerleave"].forEach(eventName => {
+            btn.addEventListener(eventName, () => setPressed(false));
+        });
         ["touchstart", "touchend", "touchcancel"].forEach(name => {
             btn.addEventListener(name, e => e.preventDefault(), { passive: false });
         });
         return btn;
+    }
+
+    // 设置按钮内容
+    private setButtonIcon(btn: HTMLButtonElement, iconName: MobileIconName) {
+        const customIconUrl = this.getIconUrl(iconName);
+        let icon: HTMLImageElement | HTMLSpanElement;
+
+        if (customIconUrl !== undefined) {
+            const image = document.createElement("img");
+            image.src = customIconUrl;
+            image.alt = "";
+            image.draggable = false;
+            icon = image;
+        } else {
+            const label = document.createElement("span");
+            label.textContent = iconLabels[iconName];
+            icon = label;
+        }
+
+        Object.assign(icon.style, {
+            width: "80%",
+            height: "80%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            objectFit: "contain",
+            pointerEvents: "none",
+            flex: "none",
+            fontSize: "11px",
+            fontWeight: "700",
+            fontFamily: "system-ui, sans-serif",
+            lineHeight: "1",
+            letterSpacing: "0.04em",
+            textShadow: "0 1px 2px rgba(0,0,0,0.9)",
+        });
+        btn.replaceChildren(icon);
     }
 }

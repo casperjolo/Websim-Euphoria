@@ -97,8 +97,6 @@ export class playerController {
     private rotationSpeed = 10; // 朝向旋转速度
     upVector = new THREE.Vector3(0, 1, 0); // 世界上方向
     private DIR_FWD = new THREE.Vector3(0, 0, -1); // 前
-    private DIR_BKD = new THREE.Vector3(0, 0, 1); // 后
-    private DIR_LFT = new THREE.Vector3(-1, 0, 0); // 左
     private DIR_RGT = new THREE.Vector3(1, 0, 0); // 右
 
     playerAcceleration = 30; // XZ 加速响应速度
@@ -679,14 +677,11 @@ export class playerController {
         this.camera.getWorldDirection(this.camDir);
         const angle = 2 * Math.PI - (Math.atan2(this.camDir.z, this.camDir.x) + Math.PI / 2);
 
-        // 按键移动方向
-        this.moveDir.set(0, 0, 0);
-        if (this.input.fwd) this.moveDir.add(this.DIR_FWD);
-        if (this.input.bkd) this.moveDir.add(this.DIR_BKD);
-        if (this.input.lft) this.moveDir.add(this.DIR_LFT);
-        if (this.input.rgt) this.moveDir.add(this.DIR_RGT);
+        // 键盘使用八方向，摇杆使用 360° 连续方向
+        const moveAxes = this.input.getMoveAxes();
+        this.moveDir.copy(this.DIR_RGT).multiplyScalar(moveAxes.x).addScaledVector(this.DIR_FWD, moveAxes.y);
         if (this.isFlying) {
-            if (this.input.fwd) this.moveDir.copy(this.camDir);
+            if (this.input.fwd || moveAxes.isAnalog) this.moveDir.copy(this.camDir);
             if (this.input.space) this.moveDir.y += 1;
             this.curPlayerSpeed = this.input.shift ? this.playerFlySpeed * 2 : this.playerFlySpeed;
         } else {
@@ -694,7 +689,7 @@ export class playerController {
         }
 
         this.moveDir.normalize(); // 归一化方向向量
-        if (!this.isFlying || !this.input.fwd) this.moveDir.applyAxisAngle(this.upVector, angle); // 应用相机角度
+        if (!this.isFlying || (!moveAxes.isAnalog && !this.input.fwd)) this.moveDir.applyAxisAngle(this.upVector, angle); // 应用相机角度
 
         // 速度驱动
         const accelStep = this.playerAcceleration * this.decelBase * delta; // 加速步长
@@ -1066,7 +1061,7 @@ export class playerController {
     // 设置第一人称
     setFirstPersonCamera(v = 0) { this.cam.setFirstPerson(v); }
     // 设置越肩视角
-    setOverShoulderView(v: boolean) { this.cam.setOverShoulder(v); }
+    setOverShoulderView(v: boolean) { this.cam.setOverShoulder(v); this.enableOverShoulderView = v; }
     // 屏幕中心检测
     getCenterScreenRaycastHit() { return this.cam.getCenterHit(); }
 

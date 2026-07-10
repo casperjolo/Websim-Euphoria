@@ -185,12 +185,18 @@ await player.init({
         toggleVehicle: ["KeyE"],             // enter / exit vehicle
     },
     isShowMobileControls: true,    // whether to show virtual controls on mobile
-    mobileControls: {              // mobile button visibility (all shown by default)
+    mobileControls: {              // mobile button visibility, icons, and layout (English labels by default)
         joystick: true,             // show joystick, default true
-        jump: true,                 // show jump button, default true
-        fly: true,                  // show fly button, default true
-        view: true,                 // show view button, default true
-        vehicle: true,              // show vehicle button, default true
+        jump: {                     // pass false to hide; pass an object to customize icon and layout
+            // icon: "/icons/custom-jump.svg",
+            // brakeIcon: "/icons/custom-brake.svg",
+            right: 24,
+            bottom: 32,
+            size: 64,
+        },
+        fly: true,                  // true or omitted uses the defaults
+        view: true,
+        vehicle: true,
     },
 });
 ```
@@ -339,8 +345,8 @@ player.setKeyMap();                                      // restore all defaults
 
 ```ts
 player.setInput({
-    moveX: 1 | 0 | -1,    // horizontal move, 1 = right, -1 = left
-    moveY: 1 | 0 | -1,    // forward/back move, 1 = forward, -1 = back
+    moveX: number,        // horizontal axis from -1 to 1; positive moves right
+    moveY: number,        // forward/back axis from -1 to 1; positive moves forward
     lookDeltaX: number,   // horizontal look delta, typically from mousemove's movementX
     lookDeltaY: number,   // vertical look delta, typically from mousemove's movementY
     jump: boolean,        // jump, held state (true = pressed, false = released); ascends while flying
@@ -430,7 +436,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // fired when look / facing i
 | `staticCollider` | `THREE.Object3D \| THREE.Object3D[]` | No | — | Source(s) for the static collider; if omitted, the whole scene is traversed. |
 | `dynamicCollider` | `THREE.Object3D \| THREE.Object3D[]` | No | — | Dynamic colliders registered at init time. |
 | `isShowMobileControls` | `boolean` | No | `true` | Whether to show virtual controls on mobile. |
-| `mobileControls` | `MobileControlsOptions` | No | all shown | Mobile button visibility config. |
+| `mobileControls` | `MobileControlsOptions` | No | all shown | Mobile button visibility, icon, and layout configuration. |
 | `thirdMouseMode` | `0 \| 1 \| 2 \| 3 \| 4 \| 5` | No | `1` | Mouse control mode in third-person view (0: hide cursor, control facing and camera; 1: hide cursor, camera only; 2: show cursor, drag to control facing and camera; 3: show cursor, drag to control camera only; 4: show cursor, drag to control camera, character facing follows camera horizontal direction; 5: hide cursor, control camera, character facing follows camera horizontal direction). |
 | `enableZoom` | `boolean` | No | `false` | Whether wheel zoom is enabled. |
 | `enableOverShoulderView` | `boolean` | No | `false` | Whether over-shoulder view is enabled. |
@@ -479,11 +485,21 @@ player.onTowardChange = (dx, dy, speed) => {};     // fired when look / facing i
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `joystick` | `boolean` | No | `true` | Show joystick. |
-| `jump` | `boolean` | No | `true` | Show jump button. |
-| `fly` | `boolean` | No | `true` | Show fly button. |
-| `view` | `boolean` | No | `true` | Show view toggle button. |
-| `vehicle` | `boolean` | No | `true` | Show enter/exit vehicle button. |
+| `joystick` | `boolean` | No | `true` | Show the joystick with continuous 360° direction input. |
+| `jump` | `boolean \| JumpButtonOptions` | No | `true` | Jump/brake button. Pass `false` to hide it or an object to customize its image and layout. |
+| `fly` | `boolean \| MobileButtonOptions` | No | `true` | Flight button. Pass `false` to hide it or an object to customize its image and layout. |
+| `view` | `boolean \| MobileButtonOptions` | No | `true` | View toggle button. Pass `false` to hide it or an object to customize its image and layout. |
+| `vehicle` | `boolean \| MobileButtonOptions` | No | `true` | Enter/exit vehicle button. Pass `false` to hide it or an object to customize its image and layout. |
+
+### `MobileButtonOptions` / `JumpButtonOptions`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `left` / `right` | `number` | No | built-in position | Distance from the left or right edge in px. Setting `left` without `right` clears the default right position. |
+| `top` / `bottom` | `number` | No | built-in position | Distance from the top or bottom edge in px. Setting `top` without `bottom` clears the default bottom position. |
+| `size` | `number` | No | `56` | Circular button diameter in px. |
+| `icon` | `string` | No | English label | Custom image URL. |
+| `brakeIcon` | `string` | No | `BRAKE` label | Available only on `JumpButtonOptions`; sets the brake image URL used in vehicle mode. |
 
 ### `VehicleOptions`
 

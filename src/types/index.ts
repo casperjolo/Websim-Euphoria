@@ -36,12 +36,25 @@ export type PlayerModelOptions = {
     deceleration?: number; // XZ 减速响应速度，默认 30
 };
 
+export type MobileButtonOptions = {
+    left?: number; // 左侧位置（px）
+    right?: number; // 右侧位置（px）
+    top?: number; // 顶部位置（px）
+    bottom?: number; // 底部位置（px）
+    size?: number; // 按钮直径（px），默认 56
+    icon?: string; // 自定义图片 URL
+};
+
+export type JumpButtonOptions = MobileButtonOptions & {
+    brakeIcon?: string; // 车辆模式下的刹车图片 URL
+};
+
 export type MobileControlsOptions = {
     joystick?: boolean; // 是否显示摇杆，默认 true
-    jump?: boolean; // 是否显示跳跃按钮，默认 true
-    fly?: boolean; // 是否显示飞行按钮，默认 true
-    view?: boolean; // 是否显示视角切换按钮，默认 true
-    vehicle?: boolean; // 是否显示上下车按钮，默认 true
+    jump?: boolean | JumpButtonOptions; // 跳跃/刹车按钮；false 隐藏，对象可自定义图片和布局
+    fly?: boolean | MobileButtonOptions; // 飞行按钮；false 隐藏，对象可自定义图片和布局
+    view?: boolean | MobileButtonOptions; // 视角切换按钮；false 隐藏，对象可自定义图片和布局
+    vehicle?: boolean | MobileButtonOptions; // 上下车按钮；false 隐藏，对象可自定义图片和布局
 };
 
 // 可重映射的输入动作

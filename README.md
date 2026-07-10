@@ -185,12 +185,18 @@ await player.init({
         toggleVehicle: ["KeyE"],             // 上 / 下车
     },
     isShowMobileControls: true,    // 移动端是否显示虚拟控制 UI
-    mobileControls: {              // 移动端按钮显隐（默认全部显示）
+    mobileControls: {              // 移动端按钮显隐、图标与布局（默认全部显示并使用英文标签）
         joystick: true,             // 是否显示摇杆，默认 true
-        jump: true,                 // 是否显示跳跃按钮，默认 true
-        fly: true,                  // 是否显示飞行按钮，默认 true
-        view: true,                 // 是否显示视角按钮，默认 true
-        vehicle: true,              // 是否显示车辆按钮，默认 true
+        jump: {                     // 传 false 隐藏，传对象自定义图标和布局
+            // icon: "/icons/custom-jump.svg",
+            // brakeIcon: "/icons/custom-brake.svg",
+            right: 24,
+            bottom: 32,
+            size: 64,
+        },
+        fly: true,                  // true 或不传时使用默认值
+        view: true,
+        vehicle: true,
     },
 });
 ```
@@ -339,8 +345,8 @@ player.setKeyMap();                                      // 恢复全部默认
 
 ```ts
 player.setInput({
-    moveX: 1 | 0 | -1,    // 水平移动，1=右，-1=左
-    moveY: 1 | 0 | -1,    // 纵向移动，1=前，-1=后
+    moveX: number,        // 水平移动轴，范围 -1～1，正数向右
+    moveY: number,        // 纵向移动轴，范围 -1～1，正数向前
     lookDeltaX: number,   // 视角水平增量，通常来自 mousemove 的 movementX
     lookDeltaY: number,   // 视角垂直增量，通常来自 mousemove 的 movementY
     jump: boolean,        // 跳跃，持续状态（true=按下，false=松开）；飞行时控制上升
@@ -430,7 +436,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `staticCollider` | `THREE.Object3D \| THREE.Object3D[]` | 否 | — | 静态碰撞体来源；不传则遍历整个场景。 |
 | `dynamicCollider` | `THREE.Object3D \| THREE.Object3D[]` | 否 | — | 初始化时注册的动态碰撞体。 |
 | `isShowMobileControls` | `boolean` | 否 | `true` | 是否在移动端显示虚拟控制 UI。 |
-| `mobileControls` | `MobileControlsOptions` | 否 | 全部显示 | 移动端按钮显隐配置。 |
+| `mobileControls` | `MobileControlsOptions` | 否 | 全部显示 | 移动端按钮显隐、图标与布局配置。 |
 | `thirdMouseMode` | `0 \| 1 \| 2 \| 3 \| 4 \| 5` | 否 | `1` | 第三人称视角下的鼠标控制模式（0:隐藏鼠标，控制朝向及视角；1:隐藏鼠标，仅控制视角；2:显示鼠标，拖拽控制朝向及视角；3:显示鼠标，拖拽仅控制视角；4:显示鼠标，拖拽控制视角且人物朝向跟随相机水平方向；5:隐藏鼠标，控制视角且人物朝向跟随相机水平方向） |
 | `enableZoom` | `boolean` | 否 | `false` | 是否允许滚轮缩放。 |
 | `enableOverShoulderView` | `boolean` | 否 | `false` | 是否启用过肩视角。 |
@@ -479,11 +485,21 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
-| `joystick` | `boolean` | 否 | `true` | 是否显示摇杆。 |
-| `jump` | `boolean` | 否 | `true` | 是否显示跳跃按钮。 |
-| `fly` | `boolean` | 否 | `true` | 是否显示飞行按钮。 |
-| `view` | `boolean` | 否 | `true` | 是否显示视角切换按钮。 |
-| `vehicle` | `boolean` | 否 | `true` | 是否显示上下车按钮。 |
+| `joystick` | `boolean` | 否 | `true` | 是否显示支持 360° 连续方向的摇杆。 |
+| `jump` | `boolean \| JumpButtonOptions` | 否 | `true` | 跳跃/刹车按钮；`false` 隐藏，对象可自定义图片和布局。 |
+| `fly` | `boolean \| MobileButtonOptions` | 否 | `true` | 飞行按钮；`false` 隐藏，对象可自定义图片和布局。 |
+| `view` | `boolean \| MobileButtonOptions` | 否 | `true` | 视角切换按钮；`false` 隐藏，对象可自定义图片和布局。 |
+| `vehicle` | `boolean \| MobileButtonOptions` | 否 | `true` | 上下车按钮；`false` 隐藏，对象可自定义图片和布局。 |
+
+### `MobileButtonOptions` / `JumpButtonOptions`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `left` / `right` | `number` | 否 | 内置位置 | 按钮距离左侧或右侧的位置（px）。设置 `left` 且未设置 `right` 时会清除默认右侧定位。 |
+| `top` / `bottom` | `number` | 否 | 内置位置 | 按钮距离顶部或底部的位置（px）。设置 `top` 且未设置 `bottom` 时会清除默认底部定位。 |
+| `size` | `number` | 否 | `56` | 圆形按钮直径（px）。 |
+| `icon` | `string` | 否 | 英文标签 | 自定义图片 URL。 |
+| `brakeIcon` | `string` | 否 | `BRAKE` 标签 | 仅用于 `JumpButtonOptions`，设置车辆模式下的刹车图片 URL。 |
 
 ### `VehicleOptions`
 
