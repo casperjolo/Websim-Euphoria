@@ -661,6 +661,7 @@ async function onPreviewDblClick() {
         maxCamDistance: 220,
         colliderMeshUrl: currentBlobUrl,
         enableOverShoulderView: guiParams?.enableOverShoulderView ?? true,
+        camOverShoulderOffsetRatio: guiParams?.camOverShoulderOffsetRatio ?? 0.2,
         thirdMouseMode: guiParams?.thirdMouseMode ?? 1,
     });
 
@@ -760,6 +761,7 @@ function initGUI() {
         enableZoom: false,
         debug: false,
         enableOverShoulderView: true,
+        camOverShoulderOffsetRatio: 0.2,
         centerRaycast: false,
         showSkeleton: false,
     };
@@ -874,6 +876,7 @@ function initGUI() {
     gui.add(params, "minCamDistance", 0, 200, 1).onChange((v) => player.setMinCamDistance(v));
     gui.add(params, "maxCamDistance", 50, 1000, 1).onChange((v) => player.setMaxCamDistance(v));
     gui.add(params, "camLookAtHeightRatio", 0, 1, 0.01).onChange((v) => player.setCamLookAtHeightRatio(v));
+    gui.add(params, "camOverShoulderOffsetRatio", -1, 1, 0.01).onChange((v) => player.setCamOverShoulderOffsetRatio(v));
     gui.add(params, "enableSpringCamera").name("Spring Camera").onChange((v) => player.cam.enableSpringCamera = v);
     gui.add(params, "springCameraTime", 0.01, 1, 0.01).name("Spring Time").onChange((v) => player.cam.springCameraTime = v);
     gui.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).onChange((v) => player.setThirdMouseMode(Number(v)));
@@ -904,6 +907,7 @@ function initGUI() {
                 player.setEnableZoom(defaults.enableZoom);
                 player.setDebug(defaults.debug);
                 player.setOverShoulderView(defaults.enableOverShoulderView);
+                player.setCamOverShoulderOffsetRatio(defaults.camOverShoulderOffsetRatio);
                 raycastSphere.visible = false;
 
                 if (stats) stats.dom.style.display = "none";

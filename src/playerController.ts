@@ -167,6 +167,7 @@ export class playerController {
         this.cam.minDist = (opts.minCamDistance ?? this.cam.minDist) * s;
         this.cam.maxDist = (opts.maxCamDistance ?? this.cam.maxDist) * s;
         this.cam.lookAtHeightRatio = opts.camLookAtHeightRatio ?? this.cam.lookAtHeightRatio;
+        this.cam.overShoulderOffsetRatio = opts.camOverShoulderOffsetRatio ?? this.cam.overShoulderOffsetRatio;
         this.cam.originMaxDist = this.cam.maxDist;
         this.cam.epsilon = this.cam.epsilon * s;
 
@@ -1025,6 +1026,9 @@ export class playerController {
     setMaxCamDistance(dist: number) { this.cam.maxDist = dist * this.playerModelConfig.scale; this.cam.originMaxDist = this.cam.maxDist; }
     // 设置相机看向点高度比例
     setCamLookAtHeightRatio(ratio: number) { this.cam.lookAtHeightRatio = ratio; }
+    // 设置相机过肩视角横向偏移比例
+    setCamOverShoulderOffsetRatio(ratio: number) { this.cam.overShoulderOffsetRatio = ratio; this.cam.setOverShoulder(this.enableOverShoulderView && !this.isFirstPerson); }
+
     // 设置鼠标模式
     setThirdMouseMode(mode: 0 | 1 | 2 | 3 | 4 | 5) { this.cam.mouseMode = mode; this.cam.setPointerLock(); }
     // 设置缩放开关

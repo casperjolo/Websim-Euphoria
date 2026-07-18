@@ -13,6 +13,7 @@ export class CameraSystem {
     mouseMode: 0 | 1 | 2 | 3 | 4 | 5 = 1; // 鼠标控制模式
     zoomEnabled = false; // 是否允许缩放
     lookAtHeightRatio = 0.8; // 第三人称看向点高度比例（0=底部，1=顶部）
+    overShoulderOffsetRatio = 0.2; // 第三人称相机过肩视角横向偏移比例
 
     private lookAtPoint = new THREE.Vector3(); // 预分配的看向点向量
 
@@ -71,7 +72,7 @@ export class CameraSystem {
         if (!enable || this.ctrl.controllerMode === 1) { this.ctrl.camera.clearViewOffset(); return; }
         const w = window.innerWidth;
         const h = window.innerHeight;
-        this.ctrl.camera.setViewOffset(w, h, w * 0.2, 0, w, h);
+        this.ctrl.camera.setViewOffset(w, h, w * this.overShoulderOffsetRatio, 0, w, h);
     }
 
     // 切换视角模式
