@@ -217,6 +217,11 @@ export class AnimationSystem {
         const a = this.actions;
         // 只有在起跳或跳跃循环中才触发落地
         if (s === a?.get("jumpStart") || s === a?.get("jumpLoop")) {
+            const { fwd, bkd, lft, rgt } = this.ctrl.input;
+            if (fwd || bkd || lft || rgt) {
+                this.setAnimationByPressed();
+                return;
+            }
             this.playByName("jumpEnd");
         }
     }
@@ -310,8 +315,12 @@ export class AnimationSystem {
 
         // 地面状态下的动画逻辑
         if (this.ctrl.playerIsOnGround) {
-            // 如果是三段跳的落地动画，则等待其播放完毕
-            if (this.hasThreePartJump && this.state === this.actions?.get("jumpEnd")) return;
+            // 无移动输入时等待落地动画播完；有移动输入则立即切换移动动画
+            if (
+                this.hasThreePartJump &&
+                this.state === this.actions?.get("jumpEnd") &&
+                !fwd && !bkd && !lft && !rgt
+            ) return;
             // 无方向键输入，播放站立动画
             if (!fwd && !bkd && !lft && !rgt) { this.playByName("idle"); return; }
             // 向前走或跑

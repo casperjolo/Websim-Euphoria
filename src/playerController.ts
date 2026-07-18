@@ -308,9 +308,18 @@ export class playerController {
                     if (this.input.rgt || this.input.lft) { this.animation.playByName("walking"); return; }
                     this.animation.playByName("idle");
                 };
-                if (done === this.animation.actions?.get("jumping")) { resolveGroundAnim(); return; }
-                if (done === this.animation.actions?.get("jumpStart")) { this.animation.playByName("jumpLoop"); return; }
-                if (done === this.animation.actions?.get("jumpEnd")) { resolveGroundAnim(); return; }
+                if (done === this.animation.actions?.get("jumping")) {
+                    if (this.animation.state === done) resolveGroundAnim();
+                    return;
+                }
+                if (done === this.animation.actions?.get("jumpStart")) {
+                    if (this.animation.state === done) this.animation.playByName("jumpLoop");
+                    return;
+                }
+                if (done === this.animation.actions?.get("jumpEnd")) {
+                    if (this.animation.state === done) resolveGroundAnim();
+                    return;
+                }
                 if (done === this.animation.actions?.get("enterCar")) this.vehicle.onEnterAnimFinished();
             };
             this.animation.mixer.addEventListener("finished", this.animation.mixerCb);
