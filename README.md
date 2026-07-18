@@ -166,6 +166,7 @@ await player.init({
     thirdMouseMode: 1,             // 鼠标控制模式 0-5，详见字段说明
     enableZoom: false,             // 是否允许滚轮缩放
     enableOverShoulderView: false, // 是否启用过肩视角
+    camOverShoulderOffsetRatio: 0.2, // 第三人称相机过肩视角横向偏移比例
     isFirstPerson: false,          // 初始是否进入第一人称
     enableSpringCamera: false,     // 是否启用弹簧相机
     springCameraTime: 0.05,        // 弹簧相机平滑时间（秒），越小跟随越紧
@@ -279,6 +280,7 @@ await player.loadVehicleModel({
 | `setMinCamDistance(v)` | 设置第三人称最小镜头距离。 |
 | `setMaxCamDistance(v)` | 设置第三人称最大镜头距离。 |
 | `setCamLookAtHeightRatio(v)` | 设置第三人称相机看向点高度比例（0=底部，1=顶部）。 |
+| `setCamOverShoulderOffsetRatio(v)` | 设置第三人称相机过肩视角横向偏移比例。 |
 | `setThirdMouseMode(v)` | 设置第三人称鼠标模式：[0 | 1 | 2 | 3 | 4 | 5]。 |
 | `setEnableZoom(v)` | 设置是否允许镜头缩放。 |
 | `setOverShoulderView(v)` | 开关过肩视角偏移。 |
@@ -440,6 +442,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `thirdMouseMode` | `0 \| 1 \| 2 \| 3 \| 4 \| 5` | 否 | `1` | 第三人称视角下的鼠标控制模式（0:隐藏鼠标，控制朝向及视角；1:隐藏鼠标，仅控制视角；2:显示鼠标，拖拽控制朝向及视角；3:显示鼠标，拖拽仅控制视角；4:显示鼠标，拖拽控制视角且人物朝向跟随相机水平方向；5:隐藏鼠标，控制视角且人物朝向跟随相机水平方向） |
 | `enableZoom` | `boolean` | 否 | `false` | 是否允许滚轮缩放。 |
 | `enableOverShoulderView` | `boolean` | 否 | `false` | 是否启用过肩视角。 |
+| `camOverShoulderOffsetRatio` | `number` | 否 | `0.2` | 第三人称相机过肩视角横向偏移比例。 |
 | `isFirstPerson` | `boolean` | 否 | `false` | 初始化时是否直接进入第一人称。 |
 | `enableSpringCamera` | `boolean` | 否 | `false` | 是否启用弹簧相机（目标点以弹簧阻尼跟随角色）。 |
 | `springCameraTime` | `number` | 否 | `0.05` | 弹簧平滑时间（秒），越小跟随越紧。 |

@@ -82,6 +82,7 @@ export type PlayerControllerOptions = {
     thirdMouseMode?: 0 | 1 | 2 | 3 | 4 | 5; // 第三人称鼠标控制模式，默认 1
     enableZoom?: boolean; // 是否允许滚轮缩放，默认 false
     enableOverShoulderView?: boolean; // 是否启用过肩视角，默认 false
+    camOverShoulderOffsetRatio?: number; // 第三人称相机过肩视角横向偏移比例，默认 0.2
     isFirstPerson?: boolean; // 初始是否进入第一人称，默认 false
     enableSpringCamera?: boolean; // 是否启用弹簧相机，默认 false
     springCameraTime?: number; // 弹簧相机平滑时间（秒），默认 0.05

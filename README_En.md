@@ -166,6 +166,7 @@ await player.init({
     thirdMouseMode: 1,             // mouse control mode 0-5, see Field Reference
     enableZoom: false,             // whether wheel zoom is allowed
     enableOverShoulderView: false, // whether over-shoulder view is enabled
+    camOverShoulderOffsetRatio: 0.2, // over-shoulder view horizontal offset ratio
     isFirstPerson: false,          // whether to start in first-person
     enableSpringCamera: false,     // whether to enable spring camera
     springCameraTime: 0.05,        // spring camera smooth time (seconds); lower = tighter tracking
@@ -279,6 +280,7 @@ await player.loadVehicleModel({
 | `setMinCamDistance(v)` | Set minimum third-person camera distance. |
 | `setMaxCamDistance(v)` | Set maximum third-person camera distance. |
 | `setCamLookAtHeightRatio(v)` | Set the third-person camera look-at height ratio (0 = bottom, 1 = top). |
+| `setCamOverShoulderOffsetRatio(v)` | Set the third-person camera over-shoulder view horizontal offset ratio. |
 | `setThirdMouseMode(v)` | Set third-person mouse mode: [0 | 1 | 2 | 3 | 4 | 5]. |
 | `setEnableZoom(v)` | Enable or disable camera zoom. |
 | `setOverShoulderView(v)` | Enable or disable over-shoulder view offset. |
@@ -440,6 +442,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // fired when look / facing i
 | `thirdMouseMode` | `0 \| 1 \| 2 \| 3 \| 4 \| 5` | No | `1` | Mouse control mode in third-person view (0: hide cursor, control facing and camera; 1: hide cursor, camera only; 2: show cursor, drag to control facing and camera; 3: show cursor, drag to control camera only; 4: show cursor, drag to control camera, character facing follows camera horizontal direction; 5: hide cursor, control camera, character facing follows camera horizontal direction). |
 | `enableZoom` | `boolean` | No | `false` | Whether wheel zoom is enabled. |
 | `enableOverShoulderView` | `boolean` | No | `false` | Whether over-shoulder view is enabled. |
+| `camOverShoulderOffsetRatio` | `number` | No | `0.2` | Third-person camera over-shoulder view horizontal offset ratio. |
 | `isFirstPerson` | `boolean` | No | `false` | Whether to start directly in first-person. |
 | `enableSpringCamera` | `boolean` | No | `false` | Whether to enable spring camera (the target follows the character with spring-damper smoothing). |
 | `springCameraTime` | `number` | No | `0.05` | Spring smooth time (seconds); lower = tighter tracking. |
