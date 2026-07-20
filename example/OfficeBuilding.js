@@ -879,7 +879,7 @@ async function initMarbleFloors() {
     configureReflectorUpdate(reflectiveFloor, {
         updateEveryNFrames: 2, // 隔帧更新
         frameOffset: 0, // 在偶数帧执行
-        maxFps: 60, // 同时限制反射最高帧率
+        maxFps: 30, // 同时限制反射最高帧率
     });
 
     reflectiveFloor.name = "MarbleReflectiveFloor";
