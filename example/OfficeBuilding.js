@@ -42,7 +42,11 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 
 import { TilesRenderer } from "3d-tiles-renderer";
-import { TilesFadePlugin } from "3d-tiles-renderer/plugins";
+import {
+    GLTFMeshFeaturesExtension,
+    GLTFStructuralMetadataExtension,
+    TilesFadePlugin,
+} from "3d-tiles-renderer/plugins";
 import { playerController } from "../src/playerController";
 
 // ==================== 楼层数据 ====================
@@ -406,6 +410,11 @@ async function init() {
     ktx2Loader.setTranscoderPath("https://unpkg.com/three@0.180.0/examples/jsm/libs/basis/");
     ktx2Loader.detectSupport(renderer);
     gltfLoader.setKTX2Loader(ktx2Loader);
+
+    // 消除兼容性警告
+    gltfLoader.register(() => new GLTFMeshFeaturesExtension());
+    gltfLoader.register(() => new GLTFStructuralMetadataExtension());
+    gltfLoader.register(() => ({ name: "EXT_instance_features" }));
 
     // 渲染循环
     renderer.setAnimationLoop(animate);
