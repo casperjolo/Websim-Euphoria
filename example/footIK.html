@@ -91,6 +91,30 @@
                 height: 24px;
             }
 
+            #top-notice {
+                position: fixed;
+                top: 12px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 9999;
+                background: rgba(0, 0, 0, 0.45);
+                color: #e6eef6;
+                padding: 7px 16px;
+                border-radius: 8px;
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+                font-size: 13px;
+                white-space: nowrap;
+                backdrop-filter: blur(4px);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+            }
+            #top-notice a {
+                color: #79c0ff;
+                text-decoration: none;
+            }
+            #top-notice a:hover {
+                text-decoration: underline;
+            }
+
             @media (hover: none) and (pointer: coarse), (max-width: 768px) {
                 .hud,
                 .source {
@@ -102,6 +126,14 @@
     </head>
     <body>
         <div id="container"></div>
+
+        <div id="top-notice">
+            Character Model:
+            <a href="https://quaternius.itch.io/universal-animation-library" target="_blank" rel="noopener noreferrer">
+                Universal Animation Library
+            </a>
+        </div>
+
         <div class="hud" role="note" aria-label="Controls">
             <div class="row hint-group">
                 <span class="hint-text">Move:</span>
