@@ -15,6 +15,11 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.mjs",
             "require": "./dist/index.js"
+        },
+        "./foot-ik": {
+            "types": "./dist/foot-ik.d.ts",
+            "import": "./dist/foot-ik.mjs",
+            "require": "./dist/foot-ik.js"
         }
     },
     "scripts": {

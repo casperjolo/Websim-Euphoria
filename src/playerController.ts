@@ -9,6 +9,7 @@ import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUti
 
 import { MobileControls } from "./utils/mobileControls";
 import type { PlayerControllerOptions, PlayerModelOptions, VehicleInstance, VehicleOptions, DynamicColliderEntry, KeyMap } from "./types";
+import type { PlayerPlugin } from "./plugins/types";
 import { AnimationSystem } from "./systems/AnimationSystem";
 import { CameraSystem } from "./systems/CameraSystem";
 import { InputSystem } from "./systems/InputSystem";
@@ -26,106 +27,186 @@ function isMobileDevice() {
 export class playerController {
 
     // ==================== 场景引用 ====================
-    loader: GLTFLoader = new GLTFLoader(); // GLTF加载器
-    scene!: THREE.Scene; // 三维场景
-    camera!: THREE.PerspectiveCamera; // 透视相机
-    controls!: OrbitControls; // 轨道控制器
+    /** GLTF加载器。 */
+    loader: GLTFLoader = new GLTFLoader();
+    /** 三维场景。 */
+    scene!: THREE.Scene;
+    /** 透视相机。 */
+    camera!: THREE.PerspectiveCamera;
+    /** 轨道控制器。 */
+    controls!: OrbitControls;
 
     // ==================== 玩家配置 ====================
-    playerModelConfig!: PlayerModelOptions; // 模型配置项
-    private initPos: THREE.Vector3 = new THREE.Vector3(0, 0, 0); // 初始出生位置
-    gravity = -2400; // 重力加速度
-    jumpHeight = 600; // 跳跃初速度
-    playerSpeed = 200; // 行走速度
-    playerFlySpeed = 2100; // 飞行速度
-    private curPlayerSpeed = 0; // 当前实际速度
-    enableOverShoulderView = false; // 越肩视角开关
-    private isShowMobileControls = true; // 显示移动端控件
+    /** 模型配置项。 */
+    playerModelConfig!: PlayerModelOptions;
+    /** 初始出生位置。 */
+    private initPos: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
+    /** 重力加速度。 */
+    gravity = -2400;
+    /** 跳跃初速度。 */
+    jumpHeight = 600;
+    /** 行走速度。 */
+    playerSpeed = 200;
+    /** 跑步速度。 */
+    playerRunSpeed = 600;
+    /** 飞行速度。 */
+    playerFlySpeed = 2100;
+    /** 当前实际速度。 */
+    private curPlayerSpeed = 0;
+    /** 越肩视角开关。 */
+    enableOverShoulderView = false;
+    /** 显示移动端控件。 */
+    private isShowMobileControls = true;
 
     // ==================== 玩家胶囊体 ====================
-    private playerCapsuleRadius = 30; // 胶囊体半径
-    private playerCapsuleRadiusRatio = 1; // 半径缩放比
-    private playerCapsuleHeight = 180; // 胶囊体高度
-    isFirstPerson = false; // 第一人称状态
+    /** 胶囊体半径。 */
+    private playerCapsuleRadius = 30;
+    /** 半径缩放比。 */
+    private playerCapsuleRadiusRatio = 1;
+    /** 胶囊体高度。 */
+    private playerCapsuleHeight = 180;
+    /** 第一人称状态。 */
+    isFirstPerson = false;
 
     // ==================== 运行状态 ====================
-    controllerMode: 0 | 1 = 0; // 0步行 1载具
-    playerIsOnGround = false; // 是否在地面
-    isupdate = true; // 帧更新开关
-    timeScale = 1; // 时间缩放系数
-    currentDelta = 0; // 本帧实际使用的 delta（已钳制 + timeScale）
-    isFlying = false; // 飞行状态
-    skipCapsuleCollision = false; // 临时跳过玩家胶囊碰撞检测
-    isChangeControllerTransitionTimer: any = null; // 模式切换计时器
-    enableToward = true; // 启用朝向输入
+    /** 0步行 1载具。 */
+    controllerMode: 0 | 1 = 0;
+    /** 是否在地面。 */
+    playerIsOnGround = false;
+    /** 帧更新开关。 */
+    isupdate = true;
+    /** 时间缩放系数。 */
+    timeScale = 1;
+    /** 本帧实际使用的 delta（已钳制 + timeScale）。 */
+    currentDelta = 0;
+    /** 飞行状态。 */
+    isFlying = false;
+    /** 临时跳过玩家胶囊碰撞检测。 */
+    skipCapsuleCollision = false;
+    /** 模式切换计时器。 */
+    isChangeControllerTransitionTimer: any = null;
+    /** 启用朝向输入。 */
+    enableToward = true;
 
     // ==================== 玩家物体 ====================
-    playerCapsule!: THREE.Mesh & { capsuleInfo?: any }; // 玩家碰撞胶囊
-    playerModel: THREE.Object3D | null = null; // 模型根节点
-    playerModelHead: THREE.Object3D | null = null; // 头骨节点
+    /** 玩家碰撞胶囊。 */
+    playerCapsule!: THREE.Mesh & { capsuleInfo?: any };
+    /** 模型根节点。 */
+    playerModel: THREE.Object3D | null = null;
+    /** 头骨节点。 */
+    playerModelHead: THREE.Object3D | null = null;
 
     // ==================== 碰撞体 ====================
-    collider: THREE.Mesh | null = null; // 静态碰撞体
-    private visualizer: BVHHelper | null = null; // BVH可视化
-    collected: THREE.BufferGeometry[] = []; // 静态几何收集
-    private dynamicColliders: DynamicColliderEntry[] = []; // 动态碰撞体列表
-    activeDynamicCollider: DynamicColliderEntry | null = null; // 当前站立的动态碰撞体
+    /** 静态碰撞体。 */
+    collider: THREE.Mesh | null = null;
+    /** BVH可视化。 */
+    private visualizer: BVHHelper | null = null;
+    /** 静态几何收集。 */
+    collected: THREE.BufferGeometry[] = [];
+    /** 动态碰撞体列表。 */
+    private dynamicColliders: DynamicColliderEntry[] = [];
+    /** 当前站立的动态碰撞体。 */
+    activeDynamicCollider: DynamicColliderEntry | null = null;
 
     // ==================== 碰撞阈值 ====================
-    private readonly rideHeight = 40; // 悬空胶囊离地高度
+    /** 悬空胶囊离地高度。 */
+    private readonly rideHeight = 40;
     // 站立 / 落地阈值
-    private snapH = 0; // 站立时胶囊原点应离地的高度
-    private maxH = 0;  // 离地超过此值判为悬空、施加重力
+    /** 站立时胶囊原点应离地的高度。 */
+    private snapH = 0;
+    /** 离地超过此值判为悬空、施加重力。 */
+    private maxH = 0;
 
     // ==================== 台阶视觉平滑 ====================
-    private stepSmoothFactor = 10; // 插值追赶速度，越大追得越快
-    private modelBaseY = 0; // 模型相对胶囊的基准 Y
-    private readonly minFloorNormalY = Math.cos(8 * Math.PI / 180);// 最小法线 Y 分量，地面法线与竖直夹角 ≤ 8° 视为台阶/平地（注入平滑）
+    /** 插值追赶速度，越大追得越快。 */
+    private stepSmoothFactor = 10;
+    /** 模型相对胶囊的基准 Y。 */
+    private modelBaseY = 0;
+    /** 最小法线 Y 分量，地面法线与竖直夹角 ≤ 8° 视为台阶/平地（注入平滑）。 */
+    private readonly minFloorNormalY = Math.cos(8 * Math.PI / 180);
 
     // ==================== 移动端 ====================
-    mobileControls: MobileControls | null = null; // 移动端控件
-    private isNearVehicle = false; // 靠近车辆
-    private nearCheckLocal = new THREE.Vector3(); // 近距检测局部坐标
-    private nearCheckWorld = new THREE.Vector3(); // 近距检测世界坐标
+    /** 移动端控件。 */
+    mobileControls: MobileControls | null = null;
+    /** 靠近车辆。 */
+    private isNearVehicle = false;
+    /** 近距检测局部坐标。 */
+    private nearCheckLocal = new THREE.Vector3();
+    /** 近距检测世界坐标。 */
+    private nearCheckWorld = new THREE.Vector3();
 
     // ==================== 调试 ====================
-    private displayPlayer = false; // 显示玩家碰撞体
-    private displayCollider = false; // 显示场景碰撞体
-    private displayVisualizer = false; // 显示BVH辅助
+    /** 显示玩家碰撞体。 */
+    private displayPlayer = false;
+    /** 显示场景碰撞体。 */
+    private displayCollider = false;
+    /** 显示BVH辅助。 */
+    private displayVisualizer = false;
 
     // ==================== 方向常量 & 复用向量 ====================
-    private rotationSpeed = 10; // 朝向旋转速度
-    upVector = new THREE.Vector3(0, 1, 0); // 世界上方向
-    private DIR_FWD = new THREE.Vector3(0, 0, -1); // 前
-    private DIR_RGT = new THREE.Vector3(1, 0, 0); // 右
+    /** 朝向旋转速度。 */
+    private rotationSpeed = 10;
+    /** 世界上方向。 */
+    upVector = new THREE.Vector3(0, 1, 0);
+    /** 前。 */
+    private DIR_FWD = new THREE.Vector3(0, 0, -1);
+    /** 右。 */
+    private DIR_RGT = new THREE.Vector3(1, 0, 0);
 
-    playerAcceleration = 30; // XZ 加速响应速度
-    playerDeceleration = 30; // XZ 减速响应速度
-    private decelBase = 300; // 减速基准速度
-    playerVelocity = new THREE.Vector3(); // 玩家速度
-    private camDir = new THREE.Vector3(); // 相机方向缓存
-    private moveDir = new THREE.Vector3(); // 移动方向缓存
-    private xzDir = new THREE.Vector3(); // 步进方向缓存
-    targetQuat = new THREE.Quaternion(); // 目标四元数
-    targetMat = new THREE.Matrix4(); // 目标变换矩阵
-    private staticTemps: CollisionTemps = createCollisionTemps(); // 静态碰撞临时对象
-    private dynTemps: CollisionTemps = createCollisionTemps();    // 动态碰撞临时对象
-    private groundRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0)); // 地面检测射线
+    /** XZ 加速响应速度。 */
+    playerAcceleration = 30;
+    /** XZ 减速响应速度。 */
+    playerDeceleration = 30;
+    /** 减速基准速度。 */
+    private decelBase = 300;
+    /** 玩家速度。 */
+    playerVelocity = new THREE.Vector3();
+    /** 相机方向缓存。 */
+    private camDir = new THREE.Vector3();
+    /** 移动方向缓存。 */
+    private moveDir = new THREE.Vector3();
+    /** 步进方向缓存。 */
+    private xzDir = new THREE.Vector3();
+    /** 目标四元数。 */
+    targetQuat = new THREE.Quaternion();
+    /** 目标变换矩阵。 */
+    targetMat = new THREE.Matrix4();
+    /** 静态碰撞临时对象。 */
+    private staticTemps: CollisionTemps = createCollisionTemps();
+    /** 动态碰撞临时对象。 */
+    private dynTemps: CollisionTemps = createCollisionTemps();
+    /** 地面检测射线。 */
+    private groundRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+
+    // ==================== 插件 ====================
+    /** 后处理等可选插件。 */
+    private plugins: PlayerPlugin[] = [];
 
     // ==================== 事件回调 ====================
-    onAnimationChange?: (name: string, action: THREE.AnimationAction) => void; // 动画切换回调
-    onBeforeViewChange?: (isFirstPerson: boolean) => void; // 视角切换前回调
-    onViewChange?: (isFirstPerson: boolean) => void; // 视角切换后回调
-    onGroundChange?: (onGround: boolean) => void; // 落地状态回调
-    onVehicleEnter?: (vehicle: VehicleInstance) => void; // 上车回调
-    onVehicleExit?: (vehicle: VehicleInstance) => void; // 下车回调
-    onTowardChange?: (dx: number, dy: number, speed: number) => void; // 朝向变化回调
+    /** 动画切换回调。 */
+    onAnimationChange?: (name: string, action: THREE.AnimationAction) => void;
+    /** 视角切换前回调。 */
+    onBeforeViewChange?: (isFirstPerson: boolean) => void;
+    /** 视角切换后回调。 */
+    onViewChange?: (isFirstPerson: boolean) => void;
+    /** 落地状态回调。 */
+    onGroundChange?: (onGround: boolean) => void;
+    /** 上车回调。 */
+    onVehicleEnter?: (vehicle: VehicleInstance) => void;
+    /** 下车回调。 */
+    onVehicleExit?: (vehicle: VehicleInstance) => void;
+    /** 朝向变化回调。 */
+    onTowardChange?: (dx: number, dy: number, speed: number) => void;
 
     // ==================== 子系统 ====================
-    animation = new AnimationSystem(this); // 动画系统
-    cam = new CameraSystem(this); // 相机系统
-    input = new InputSystem(this); // 输入系统
-    vehicle = new VehicleSystem(this); // 载具系统
+    /** 动画系统。 */
+    animation = new AnimationSystem(this);
+    /** 相机系统。 */
+    cam = new CameraSystem(this);
+    /** 输入系统。 */
+    input = new InputSystem(this);
+    /** 载具系统。 */
+    vehicle = new VehicleSystem(this);
 
     constructor() {
         (this.groundRaycaster as any).firstHitOnly = true;
@@ -133,7 +214,7 @@ export class playerController {
 
     // ==================== 初始化 ====================
 
-    // 主初始化入口
+    /** 主初始化入口。 */
     async init(opts: PlayerControllerOptions, callback?: () => void) {
         const m = opts.playerModelConfig;
         const s = m.scale ?? 1;
@@ -151,6 +232,7 @@ export class playerController {
         this.gravity = (pm.gravity ?? this.gravity) * s;
         this.jumpHeight = (pm.jumpHeight ?? this.jumpHeight) * s;
         this.playerSpeed = (pm.speed ?? this.playerSpeed) * s;
+        this.playerRunSpeed = (pm.runSpeed ?? this.playerRunSpeed) * s;
         this.playerFlySpeed = (pm.flySpeed ?? this.playerFlySpeed) * s;
         this.curPlayerSpeed = this.playerSpeed;
         this.playerCapsuleRadiusRatio = pm.capsuleRadiusRatio ?? this.playerCapsuleRadiusRatio;
@@ -202,7 +284,7 @@ export class playerController {
         callback?.();
     }
 
-    // 初始化加载器
+    /** 初始化加载器。 */
     private async initLoader() {
         const dracoLoader = new DRACOLoader();
         dracoLoader.setDecoderPath("https://unpkg.com/three@0.182.0/examples/jsm/libs/draco/gltf/");
@@ -211,7 +293,7 @@ export class playerController {
 
     // ==================== 玩家模型 ====================
 
-    // 加载模型与动画
+    /** 加载模型与动画。 */
     private async loadPlayerModelGLB() {
         try {
             const gltf = await this.loader.loadAsync(this.playerModelConfig.url) as GLTF;
@@ -377,7 +459,7 @@ export class playerController {
         }
     }
 
-    // 切换玩家模型
+    /** 切换玩家模型。 */
     async switchPlayerModel(newPlayerModel: PlayerModelOptions) {
         // 保存当前状态
         const savedPos = this.playerCapsule.position.clone();
@@ -405,6 +487,7 @@ export class playerController {
         this.gravity *= ratio;
         this.jumpHeight *= ratio;
         this.playerSpeed *= ratio;
+        this.playerRunSpeed *= ratio;
         this.playerFlySpeed *= ratio;
         this.curPlayerSpeed *= ratio;
         this.cam.epsilon *= ratio;
@@ -417,11 +500,40 @@ export class playerController {
         this.playerCapsule.quaternion.copy(savedQuat);
         if (wasFirstPerson) this.cam.setFirstPerson();
         this.setDebug(this.displayCollider);
+        for (const plugin of this.plugins) plugin.onPlayerModelChange?.();
+    }
+
+    // ==================== 插件 ====================
+
+    /** 注册后处理插件。 */
+    use(plugin: PlayerPlugin): this {
+        if (this.plugins.includes(plugin)) return this;
+        if (plugin.name) {
+            const existing = this.plugins.find(p => p.name === plugin.name);
+            if (existing) this.unuse(existing);
+        }
+        this.plugins.push(plugin);
+        plugin.onAttach?.(this);
+        return this;
+    }
+
+    /** 卸载已注册的插件。 */
+    unuse(plugin: PlayerPlugin): this {
+        const index = this.plugins.indexOf(plugin);
+        if (index < 0) return this;
+        this.plugins.splice(index, 1);
+        plugin.onDetach?.();
+        return this;
+    }
+
+    /** 获取当前插件列表的只读副本。 */
+    getPlugins(): PlayerPlugin[] {
+        return this.plugins.slice();
     }
 
     // ==================== 碰撞体构建和查询 ====================
 
-    // 获取包围盒
+    /** 获取包围盒。 */
     private getBbox(object: THREE.Object3D) {
         const bbox = new THREE.Box3().setFromObject(object);
         const center = new THREE.Vector3();
@@ -431,7 +543,7 @@ export class playerController {
         return { bbox, center, size };
     }
 
-    // 补全必要属性
+    /** 补全必要属性。 */
     private ensureAttributesMinimal(geom: THREE.BufferGeometry): THREE.BufferGeometry | null {
         if (!geom.attributes.position) return null;
         if (!geom.attributes.normal) geom.computeVertexNormals();
@@ -442,7 +554,7 @@ export class playerController {
         return geom;
     }
 
-    // 统一属性格式
+    /** 统一属性格式。 */
     private unifiedAttribute(collected: THREE.BufferGeometry[]) {
         type AttrMeta = { itemSize: number; arrayCtor: any; examples: number; normalized: boolean };
         const attrMap = new Map<string, AttrMeta>();
@@ -487,7 +599,7 @@ export class playerController {
         return collected;
     }
 
-    // 构建静态碰撞体
+    /** 构建静态碰撞体。 */
     buildStaticCollider(sources?: THREE.Object3D | THREE.Object3D[]) {
         this.collected = [];
         if (this.collider) { this.scene.remove(this.collider); this.collider = null; }
@@ -539,7 +651,7 @@ export class playerController {
         }
     }
 
-    // 注册动态碰撞体
+    /** 注册动态碰撞体。 */
     addDynamicCollider(source: THREE.Object3D) {
         if (this.dynamicColliders.find(e => e.source === source)) return;
         source.updateMatrixWorld(true);
@@ -574,7 +686,7 @@ export class playerController {
         if (this.displayCollider) this.scene.add(mesh);
     }
 
-    // 注销动态碰撞体
+    /** 注销动态碰撞体。 */
     removeDynamicCollider(source: THREE.Object3D) {
         const idx = this.dynamicColliders.findIndex(e => e.source === source);
         if (idx === -1) return;
@@ -586,7 +698,7 @@ export class playerController {
         this.dynamicColliders.splice(idx, 1);
     }
 
-    // 清除所有动态碰撞体
+    /** 清除所有动态碰撞体。 */
     clearDynamicColliders() {
         for (const entry of this.dynamicColliders) {
             this.scene.remove(entry.mesh);
@@ -597,7 +709,7 @@ export class playerController {
         this.activeDynamicCollider = null;
     }
 
-    // 更新动态碰撞体
+    /** 更新动态碰撞体。 */
     private updateDynamicColliders() {
         if (!this.playerCapsule) return;
         const playerWorldPos = this.playerCapsule.position.clone();
@@ -628,7 +740,7 @@ export class playerController {
 
     // ==================== 主循环 ====================
 
-    // 主循环
+    /** 主循环。 */
     async update(delta = clock.getDelta()) {
         if (!this.isupdate || !this.playerCapsule || !this.collider) return;
         delta = Math.min(delta, 1 / 40) * this.timeScale;
@@ -641,7 +753,7 @@ export class playerController {
         }
     }
 
-    // 玩家帧更新
+    /** 玩家帧更新。 */
     updatePlayer(delta: number) {
         // 更新动态碰撞体位置与增量
         this.updateDynamicColliders();
@@ -678,8 +790,7 @@ export class playerController {
 
         // 车辆模式下退出
         if (this.controllerMode === 1) {
-            // 更新动画
-            this.animation.updateMixers(delta);
+            this.runAnimationPass(delta);
             return;
         }
 
@@ -695,7 +806,7 @@ export class playerController {
             if (this.input.space) this.moveDir.y += 1;
             this.curPlayerSpeed = this.input.shift ? this.playerFlySpeed * 2 : this.playerFlySpeed;
         } else {
-            this.curPlayerSpeed = this.input.shift ? this.playerSpeed * 3 : this.playerSpeed;
+            this.curPlayerSpeed = this.input.shift ? this.playerRunSpeed : this.playerSpeed;
         }
 
         this.moveDir.normalize(); // 归一化方向向量
@@ -864,13 +975,20 @@ export class playerController {
 
         // 设置动画
         this.animation.setAnimationByPressed();
-        // 更新动画混合器
+        // 更新动画混合器（含插件 before/after 钩子）
+        this.runAnimationPass(delta);
+    }
+
+    /** 在插件的恢复与应用钩子之间更新动画混合器。 */
+    private runAnimationPass(delta: number): void {
+        for (const plugin of this.plugins) plugin.onBeforeAnimationUpdate?.(delta);
         this.animation.updateMixers(delta);
+        for (const plugin of this.plugins) plugin.onAfterAnimationUpdate?.(delta);
     }
 
     // ==================== 内部辅助 ====================
 
-    // 同步 debug 可见性
+    /** 同步 debug 可见性。 */
     syncDebugVisibility() {
         if (!this.playerCapsule) return;
         const dbg = this.displayCollider;
@@ -900,7 +1018,7 @@ export class playerController {
         }
     }
 
-    // 设置落地状态
+    /** 设置落地状态。 */
     setOnGround(val: boolean) {
         if (this.playerIsOnGround === val) return;
         this.playerIsOnGround = val;
@@ -909,20 +1027,20 @@ export class playerController {
         else this.animation.onBecomeAirborne();
     }
 
-    // 应用重力
+    /** 应用重力。 */
     private applyGravity(delta: number) {
         this.playerVelocity.y += delta * this.gravity;
         this.setOnGround(false);
     }
 
-    // 判断脚下地面是否为水平台面（法线接近竖直）
+    /** 判断脚下地面是否为水平台面（法线接近竖直）。 */
     private isFlatFloor(hit: THREE.Intersection): boolean {
         const n = hit.face?.normal;
         if (!n) return true;
         return n.y >= this.minFloorNormalY; // 大于等于最小法线 Y 分量时为水平台面
     }
 
-    // 吸附到地面
+    /** 吸附到地面。 */
     private snapToGround(groundY: number, smooth = false, delta = 0) {
         this.playerVelocity.y = 0;
         const dy = groundY - this.playerCapsule.position.y;
@@ -936,7 +1054,7 @@ export class playerController {
         this.setOnGround(true);
     }
 
-    // 重算站立 / 落地阈值（snapH / maxH）。仅在胶囊创建、缩放后调用。
+    /** 重算站立 / 落地阈值（snapH / maxH）。仅在胶囊创建、缩放后调用。 */
     private recomputeGroundThresholds() {
         const info = this.playerCapsule?.capsuleInfo;
         if (!info) return;
@@ -946,7 +1064,7 @@ export class playerController {
         this.maxH = this.snapH + rideHeightScaled;
     }
 
-    // 动态修改缩放
+    /** 动态修改缩放。 */
     setPlayerScale(newScale: number) {
         if (newScale <= 0) return;
         const ratio = newScale / this.playerModelConfig.scale;
@@ -956,6 +1074,7 @@ export class playerController {
         this.gravity *= ratio;
         this.jumpHeight *= ratio;
         this.playerSpeed *= ratio;
+        this.playerRunSpeed *= ratio;
         this.playerFlySpeed *= ratio;
         this.curPlayerSpeed *= ratio;
         this.cam.epsilon *= ratio;
@@ -974,7 +1093,7 @@ export class playerController {
         if (this.isFirstPerson) this.cam.setFirstPerson();
     }
 
-    // 重置玩家位置
+    /** 重置玩家位置。 */
     reset(position?: THREE.Vector3) {
         if (!this.playerCapsule) return;
         this.playerVelocity.set(0, 0, 0);
@@ -983,118 +1102,127 @@ export class playerController {
 
     // ==================== API ====================
 
-    // 获取当前位置
+    /** 获取当前位置。 */
     getPosition() { return this.playerCapsule?.position; }
-    // 获取速度
+    /** 获取速度。 */
     getVelocity() { return this.playerVelocity.clone(); }
-    // 获取第一人称状态
+    /** 获取第一人称状态。 */
     getIsFirstPerson() { return this.isFirstPerson; }
-    // 获取飞行状态
+    /** 获取飞行状态。 */
     getIsFlying() { return this.isFlying; }
-    // 获取落地状态
+    /** 获取落地状态。 */
     getIsOnGround() { return this.playerIsOnGround; }
-    // 获取本帧实际使用的 delta（已钳制 + timeScale）
+    /** 获取本帧实际使用的 delta（已钳制 + timeScale）。 */
     getCurrentDelta() { return this.currentDelta; }
-    // 获取控制器模式
+    /** 获取控制器模式。 */
     getControllerMode() { return this.controllerMode; }
-    // 获取玩家模型
+    /** 获取玩家模型。 */
     getPlayerModel() { return this.playerModel; }
-    // 获取胶囊体
+    /** 获取胶囊体。 */
     getPlayerCapsule() { return this.playerCapsule; }
-    // 获取当前载具
+    /** 获取当前载具。 */
     getActiveVehicle() { return this.vehicle.active; }
-    // 获取所有载具
+    /** 获取所有载具。 */
     getAllVehicles() { return this.vehicle.list; }
-    // 获取碰撞体
+    /** 获取碰撞体。 */
     getCollider() { return this.collider; }
-    // 获取当前站立的动态碰撞体
+    /** 获取当前站立的动态碰撞体。 */
     getActiveDynamicCollider() { return this.activeDynamicCollider; }
 
-    // 设置鼠标灵敏度
+    /** 设置鼠标灵敏度。 */
     setMouseSensitivity(value: number) {
         this.cam.sensitivity = value;
         this.controls.rotateSpeed = value * 0.05;
     }
 
     // --- 玩家参数 ---
-    // 设置重力
+    /** 设置重力。 */
     setGravity(gravity: number) { this.gravity = gravity * this.playerModelConfig.scale; }
-    // 设置跳跃高度
+    /** 设置跳跃高度。 */
     setJumpHeight(jumpHeight: number) { this.jumpHeight = jumpHeight * this.playerModelConfig.scale; }
-    // 设置行走速度
+    /** 设置行走速度。 */
     setPlayerSpeed(speed: number) { this.playerSpeed = speed * this.playerModelConfig.scale; this.curPlayerSpeed = this.playerSpeed; }
-    // 设置飞行速度
+    /** 设置跑步速度。 */
+    setPlayerRunSpeed(runSpeed: number) { this.playerRunSpeed = runSpeed * this.playerModelConfig.scale; }
+    /** 设置飞行速度。 */
     setPlayerFlySpeed(flySpeed: number) { this.playerFlySpeed = flySpeed * this.playerModelConfig.scale; }
-    // 设置朝向开关
+    /** 设置朝向开关。 */
     setEnableToward(v: boolean) { this.enableToward = v; }
 
     // --- 相机参数 ---
-    // 设置相机最近距
+    /** 设置相机最近距。 */
     setMinCamDistance(dist: number) { this.cam.minDist = dist * this.playerModelConfig.scale; }
-    // 设置相机最远距
+    /** 设置相机最远距。 */
     setMaxCamDistance(dist: number) { this.cam.maxDist = dist * this.playerModelConfig.scale; this.cam.originMaxDist = this.cam.maxDist; }
-    // 设置相机看向点高度比例
+    /** 设置相机看向点高度比例。 */
     setCamLookAtHeightRatio(ratio: number) { this.cam.lookAtHeightRatio = ratio; }
-    // 设置相机过肩视角横向偏移比例
+    /** 设置相机过肩视角横向偏移比例。 */
     setCamOverShoulderOffsetRatio(ratio: number) { this.cam.overShoulderOffsetRatio = ratio; this.cam.setOverShoulder(this.enableOverShoulderView && !this.isFirstPerson); }
 
-    // 设置鼠标模式
+    /** 设置鼠标模式。 */
     setThirdMouseMode(mode: 0 | 1 | 2 | 3 | 4 | 5) { this.cam.mouseMode = mode; this.cam.setPointerLock(); }
-    // 设置缩放开关
+    /** 设置缩放开关。 */
     setEnableZoom(enable: boolean) { this.cam.zoomEnabled = enable; this.controls.enableZoom = enable; }
 
     // --- 调试 ---
-    // 切换调试显示
+    /** 切换调试显示。 */
     setDebug(debug: boolean) {
         this.displayCollider = debug;
         this.syncDebugVisibility();
     }
-    // 临时跳过玩家胶囊碰撞检测
+    /** 临时跳过玩家胶囊碰撞检测。 */
     setSkipCapsuleCollision(skip: boolean) { this.skipCapsuleCollision = skip; }
 
     // --- 动画 ---
-    // 按名播放动画
+    /** 按名播放动画。 */
     playPlayerAnimationByName(name: string, fade?: number) { this.animation.playByName(name, fade); }
-    // 注册自定义动画
+    /** 注册自定义动画。 */
     registerAnimation(key: string, clipName: string, opts?: Parameters<AnimationSystem["register"]>[2]) { this.animation.register(key, clipName, opts); }
-    // 播放已注册动画
+    /** 播放已注册动画。 */
     playAnimation(key: string, opts?: Parameters<AnimationSystem["play"]>[1]) { this.animation.play(key, opts); }
-    // 注册移动动作组
+    /** 注册移动动作组。 */
     registerLocomotionSet(setName: string, map: Parameters<AnimationSystem["registerLocomotionSet"]>[1]) { this.animation.registerLocomotionSet(setName, map); }
-    // 切换移动动作组
+    /** 切换移动动作组。 */
     switchLocomotionSet(setName: string, fade?: number) { this.animation.switchLocomotionSet(setName, fade); }
-    // 获取当前动画名
+    /** 获取当前动画名。 */
     getCurrentPlayerAnimationName() { return this.animation.getCurrentName(); }
-    // 获取当前移动动作组名
+    /** 获取当前移动动作组名。 */
     getCurrentLocomotionSet() { return this.animation.currentLocomotionSet; }
 
     // --- 相机 ---
-    // 切换视角模式
+    /** 切换视角模式。 */
     changeView() { this.cam.changeView(); }
-    // 设置第一人称
+    /** 设置第一人称。 */
     setFirstPersonCamera(v = 0) { this.cam.setFirstPerson(v); }
-    // 设置越肩视角
+    /** 设置越肩视角。 */
     setOverShoulderView(v: boolean) { this.cam.setOverShoulder(v); this.enableOverShoulderView = v; }
-    // 屏幕中心检测
+    /** 屏幕中心检测。 */
     getCenterScreenRaycastHit() { return this.cam.getCenterHit(); }
 
     // --- 输入 ---
-    // 设置输入状态
+    /** 设置输入状态。 */
     setInput(input: Parameters<InputSystem["setInput"]>[0]) { this.input.setInput(input); }
-    // 运行时自定义键位
+    /** 运行时自定义键位。 */
     setKeyMap(map?: KeyMap) { this.input.buildKeyMap(map); }
-    // 绑定输入事件
+    /** 绑定输入事件。 */
     onAllEvent() { this.input.bindEvents(); }
-    // 解绑输入事件
+    /** 解绑输入事件。 */
     offAllEvent() { this.input.unbindEvents(); }
 
     // --- 载具 ---
-    // 加载车辆模型
+    /** 加载车辆模型。 */
     loadVehicleModel(opts: VehicleOptions) { return this.vehicle.load(opts); }
 
     // --- 销毁 ---
+    /** 销毁控制器并释放资源。 */
     destroy() {
         this.input.unbindEvents();
+
+        // 卸载插件
+        for (const plugin of this.plugins.slice()) {
+            plugin.dispose?.();
+        }
+        this.plugins = [];
 
         // 清除玩家对象
         if (this.playerCapsule) { this.playerCapsule.remove(this.camera); this.scene.remove(this.playerCapsule); }

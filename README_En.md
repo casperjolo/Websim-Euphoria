@@ -143,6 +143,7 @@ await player.init({
         gravity: -2400,     // gravity base value, scaled by scale
         jumpHeight: 600,    // jump height base value, scaled by scale
         speed: 200,         // move speed base value, scaled by scale
+        runSpeed: 600,      // run speed base value, scaled by scale
         flySpeed: 2100,     // fly speed base value, scaled by scale
         acceleration: 30,   // XZ acceleration response speed
         deceleration: 30,   // XZ deceleration response speed
@@ -225,6 +226,50 @@ await player.loadVehicleModel({
 });
 ```
 
+## Foot IK Plugin
+
+```ts
+import { FootIK } from "three-player-controller/foot-ik";
+
+const footIK = new FootIK({
+    // Leg bone binding; Bone objects are also accepted. Omitted names are matched automatically.
+    skeleton: {
+        hips: "mixamorigHips", // pelvis
+        legs: {
+            left: {
+                upper: "mixamorigLeftUpLeg", // thigh
+                lower: "mixamorigLeftLeg",   // calf
+                foot: "mixamorigLeftFoot",   // foot
+                toe: "mixamorigLeftToeBase", // toe
+            },
+            right: {
+                upper: "mixamorigRightUpLeg",
+                lower: "mixamorigRightLeg",
+                foot: "mixamorigRightFoot",
+                toe: "mixamorigRightToeBase",
+            },
+        },
+    },
+    // Skin thickness from foot bone to sole (extra lift so the sole does not sink into the ground)
+    soleSkinThickness: 3,
+});
+
+player.use(footIK);
+```
+
+When `skeleton` is omitted, common bone names are matched automatically. Idle poses preserve the animation knee pole, while locomotion uses a stable pole in the character's sagittal plane. Foot phases are sampled offline from `playerModelConfig` locomotion clips to distinguish planted and swinging feet.
+
+```ts
+footIK.setEnabled(false);                // disable IK
+footIK.setDebugEnabled(true);            // show IK targets and probe rays
+footIK.setSoleSampleDebugEnabled(true);  // show foot-local sole samples
+
+player.unuse(footIK); // reversible detach
+footIK.dispose();     // terminal cleanup
+```
+
+`player.destroy()` disposes registered plugins automatically. Distance options are scale=1 base values (multiplied by `playerModelConfig.scale` internally) and angle options use radians. See [`example/footIK.js`](https://github.com/hh-hang/three-player-controller/blob/master/example/footIK.js) for a complete example.
+
 # API
 
 ## Lifecycle
@@ -274,6 +319,7 @@ await player.loadVehicleModel({
 | `setMouseSensitivity(v)` | Set mouse sensitivity. |
 | `setPlayerScale(v)` | Rescale the player and update collider-related values. |
 | `setPlayerSpeed(v)` | Set move speed. |
+| `setPlayerRunSpeed(v)` | Set run speed. |
 | `setPlayerFlySpeed(v)` | Set fly speed. |
 | `setJumpHeight(v)` | Set jump height. |
 | `setGravity(v)` | Set gravity. |
@@ -476,6 +522,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // fired when look / facing i
 | `gravity` | `number` | No | `-2400` | Gravity base value (scaled by `scale`). |
 | `jumpHeight` | `number` | No | `600` | Jump height base value (scaled by `scale`). |
 | `speed` | `number` | No | `200` | Move speed base value (scaled by `scale`). |
+| `runSpeed` | `number` | No | `600` | Run speed base value (scaled by `scale`). |
 | `flySpeed` | `number` | No | `2100` | Fly speed base value (scaled by `scale`). |
 | `rotateY` | `number` | No | `0` | Initial character facing (radians); changes the model's initial facing direction. |
 | `headBoneName` | `string` | No | — | Head bone or node name, used for first-person camera attachment. |

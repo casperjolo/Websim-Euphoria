@@ -143,6 +143,7 @@ await player.init({
         gravity: -2400,     // 重力基准值，会按 scale 缩放
         jumpHeight: 600,    // 跳跃高度基准值，会按 scale 缩放
         speed: 200,         // 移动速度基准值，会按 scale 缩放
+        runSpeed: 600,      // 跑步速度基准值，会按 scale 缩放
         flySpeed: 2100,     // 飞行速度基准值，会按 scale 缩放
         acceleration: 30,   // XZ 加速响应速度
         deceleration: 30,   // XZ 减速响应速度
@@ -225,6 +226,50 @@ await player.loadVehicleModel({
 });
 ```
 
+## Foot IK 插件
+
+```ts
+import { FootIK } from "three-player-controller/foot-ik";
+
+const footIK = new FootIK({
+    // 腿部骨骼绑定；也可传 Bone 对象。未传时按常见骨骼名自动匹配。
+    skeleton: {
+        hips: "mixamorigHips", // 骨盆
+        legs: {
+            left: {
+                upper: "mixamorigLeftUpLeg", // 大腿
+                lower: "mixamorigLeftLeg",   // 小腿
+                foot: "mixamorigLeftFoot",   // 脚
+                toe: "mixamorigLeftToeBase", // 脚趾
+            },
+            right: {
+                upper: "mixamorigRightUpLeg",
+                lower: "mixamorigRightLeg",
+                foot: "mixamorigRightFoot",
+                toe: "mixamorigRightToeBase",
+            },
+        },
+    },
+    // 脚骨到鞋底蒙皮厚度补偿（贴地时额外上抬，避免鞋底陷入地面）
+    soleSkinThickness: 3,
+});
+
+player.use(footIK);
+```
+
+未传 `skeleton` 时会根据常见骨骼名自动匹配。静止状态保留动画膝盖 pole，移动状态使用角色前后平面内的稳定 pole。脚步相位会离线采样 `playerModelConfig` 中的移动动画，用于区分支撑脚和摆动脚。
+
+```ts
+footIK.setEnabled(false);                // 停用 IK
+footIK.setDebugEnabled(true);            // 显示 IK 目标点和检测射线
+footIK.setSoleSampleDebugEnabled(true);  // 显示 foot-local 脚底采样点
+
+player.unuse(footIK); // 可逆卸载
+footIK.dispose();     // 终止使用并释放资源
+```
+
+`player.destroy()` 会自动销毁已注册插件。距离类配置为 scale=1 基准值（内部乘以 `playerModelConfig.scale`），角度配置使用弧度。完整示例见 [`example/footIK.js`](https://github.com/hh-hang/three-player-controller/blob/master/example/footIK.js)。
+
 # API
 
 ## 生命周期
@@ -274,6 +319,7 @@ await player.loadVehicleModel({
 | `setMouseSensitivity(v)` | 设置鼠标灵敏度。 |
 | `setPlayerScale(v)` | 动态修改角色缩放，并同步碰撞相关参数。 |
 | `setPlayerSpeed(v)` | 设置移动速度。 |
+| `setPlayerRunSpeed(v)` | 设置跑步速度。 |
 | `setPlayerFlySpeed(v)` | 设置飞行速度。 |
 | `setJumpHeight(v)` | 设置跳跃高度。 |
 | `setGravity(v)` | 设置重力。 |
@@ -476,6 +522,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `gravity` | `number` | 否 | `-2400` | 重力基准值（按 `scale` 缩放）。 |
 | `jumpHeight` | `number` | 否 | `600` | 跳跃高度基准值（按 `scale` 缩放）。 |
 | `speed` | `number` | 否 | `200` | 移动速度基准值（按 `scale` 缩放）。 |
+| `runSpeed` | `number` | 否 | `600` | 跑步速度基准值（按 `scale` 缩放）。 |
 | `flySpeed` | `number` | 否 | `2100` | 飞行速度基准值（按 `scale` 缩放）。 |
 | `rotateY` | `number` | 否 | `0` | 人物初始朝向（弧度），用于改变模型初始化面朝方向。 |
 | `headBoneName` | `string` | 否 | — | 头部骨骼或节点名称，用于第一人称相机挂载。 |

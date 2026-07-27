@@ -22,8 +22,8 @@ import { Sky } from "three/addons/objects/Sky.js";
 import { MapControls } from "three/examples/jsm/Addons.js";
 import { GUI } from "three/examples/jsm/libs/lil-gui.module.min.js";
 import Stats from "three/examples/jsm/libs/stats.module.js";
-import { playerController } from "../../src/playerController";
-import { LegIKController } from "./LegIKController.js";
+import { playerController } from "../src/playerController";
+import { FootIK } from "../src/foot-ik";
 
 const scene = new Scene();
 
@@ -31,14 +31,13 @@ let camera;
 let renderer;
 let controls;
 let player;
-let legIK;
+let footIK;
 let sunDebugHelper;
 let sunShadowCameraHelper;
 let sky;
 let gui;
 let debugParams;
 let stats;
-let legIKEnabled = true;
 let leftMouseSlowMotion = false;
 let rightMouseSlowMotion = false;
 let savedPlayerTimeScale = 1;
@@ -132,56 +131,67 @@ async function init() {
         camLookAtHeightRatio: 0.5,
         enableSpringCamera: true,
         playerModelConfig: {
-            url: "../glb/person6.glb",
-            scale: 0.005,
-            idleAnim: "idle",
-            walkAnim: "walk",
-            runAnim: "run",
-            jumpAnim: "jump",
-            speed: 200,
+            // url: "./glb/person6.glb",
+            // scale: 0.005,
+            // idleAnim: "idle",
+            // walkAnim: "walk",
+            // runAnim: "run",
+            // jumpAnim: "jump",
+            // url: "./glb/person1.glb",
+            // scale: 0.005,
+            // idleAnim: "idle1",
+            // walkAnim: "walk",
+            // runAnim: "run",
+            // jumpAnim: "jump",
             // headBoneName: "mixamorigHead",
+
+            url: "./glb/UAL1_Standard.glb",
+            scale: 0.005,
+            idleAnim: "Idle_Loop",
+            walkAnim: "Walk_Loop",
+            runAnim: "Sprint_Loop",
+            jumpAnim: ["Jump_Start", "Jump_Loop", "Jump_Land"],
+            flyAnim: "fly",
+            flyIdleAnim: "flyIdle",
+            flyHoverForwardAnim: "flyHoverForward",
+            flyHoverBackAnim: "flyHoverBack",
+            flyHoverLeftAnim: "flyHoverLeft",
+            flyHoverRightAnim: "flyHoverRight",
+            flyHoverUpAnim: "flyHoverUp",
+            flyHoverDownAnim: "flyHoverDown",
+
+            speed: 100,
+            runSpeed: 600,
             rotateY: Math.PI / 2,
         },
-        keyMap: { toggleFly: null }, // 关闭飞行
+        // keyMap: { toggleFly: null }, // 关闭飞行
     });
     enableModelShadows(player.playerModel);
 
     // 骨骼配置
     const skeleton = {
-        hips: "mixamorigHips",
+        hips: "pelvis",
         legs: {
             left: {
-                upper: "mixamorigLeftUpLeg",
-                lower: "mixamorigLeftLeg",
-                foot: "mixamorigLeftFoot",
-                toe: "mixamorigLeftToeBase",
+                upper: "thigh_l",
+                lower: "calf_l",
+                foot: "foot_l",
+                toe: "ball_l",
             },
             right: {
-                upper: "mixamorigRightUpLeg",
-                lower: "mixamorigRightLeg",
-                foot: "mixamorigRightFoot",
-                toe: "mixamorigRightToeBase",
-            },
-        },
-        arms: {
-            left: {
-                upper: "mixamorigLeftArm",
-                lower: "mixamorigLeftForeArm",
-                hand: "mixamorigLeftHand",
-            },
-            right: {
-                upper: "mixamorigRightArm",
-                lower: "mixamorigRightForeArm",
-                hand: "mixamorigRightHand",
+                upper: "thigh_r",
+                lower: "calf_r",
+                foot: "foot_r",
+                toe: "ball_r",
             },
         },
     };
 
-    legIK = new LegIKController(player, {
-        collider: player.collider,
-        scene,
+    footIK = new FootIK({
         skeleton,
+        soleSkinThickness: 1.6,
     });
+    player.use(footIK);
 
     createDebugPanel();
 
@@ -196,57 +206,172 @@ async function init() {
 
 // 创建调试面板
 function createDebugPanel() {
+    const options = footIK?.getOptions() ?? {};
     const params = {
-        legIKEnabled: true,
-        footIKDebug: false,
-        soleSampleDebug: false,
+        // 是否启用 Foot IK
+        footIKEnabled: options.enabled ?? true,
+        // 显示 IK 目标点与检测射线
+        footIKDebug: options.debug ?? false,
+        // 显示脚底四个本地采样点
+        soleSampleDebug: options.soleSampleDebug ?? false,
+        // 是否把左右脚相位文字刷到面板
         footPhaseDebug: false,
+        // 左脚相位调试文本（只读）
         leftFootPhase: "",
+        // 右脚相位调试文本（只读）
         rightFootPhase: "",
+        // 显示太阳方向与阴影相机辅助线
         sunDebug: false,
+        // 显示玩家胶囊碰撞体
         playerDebug: false,
+
+        // 骨盆最大下沉距离
+        maxPelvisDrop: options.maxPelvisDrop ?? 20,
+        // 虚拟脚底左右半宽
+        soleHalfWidth: options.soleHalfWidth ?? 7,
+        // 脚尖采样点向前延伸
+        soleToeExtend: options.soleToeExtend ?? 7,
+        // 脚跟采样点向后延伸
+        soleHeelExtend: options.soleHeelExtend ?? 3,
+        // 脚骨到鞋底蒙皮厚度补偿（贴地时额外上抬，避免鞋底陷入地面）
+        soleSkinThickness: options.soleSkinThickness ?? 3,
+        // 脚掌贴合地面法线权重（0~1）
+        footAlignWeight: options.footAlignWeight ?? 1,
+        // 脚掌最大倾斜角（度）
+        maxFootTiltDeg: ((options.maxFootTilt ?? Math.PI / 2) * 180) / Math.PI,
+        // 膝盖最小弯曲角（度）
+        minKneeBendDeg: ((options.minKneeBend ?? (2 * Math.PI) / 180) * 180) / Math.PI,
+        // 膝盖最大弯曲角（度）
+        maxKneeBendDeg: ((options.maxKneeBend ?? (145 * Math.PI) / 180) * 180) / Math.PI,
+        // 移动时脚底穿透上抬触发阈值
+        moveLiftThreshold: options.moveLiftThreshold ?? 0.1,
+        // mesh 台阶视觉补偿最大下拽
+        maxMeshStepDrop: options.maxMeshStepDrop ?? 36,
+        // mesh 台阶视觉补偿最大上抬
+        maxMeshStepRaise: options.maxMeshStepRaise ?? 36,
+        // 双脚判定为同一支撑平面的最大高度差
+        meshStepCoplanarThreshold: options.meshStepCoplanarThreshold ?? 8,
+        // 单个移动动画的脚步相位采样数
+        footPhaseSampleCount: options.footPhaseSampleCount ?? 96,
+        // 脚步相位接地高度阈值
+        footPhaseGroundThreshold: options.footPhaseGroundThreshold ?? 5,
+        // 最短接触段占动画周期的比例
+        footPhaseMinContactRatio: options.footPhaseMinContactRatio ?? 0.04,
+        // 支撑脚水平速度过滤倍率
+        footPhaseSpeedSlack: options.footPhaseSpeedSlack ?? 1.35,
     };
     debugParams = params;
 
+    const applyFootIKOptions = (patch) => {
+        footIK?.configure(patch);
+    };
+
     player?.setDebug(params.playerDebug);
-    legIK?.setDebugEnabled(params.footIKDebug && params.legIKEnabled);
-    legIK?.setSoleSampleDebugEnabled(params.soleSampleDebug);
+    footIK?.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
+    footIK?.setSoleSampleDebugEnabled(params.soleSampleDebug);
     sunDebugHelper.visible = params.sunDebug;
     sunShadowCameraHelper.visible = params.sunDebug;
 
-    gui = new GUI({ title: "Debug", width: 240 });
+    gui = new GUI({ title: "Debug", width: 300 });
     gui.domElement.style.position = "fixed";
     gui.domElement.style.top = "12px";
     gui.domElement.style.right = "12px";
 
-    gui.add(params, "playerDebug").name("Player Collider").onChange(value => {
+    const sceneFolder = gui.addFolder("Scene");
+    sceneFolder.add(params, "playerDebug").name("Player Collider").onChange(value => {
         player?.setDebug(value);
     });
-    gui.add(params, "legIKEnabled").name("Enable Leg IK").onChange(value => {
-        legIKEnabled = value;
-        if (!value) {
-            legIK?.restore();
-            legIK?.setDebugEnabled(false);
-        } else {
-            legIK?.setDebugEnabled(params.footIKDebug);
-        }
-    });
-    gui.add(params, "footIKDebug").name("Foot IK Debug").onChange(value => {
-        legIK?.setDebugEnabled(value && legIKEnabled);
-    });
-    gui.add(params, "soleSampleDebug").name("Sole Sample Debug").onChange(value => {
-        legIK?.setSoleSampleDebugEnabled(value);
-    });
-    gui.add(params, "footPhaseDebug").name("Foot Phase Debug");
-    gui.add(params, "leftFootPhase").name("Left Foot Phase").listen().disable();
-    gui.add(params, "rightFootPhase").name("Right Foot Phase").listen().disable();
-    gui.add(params, "sunDebug").name("Sun Debug").onChange(value => {
+    sceneFolder.add(params, "sunDebug").name("Sun Debug").onChange(value => {
         sunDebugHelper.visible = value;
         sunShadowCameraHelper.visible = value;
     });
+    sceneFolder.open();
+
+    const debugFolder = gui.addFolder("Foot IK Debug");
+    debugFolder.add(params, "footIKEnabled").name("Enabled").onChange(value => {
+        footIK?.setEnabled(value);
+        if (!value) {
+            footIK?.setDebugEnabled(false);
+        } else {
+            footIK?.setDebugEnabled(params.footIKDebug);
+        }
+    });
+    debugFolder.add(params, "footIKDebug").name("IK Targets").onChange(value => {
+        footIK?.setDebugEnabled(value && params.footIKEnabled);
+    });
+    debugFolder.add(params, "soleSampleDebug").name("Sole Samples").onChange(value => {
+        footIK?.setSoleSampleDebugEnabled(value);
+    });
+    debugFolder.add(params, "footPhaseDebug").name("Phase Debug");
+    debugFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
+    debugFolder.add(params, "rightFootPhase").name("Right Phase").listen().disable();
+    debugFolder.open();
+
+    const soleFolder = gui.addFolder("Sole Layout");
+    soleFolder.add(params, "soleHalfWidth", 0, 24, 0.1).name("Half Width").onChange(value => {
+        applyFootIKOptions({ soleHalfWidth: value });
+    });
+    soleFolder.add(params, "soleToeExtend", 0, 24, 0.1).name("Toe Extend").onChange(value => {
+        applyFootIKOptions({ soleToeExtend: value });
+    });
+    soleFolder.add(params, "soleHeelExtend", 0, 24, 0.1).name("Heel Extend").onChange(value => {
+        applyFootIKOptions({ soleHeelExtend: value });
+    });
+    soleFolder.add(params, "soleSkinThickness", 0, 16, 0.1).name("Skin Thickness").onChange(value => {
+        applyFootIKOptions({ soleSkinThickness: value });
+    });
+    soleFolder.open();
+
+    const ikFolder = gui.addFolder("IK Solve");
+    ikFolder.add(params, "maxPelvisDrop", 0, 80, 0.1).name("Max Pelvis Drop").onChange(value => {
+        applyFootIKOptions({ maxPelvisDrop: value });
+    });
+    ikFolder.add(params, "footAlignWeight", 0, 1, 0.01).name("Foot Align Weight").onChange(value => {
+        applyFootIKOptions({ footAlignWeight: value });
+    });
+    ikFolder.add(params, "maxFootTiltDeg", 0, 90, 0.5).name("Max Foot Tilt °").onChange(value => {
+        applyFootIKOptions({ maxFootTilt: (value * Math.PI) / 180 });
+    });
+    ikFolder.add(params, "minKneeBendDeg", 0, 60, 0.5).name("Min Knee Bend °").onChange(value => {
+        applyFootIKOptions({ minKneeBend: (value * Math.PI) / 180 });
+    });
+    ikFolder.add(params, "maxKneeBendDeg", 60, 179, 0.5).name("Max Knee Bend °").onChange(value => {
+        applyFootIKOptions({ maxKneeBend: (value * Math.PI) / 180 });
+    });
+    ikFolder.add(params, "moveLiftThreshold", 0, 4, 0.01).name("Move Lift Threshold").onChange(value => {
+        applyFootIKOptions({ moveLiftThreshold: value });
+    });
+    ikFolder.open();
+
+    const stepFolder = gui.addFolder("Mesh Step Offset");
+    stepFolder.add(params, "maxMeshStepDrop", 0, 100, 0.1).name("Max Drop").onChange(value => {
+        applyFootIKOptions({ maxMeshStepDrop: value });
+    });
+    stepFolder.add(params, "maxMeshStepRaise", 0, 100, 0.1).name("Max Raise").onChange(value => {
+        applyFootIKOptions({ maxMeshStepRaise: value });
+    });
+    stepFolder.add(params, "meshStepCoplanarThreshold", 0, 40, 0.1).name("Coplanar Threshold").onChange(value => {
+        applyFootIKOptions({ meshStepCoplanarThreshold: value });
+    });
+    stepFolder.open();
+
+    const phaseFolder = gui.addFolder("Foot Phase");
+    phaseFolder.add(params, "footPhaseSampleCount", 16, 256, 1).name("Sample Count").onFinishChange(value => {
+        applyFootIKOptions({ footPhaseSampleCount: value });
+    });
+    phaseFolder.add(params, "footPhaseGroundThreshold", 0, 20, 0.1).name("Ground Threshold").onFinishChange(value => {
+        applyFootIKOptions({ footPhaseGroundThreshold: value });
+    });
+    phaseFolder.add(params, "footPhaseMinContactRatio", 0, 0.3, 0.001).name("Min Contact Ratio").onFinishChange(value => {
+        applyFootIKOptions({ footPhaseMinContactRatio: value });
+    });
+    phaseFolder.add(params, "footPhaseSpeedSlack", 0, 3, 0.01).name("Speed Slack").onFinishChange(value => {
+        applyFootIKOptions({ footPhaseSpeedSlack: value });
+    });
+    phaseFolder.open();
 }
 
-// 创建楼梯与斜坡测试场景
+// 更新天空太阳方向。
 function updateSkySun(light) {
     sky.material.uniforms["sunPosition"].value.copy(light.position).normalize();
 }
@@ -265,6 +390,10 @@ function buildTestCourse() {
         new MeshStandardMaterial({ color: 0x9fb7b4, roughness: 0.8 }),
         new MeshStandardMaterial({ color: 0xc0b48c, roughness: 0.8 }),
     ];
+    const speedBumpMats = [
+        new MeshStandardMaterial({ color: 0xe5b73b, roughness: 0.72 }),
+        new MeshStandardMaterial({ color: 0x4b4a46, roughness: 0.82 }),
+    ];
     const wallMat = new MeshStandardMaterial({ color: 0x9a9691, roughness: 0.88 });
 
     addBox(root, new Vector3(0, -0.06, 0), new Vector3(20, 0.12, 12), groundMat);
@@ -273,6 +402,8 @@ function buildTestCourse() {
     createStairs(root, new Vector3(-6.5, 0, -3.5), 0.08, stairMats[0]);
     createStairs(root, new Vector3(-1.2, 0, -3.5), 0.12, stairMats[1]);
     createStairs(root, new Vector3(4.1, 0, -3.5), 0.16, stairMats[2]);
+
+    createSpeedBumpCourse(root, -0.25, speedBumpMats);
 
     createRamp(root, new Vector3(-6.1, 0, 3), 10, rampMats[0]);
     createRamp(root, new Vector3(-0.3, 0, 3), 18, rampMats[1]);
@@ -334,6 +465,27 @@ function createStairs(root, start, stepHeight, material) {
     }
 }
 
+// 在楼梯和斜坡之间创建 10 个高度统一、宽度不超过 0.32 的长方体。
+function createSpeedBumpCourse(root, centerZ, materials) {
+    const height = 0.140;
+    const depth = 1.7;
+    const widths = [0.14, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32];
+    const gaps = [0.32, 0.58, 0.41, 0.75, 0.36, 0.63, 0.48, 0.71, 0.54];
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0)
+        + gaps.reduce((sum, gap) => sum + gap, 0);
+    let cursorX = -totalWidth / 2;
+
+    widths.forEach((width, index) => {
+        addBox(
+            root,
+            new Vector3(cursorX + width / 2, height / 2, centerZ),
+            new Vector3(width, height, depth),
+            materials[index % materials.length],
+        );
+        cursorX += width + (gaps[index] ?? 0);
+    });
+}
+
 // 创建一个斜坡
 function createRamp(root, position, angleDeg, material) {
     const length = 3.4;
@@ -347,7 +499,7 @@ function createRamp(root, position, angleDeg, material) {
     return ramp;
 }
 
-// 添加盒体碰撞物
+// 创建斜坡碰撞几何体。
 function createRampGeometry(length, height, width) {
     const halfLength = length / 2;
     const halfWidth = width / 2;
@@ -397,17 +549,11 @@ function enableModelShadows(root) {
 function animate() {
     sunDebugHelper?.update();
     sunShadowCameraHelper?.update();
-    if (legIKEnabled) legIK?.restore();
     if (player) {
-        player.update()
+        player.update();
     } else {
         controls.update();
     }
-    const delta = player?.currentDelta ?? 1 / 60;
-    if (legIKEnabled) {
-        legIK?.update(player?.currentDelta ?? delta);
-    }
-    legIK?.updateSoleSampleDebug();
     updateFootPhasePanel();
     renderer.render(scene, camera);
     stats?.update();
@@ -415,9 +561,9 @@ function animate() {
 
 // 更新脚步相位调试面板
 function updateFootPhasePanel() {
-    if (!debugParams || !legIK || !debugParams.footPhaseDebug) return;
-    debugParams.leftFootPhase = legIK.getFootPhaseDebugText("left");
-    debugParams.rightFootPhase = legIK.getFootPhaseDebugText("right");
+    if (!debugParams || !footIK || !debugParams.footPhaseDebug) return;
+    debugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
+    debugParams.rightFootPhase = footIK.getFootPhaseDebugText("right");
 }
 
 // 鼠标右键慢动作
