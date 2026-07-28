@@ -225,8 +225,6 @@ function createDebugPanel() {
         // 显示玩家胶囊碰撞体
         playerDebug: false,
 
-        // 骨盆最大下沉距离
-        maxPelvisDrop: options.maxPelvisDrop ?? 20,
         // 虚拟脚底左右半宽
         soleHalfWidth: options.soleHalfWidth ?? 7,
         // 脚尖采样点向前延伸
@@ -235,30 +233,6 @@ function createDebugPanel() {
         soleHeelExtend: options.soleHeelExtend ?? 3,
         // 脚骨到鞋底蒙皮厚度补偿（贴地时额外上抬，避免鞋底陷入地面）
         soleSkinThickness: options.soleSkinThickness ?? 3,
-        // 脚掌贴合地面法线权重（0~1）
-        footAlignWeight: options.footAlignWeight ?? 1,
-        // 脚掌最大倾斜角（度）
-        maxFootTiltDeg: ((options.maxFootTilt ?? Math.PI / 2) * 180) / Math.PI,
-        // 膝盖最小弯曲角（度）
-        minKneeBendDeg: ((options.minKneeBend ?? (2 * Math.PI) / 180) * 180) / Math.PI,
-        // 膝盖最大弯曲角（度）
-        maxKneeBendDeg: ((options.maxKneeBend ?? (145 * Math.PI) / 180) * 180) / Math.PI,
-        // 移动时脚底穿透上抬触发阈值
-        moveLiftThreshold: options.moveLiftThreshold ?? 0.1,
-        // mesh 台阶视觉补偿最大下拽
-        maxMeshStepDrop: options.maxMeshStepDrop ?? 36,
-        // mesh 台阶视觉补偿最大上抬
-        maxMeshStepRaise: options.maxMeshStepRaise ?? 36,
-        // 双脚判定为同一支撑平面的最大高度差
-        meshStepCoplanarThreshold: options.meshStepCoplanarThreshold ?? 8,
-        // 单个移动动画的脚步相位采样数
-        footPhaseSampleCount: options.footPhaseSampleCount ?? 96,
-        // 脚步相位接地高度阈值
-        footPhaseGroundThreshold: options.footPhaseGroundThreshold ?? 5,
-        // 最短接触段占动画周期的比例
-        footPhaseMinContactRatio: options.footPhaseMinContactRatio ?? 0.04,
-        // 支撑脚水平速度过滤倍率
-        footPhaseSpeedSlack: options.footPhaseSpeedSlack ?? 1.35,
     };
     debugParams = params;
 
@@ -321,54 +295,6 @@ function createDebugPanel() {
         applyFootIKOptions({ soleSkinThickness: value });
     });
     soleFolder.open();
-
-    const ikFolder = gui.addFolder("IK Solve");
-    ikFolder.add(params, "maxPelvisDrop", 0, 80, 0.1).name("Max Pelvis Drop").onChange(value => {
-        applyFootIKOptions({ maxPelvisDrop: value });
-    });
-    ikFolder.add(params, "footAlignWeight", 0, 1, 0.01).name("Foot Align Weight").onChange(value => {
-        applyFootIKOptions({ footAlignWeight: value });
-    });
-    ikFolder.add(params, "maxFootTiltDeg", 0, 90, 0.5).name("Max Foot Tilt °").onChange(value => {
-        applyFootIKOptions({ maxFootTilt: (value * Math.PI) / 180 });
-    });
-    ikFolder.add(params, "minKneeBendDeg", 0, 60, 0.5).name("Min Knee Bend °").onChange(value => {
-        applyFootIKOptions({ minKneeBend: (value * Math.PI) / 180 });
-    });
-    ikFolder.add(params, "maxKneeBendDeg", 60, 179, 0.5).name("Max Knee Bend °").onChange(value => {
-        applyFootIKOptions({ maxKneeBend: (value * Math.PI) / 180 });
-    });
-    ikFolder.add(params, "moveLiftThreshold", 0, 4, 0.01).name("Move Lift Threshold").onChange(value => {
-        applyFootIKOptions({ moveLiftThreshold: value });
-    });
-    ikFolder.open();
-
-    const stepFolder = gui.addFolder("Mesh Step Offset");
-    stepFolder.add(params, "maxMeshStepDrop", 0, 100, 0.1).name("Max Drop").onChange(value => {
-        applyFootIKOptions({ maxMeshStepDrop: value });
-    });
-    stepFolder.add(params, "maxMeshStepRaise", 0, 100, 0.1).name("Max Raise").onChange(value => {
-        applyFootIKOptions({ maxMeshStepRaise: value });
-    });
-    stepFolder.add(params, "meshStepCoplanarThreshold", 0, 40, 0.1).name("Coplanar Threshold").onChange(value => {
-        applyFootIKOptions({ meshStepCoplanarThreshold: value });
-    });
-    stepFolder.open();
-
-    const phaseFolder = gui.addFolder("Foot Phase");
-    phaseFolder.add(params, "footPhaseSampleCount", 16, 256, 1).name("Sample Count").onFinishChange(value => {
-        applyFootIKOptions({ footPhaseSampleCount: value });
-    });
-    phaseFolder.add(params, "footPhaseGroundThreshold", 0, 20, 0.1).name("Ground Threshold").onFinishChange(value => {
-        applyFootIKOptions({ footPhaseGroundThreshold: value });
-    });
-    phaseFolder.add(params, "footPhaseMinContactRatio", 0, 0.3, 0.001).name("Min Contact Ratio").onFinishChange(value => {
-        applyFootIKOptions({ footPhaseMinContactRatio: value });
-    });
-    phaseFolder.add(params, "footPhaseSpeedSlack", 0, 3, 0.01).name("Speed Slack").onFinishChange(value => {
-        applyFootIKOptions({ footPhaseSpeedSlack: value });
-    });
-    phaseFolder.open();
 }
 
 // 更新天空太阳方向。
