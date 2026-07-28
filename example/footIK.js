@@ -131,19 +131,23 @@ async function init() {
         camLookAtHeightRatio: 0.5,
         enableSpringCamera: true,
         playerModelConfig: {
-            // url: "./glb/person6.glb",
-            // scale: 0.005,
+            // url: "./glb/person3.glb",
+            // scale: 0.01,
             // idleAnim: "idle",
             // walkAnim: "walk",
             // runAnim: "run",
             // jumpAnim: "jump",
+            // speed: 150,
+            // runSpeed: 600,
+
             // url: "./glb/person1.glb",
             // scale: 0.005,
             // idleAnim: "idle1",
             // walkAnim: "walk",
             // runAnim: "run",
             // jumpAnim: "jump",
-            // headBoneName: "mixamorigHead",
+            // speed: 160,
+            // runSpeed: 600,
 
             url: "./glb/UAL1_Standard.glb",
             scale: 0.005,
@@ -159,9 +163,9 @@ async function init() {
             flyHoverRightAnim: "flyHoverRight",
             flyHoverUpAnim: "flyHoverUp",
             flyHoverDownAnim: "flyHoverDown",
-
             speed: 100,
             runSpeed: 600,
+
             rotateY: Math.PI / 2,
         },
         // keyMap: { toggleFly: null }, // 关闭飞行
@@ -188,7 +192,7 @@ async function init() {
     };
 
     footIK = new FootIK({
-        skeleton,
+        // skeleton,
         soleSkinThickness: 1.6,
     });
     player.use(footIK);
