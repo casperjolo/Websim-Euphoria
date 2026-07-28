@@ -1034,8 +1034,7 @@ export class FootIK {
     /**
      * 运行时更新部分配置。
      * 距离类参数传入 scale=1 基准值，内部会乘以当前 playerModelConfig.scale。
-     * `skeleton` 需重新挂载模型后才会生效；sole 尺寸变化会重建本地采样点，
-     * 脚步相位相关参数变化会重建相位库。
+     * sole 尺寸变化会重建本地采样点，脚步相位相关参数变化会重建相位库。
      */
     configure(options: Partial<FootIKOptions>): void {
         if (this.disposed) return;

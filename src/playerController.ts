@@ -1220,6 +1220,7 @@ export class playerController {
 
         // 卸载插件
         for (const plugin of this.plugins.slice()) {
+            this.unuse(plugin);
             plugin.dispose?.();
         }
         this.plugins = [];
