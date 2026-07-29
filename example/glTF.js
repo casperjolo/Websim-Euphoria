@@ -147,39 +147,15 @@ const PLAYER_MODELS = {
     },
 };
 
-// 车辆配置
-const VEHICLE_CONFIGS = {
-    bugatti: {
-        url: "./glb/bugatti.glb",
-        scale: 0.1,
-        wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-        openDoorAnim: "openDoorLF",
-        boardingPoint: new Vector3(0.6, 0, 1.8),
-        seatOffset: new Vector3(0, 0.65, 0),
-        chassisRatio: 0.15,
-        suspensionRestLengthRatio: 0.2,
-    },
-    landRover: {
-        url: "./glb/landRover.glb",
-        scale: 0.08,
-        wheelsNames: ["WheelFL", "WheelFR", "WheelBL", "WheelBR"],
-        openDoorAnim: "opendoor",
-        boardingPoint: new Vector3(0.95, 0, 2.15),
-        seatOffset: new Vector3(0, 0.75, 0),
-        chassisRatio: 0.4,
-        suspensionRestLengthRatio: 0.2,
-    },
-    tesla: {
-        url: "./glb/tesla2.glb",
-        scale: 0.09,
-        wheelsNames: ["WHEEL_LF", "WHEEL_RF", "WHEEL_LR", "WHEEL_RR"],
-        openDoorAnim: "opendoor",
-        boardingPoint: new Vector3(1, 0, 1.9),
-        seatOffset: new Vector3(0.1, 0.6, 0),
-        chassisRatio: 0.4,
-        suspensionRestLengthRatio: 0.2,
-        followVehicleDirection: false,
-    },
+// 车辆配置（Generic Sedan Car by MMC Works, CC BY 4.0）
+const VEHICLE_CONFIG = {
+    url: "./glb/sedan.glb",
+    scale: 0.09,
+    wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
+    boardingPoint: new Vector3(0.6, 0, 1.9),
+    seatOffset: new Vector3(0.35, 0.65, 0.0),
+    chassisRatio: 0.35,
+    suspensionRestLengthRatio: 0.2,
 };
 
 init();
@@ -228,11 +204,6 @@ function recreateCSM(scale) {
 function getScaledModel(key) {
     const m = PLAYER_MODELS[key];
     return { ...m, scale: m.scale * globalScale };
-}
-
-function getScaledVehicle(key) {
-    const v = VEHICLE_CONFIGS[key];
-    return { ...v, scale: v.scale * globalScale };
 }
 
 // 创建动态平台
@@ -728,7 +699,6 @@ function initGUI() {
 
     const params = {
         playerModel: "Josh",
-        vehicleType: "bugatti",
         showFPS: true,
         showShadow: false,
         mouseSensitivity: 5,
@@ -751,9 +721,62 @@ function initGUI() {
         camOverShoulderOffsetRatio: 0.2,
         centerRaycast: false,
         showSkeleton: false,
+        pathPlannerDebug: false,
     };
 
     const defaults = { ...params };
+
+    const setPathPlannerDebug = (enabled) => {
+        player.getAllVehicles().forEach((v) => {
+            v.pathPlanner?.updateConfig({ debugEnabled: enabled });
+            if (!enabled) v.pathPlanner?.clearVisualization();
+        });
+    };
+
+    const spawnController = gui.add(
+        {
+            spawn: async () => {
+                if (player.getAllVehicles().length >= 5) {
+                    alert("For performance reasons, the demo supports a maximum of 5 vehicles.");
+                    return;
+                }
+
+                const playerPos = player.getPosition();
+
+                // 取相机朝向的水平分量，沿该方向偏移生成车辆
+                const camDir = new Vector3();
+                camera.getWorldDirection(camDir);
+                camDir.y = 0;
+                camDir.normalize();
+
+                const spawnPos = playerPos.clone().addScaledVector(camDir, 0.5);
+                spawnPos.y = playerPos.y;
+
+                await player.loadVehicleModel({
+                    ...VEHICLE_CONFIG,
+                    scale: VEHICLE_CONFIG.scale * globalScale,
+                    position: spawnPos,
+                });
+                const spawned = player.getAllVehicles().at(-1);
+                spawned?.pathPlanner?.updateConfig({ debugEnabled: params.pathPlannerDebug });
+                spawned?.vehicleGroup?.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        setupCSMMaterial(child.material);
+                        // 设置金属材质
+                        child.material.metalness = 0.8;
+                        child.material.roughness = 0.0;
+                    }
+                });
+            },
+        },
+        "spawn"
+    ).name("Spawn Vehicle");
+
+    ["pointerdown", "mousedown", "click"].forEach((type) => {
+        spawnController.domElement.addEventListener(type, (e) => e.stopPropagation());
+    });
 
     gui.add(params, "playerModel", Object.keys(PLAYER_MODELS))
         .name("Player Model")
@@ -784,54 +807,6 @@ function initGUI() {
             }
         });
 
-    const vehicleFolder = gui.addFolder("Add Vehicle");
-    ["pointerdown", "mousedown", "click"].forEach((type) => {
-        vehicleFolder.domElement.addEventListener(type, (e) => e.stopPropagation());
-    });
-
-    vehicleFolder.add(params, "vehicleType", Object.keys(VEHICLE_CONFIGS)).name("Vehicle Type");
-
-    const spawnController = vehicleFolder.add(
-        {
-            spawn: async () => {
-                if (player.getAllVehicles().length >= 5) {
-                    alert("For performance reasons, the demo supports a maximum of 5 vehicles.");
-                    return;
-                }
-
-                const cfg = VEHICLE_CONFIGS[params.vehicleType];
-                if (!cfg) return;
-                const playerPos = player.getPosition();
-
-                // 取相机朝向的水平分量，沿该方向偏移生成车辆
-                const camDir = new Vector3();
-                camera.getWorldDirection(camDir);
-                camDir.y = 0;
-                camDir.normalize();
-
-                const spawnPos = playerPos.clone().addScaledVector(camDir, 0.5);
-                spawnPos.y = playerPos.y;
-
-                await player.loadVehicleModel({ ...getScaledVehicle(params.vehicleType), position: spawnPos });
-                player.getAllVehicles().at(-1)?.vehicleGroup?.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                        setupCSMMaterial(child.material);
-                        // 设置金属材质
-                        child.material.metalness = 0.8;
-                        child.material.roughness = 0.0;
-                    }
-                });
-            },
-        },
-        "spawn"
-    ).name("Spawn Vehicle");
-
-    ["pointerdown", "mousedown", "click"].forEach((type) => {
-        spawnController.domElement.addEventListener(type, (e) => e.stopPropagation());
-    });
-
     gui.add(params, "showFPS").name("Show FPS").onChange((v) => stats.dom.style.display = v ? "block" : "none");
     gui.add(params, "showShadow").name("Show Shadow").onChange((v) => {
         renderer.shadowMap.enabled = v;
@@ -858,6 +833,8 @@ function initGUI() {
     gui.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).onChange((v) => player.setThirdMouseMode(Number(v)));
     gui.add(params, "enableZoom").onChange((v) => player.setEnableZoom(v));
     gui.add(params, "debug").onChange((v) => player.setDebug(v));
+    gui.add(params, "pathPlannerDebug").name("Path Planner Debug")
+        .onChange((v) => setPathPlannerDebug(v));
     gui.add(params, "enableOverShoulderView").onChange((v) => player.setOverShoulderView(v));
     gui.add(params, "centerRaycast").name("Center Raycast Debug")
         .onChange((v) => { if (!v) raycastSphere.visible = false; });
@@ -882,6 +859,7 @@ function initGUI() {
                 player.setThirdMouseMode(defaults.thirdMouseMode);
                 player.setEnableZoom(defaults.enableZoom);
                 player.setDebug(defaults.debug);
+                setPathPlannerDebug(defaults.pathPlannerDebug);
                 player.setOverShoulderView(defaults.enableOverShoulderView);
                 player.setCamOverShoulderOffsetRatio(defaults.camOverShoulderOffsetRatio);
                 raycastSphere.visible = false;

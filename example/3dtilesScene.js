@@ -133,7 +133,13 @@ async function initPlayer() {
     renderer.render(scene, camera);
 
     // 加载碰撞体
-    const colliderGltf = await new GLTFLoader().loadAsync("./glb/EiffelCollider.glb");
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath("https://unpkg.com/three@0.153.0/examples/jsm/libs/draco/gltf/");
+    const gltfLoader = new GLTFLoader();
+    gltfLoader.setDRACOLoader(dracoLoader);
+    const colliderGltf = await gltfLoader.loadAsync("./glb/EiffelCollider.glb");
+    // collider-forge(ENU) 与 ReorientationPlugin(OBJECT_FRAME) 绕竖直轴差 180°
+    colliderGltf.scene.rotation.y = Math.PI;
 
     // 初始化玩家控制器
     player = new playerController();
@@ -153,9 +159,8 @@ async function initPlayer() {
             enterCarAnim: "enterCar",
             exitCarAnim: "exitCar",
             headBoneName: "mixamorigHead",
-            rotateY: Math.PI,
         },
-        initPos: new Vector3(100, 100, 100),
+        initPos: new Vector3(105.96, 81.25, 62.92),
         minCamDistance: 50,
         maxCamDistance: 250,
         staticCollider: colliderGltf.scene,
@@ -166,22 +171,24 @@ async function initPlayer() {
     initRegionCull();
 
     await player.loadVehicleModel({
-        url: "./glb/tesla.glb",
+        position: new Vector3(101.96, 81.25, 62.92),
+        url: "./glb/sedan.glb",
         scale: 0.9,
-        position: new Vector3(80, 80, 80),
-        wheelsNames: [
-            "WHEEL_LF", // 前左
-            "WHEEL_RF", // 前右
-            "WHEEL_LR", // 后左
-            "WHEEL_RR", // 后右
-        ],
-        openDoorAnim: "opendoor",
-        boardingPoint: new Vector3(1, 0, 1.9),
-        seatOffset: new Vector3(0.1, 0.5, 0),
-        chassisRatio: 0.4,
+        wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
+        boardingPoint: new Vector3(0.6, 0, 1.9),
+        seatOffset: new Vector3(0.35, 0.65, 0.0),
+        chassisRatio: 0.35,
         suspensionRestLengthRatio: 0.2,
         followVehicleDirection: false,
         speedMultiplier: 1.5,
+    });
+
+    const vehicle = player.getAllVehicles().at(-1);
+    vehicle?.vehicleGroup?.traverse((child) => {
+        if (child.isMesh) {
+            child.material.metalness = 0.8;
+            child.material.roughness = 0.0;
+        }
     });
 }
 
@@ -232,6 +239,7 @@ function animate() {
             nearRegion.sphere.center.copy(pos).applyMatrix4(tiles.group.matrixWorldInverse);
             farRegion.sphere.center.copy(pos).applyMatrix4(tiles.group.matrixWorldInverse);
         }
+        console.log(player.getPosition());  
     }
 
     renderer.render(scene, camera);
