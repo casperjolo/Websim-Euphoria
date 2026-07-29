@@ -1014,7 +1014,7 @@ async function initPlayer() {
         camera,
         controls,
         playerModelConfig: {
-            url: "./glb/UAL1_Standard.glb",
+            url: "./glb/ual.glb",
             scale: 0.01,
             idleAnim: "Idle_Loop",
             walkAnim: "Walk_Loop",

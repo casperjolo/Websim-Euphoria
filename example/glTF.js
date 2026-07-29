@@ -68,7 +68,7 @@ const CSM_BASE = { maxFar: 30, lightNear: 0.1, lightFar: 50, lightMargin: 30, li
 const previewRaycaster = new Raycaster();
 const previewMouse = new Vector2();
 
-const modelUrl = "./glb/burnout_revenge_-_central_route_crash_junction.glb";
+const modelUrl = "./glb/crash_junction.glb";
 const pos = new Vector3(21.5, 4, 15);
 
 // 人物模型配置
@@ -97,8 +97,8 @@ function setPositionOnXPath(mesh, progress) {
 }
 
 const PLAYER_MODELS = {
-    Josh: {
-        url: "./glb/Josh.glb",
+    josh: {
+        url: "./glb/josh.glb",
         scale: 0.001,
         idleAnim: "idle1",
         walkAnim: "walk",
@@ -111,8 +111,8 @@ const PLAYER_MODELS = {
         headBoneName: "mixamorigHead",
         rotateY: Math.PI,
     },
-    Maw_J_Laygo: {
-        url: "./glb/Maw_J_Laygo.glb",
+    maw: {
+        url: "./glb/maw.glb",
         scale: 0.005,
         idleAnim: "idle",
         walkAnim: "walk",
@@ -125,8 +125,8 @@ const PLAYER_MODELS = {
         headBoneName: "mixamorigHead",
         rotateY: Math.PI,
     },
-    UAL1_Standard: {
-        url: "./glb/UAL1_Standard.glb",
+    ual: {
+        url: "./glb/ual.glb",
         scale: 0.001,
         idleAnim: "Idle_Loop",
         walkAnim: "Walk_Loop",
@@ -142,7 +142,6 @@ const PLAYER_MODELS = {
         flyHoverDownAnim: "flyHoverDown",
         headBoneName: "Head",
         rotateY: Math.PI,
-        headBoneName: "Head",
         firstPersonCameraOffset: [0, 0.15, 0.12],
     },
 };
@@ -329,7 +328,7 @@ async function init() {
 
     // 背景
     new HDRLoader().load(
-        "./img/1.hdr",
+        "./img/env.hdr",
         (texture) => {
             texture.mapping = EquirectangularReflectionMapping;
             scene.background = texture;
@@ -368,7 +367,7 @@ async function init() {
         scene,
         camera,
         controls,
-        playerModelConfig: PLAYER_MODELS.Josh,
+        playerModelConfig: PLAYER_MODELS.josh,
         initPos: pos,
         minCamDistance: 50,
         maxCamDistance: 220,
@@ -484,7 +483,7 @@ async function replaceScene(file) {
     currentBlobUrl = blobUrl;
 
     // 进入预览模式
-    await enterPreviewMode(guiParams?.playerModel ?? "Josh");
+    await enterPreviewMode(guiParams?.playerModel ?? "josh");
 }
 
 // 进入预览模式
@@ -602,7 +601,7 @@ function onPreviewMouseMove(e) {
 async function onPreviewDblClick() {
     if (!previewMode || !previewMesh?.visible) return;
     const initPos = previewMesh.position.clone();
-    const spawnModel = getScaledModel(guiParams?.playerModel ?? "Josh");
+    const spawnModel = getScaledModel(guiParams?.playerModel ?? "josh");
     initPos.y += 180 * spawnModel.scale * 0.75;
     exitPreviewMode();
 
@@ -613,7 +612,7 @@ async function onPreviewDblClick() {
         scene,
         camera,
         controls,
-        playerModelConfig: getScaledModel(guiParams?.playerModel ?? "Josh"),
+        playerModelConfig: getScaledModel(guiParams?.playerModel ?? "josh"),
         initPos,
         minCamDistance: 50,
         maxCamDistance: 220,
@@ -698,7 +697,7 @@ function initGUI() {
     gui.add({ upload: () => uploadInput.click() }, "upload").name("Change Scene (.glb/.gltf)");
 
     const params = {
-        playerModel: "Josh",
+        playerModel: "josh",
         showFPS: true,
         showShadow: false,
         mouseSensitivity: 5,
@@ -787,7 +786,7 @@ function initGUI() {
                     child.castShadow = true;
                     child.receiveShadow = true;
                     setupCSMMaterial(child.material);
-                    if (v == "UAL1_Standard") {
+                    if (v == "ual") {
                         child.material.metalness = 0.8;
                         child.material.roughness = 0.0;
                     }

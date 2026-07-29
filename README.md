@@ -11,23 +11,7 @@
 
 # 示例
 
-[![在线示例](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.jpg)](https://hh-hang.github.io/three-player-controller/index.html)
-
-### 普通控制
-
-![普通控制演示](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/standard.gif)
-
-### 飞行控制
-
-![飞行控制演示](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/flight.gif)
-
-### 车辆控制
-
-![车辆控制演示](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/vehicle.gif)
-
-### 移动端控制
-
-![移动端控制演示](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/mobile.gif)
+[![在线示例](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.png)](https://hh-hang.github.io/three-player-controller/index.html)
 
 # 安装
 

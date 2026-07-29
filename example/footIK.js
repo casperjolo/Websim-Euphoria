@@ -131,7 +131,7 @@ async function init() {
         camLookAtHeightRatio: 0.5,
         enableSpringCamera: true,
         playerModelConfig: {
-            // url: "./glb/Maw_J_Laygo.glb",
+            // url: "./glb/maw.glb",
             // scale: 0.01,
             // idleAnim: "idle",
             // walkAnim: "walk",
@@ -140,7 +140,7 @@ async function init() {
             // speed: 150,
             // runSpeed: 600,
 
-            // url: "./glb/Josh.glb",
+            // url: "./glb/josh.glb",
             // scale: 0.005,
             // idleAnim: "idle1",
             // walkAnim: "walk",
@@ -149,7 +149,7 @@ async function init() {
             // speed: 160,
             // runSpeed: 600,
 
-            url: "./glb/UAL1_Standard.glb",
+            url: "./glb/ual.glb",
             scale: 0.005,
             idleAnim: "Idle_Loop",
             walkAnim: "Walk_Loop",

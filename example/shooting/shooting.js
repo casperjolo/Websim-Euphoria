@@ -18,9 +18,9 @@ const initPos = new THREE.Vector3(33.21, 4.6, 2.6);
 
 const NORMAL_MAX_CAM = 220;
 const MOUSE_SENSITIVITY = 5;
-const PLAYER_MODEL_URL = base + "./glb/Swat.glb";
+const PLAYER_MODEL_URL = base + "./glb/swat.glb";
 const FIRST_PERSON_PITCH_OFFSET_BY_MODEL = {
-    [base + "./glb/Swat.glb"]: Math.PI * (16 / 180),
+    [base + "./glb/swat.glb"]: Math.PI * (16 / 180),
 };
 
 async function init() {
@@ -182,7 +182,7 @@ async function init() {
 
     // ==================== 7. 弹痕系统 ====================
     const decalSystem = new DecalSystem(scene, 60, 0.25);
-    await decalSystem.loadMaterials(["img/bullet_hole2.png"], base);
+    await decalSystem.loadMaterials(["img/bullet_hole.png"], base);
 
     // ==================== 8. 丧尸管理器 ====================
     zombieManager = new ZombieManager(scene, {

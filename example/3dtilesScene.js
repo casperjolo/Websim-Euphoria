@@ -73,7 +73,7 @@ async function init() {
 
     // 背景
     new HDRLoader().load(
-        "./img/1.hdr",
+        "./img/env.hdr",
         (texture) => {
             texture.mapping = EquirectangularReflectionMapping;
             scene.background = texture;
@@ -137,7 +137,7 @@ async function initPlayer() {
     dracoLoader.setDecoderPath("https://unpkg.com/three@0.153.0/examples/jsm/libs/draco/gltf/");
     const gltfLoader = new GLTFLoader();
     gltfLoader.setDRACOLoader(dracoLoader);
-    const colliderGltf = await gltfLoader.loadAsync("./glb/EiffelCollider.glb");
+    const colliderGltf = await gltfLoader.loadAsync("./glb/eiffel_collider.glb");
     // collider-forge(ENU) 与 ReorientationPlugin(OBJECT_FRAME) 绕竖直轴差 180°
     colliderGltf.scene.rotation.y = Math.PI;
 
@@ -148,7 +148,7 @@ async function initPlayer() {
         camera,
         controls,
         playerModelConfig: {
-            url: "./glb/Josh.glb",
+            url: "./glb/josh.glb",
             scale: 0.01,
             idleAnim: "idle1",
             walkAnim: "walk",
@@ -165,7 +165,6 @@ async function initPlayer() {
         maxCamDistance: 250,
         staticCollider: colliderGltf.scene,
         thirdMouseMode: 1,
-        enableOverShoulderView: true,
     });
 
     initRegionCull();

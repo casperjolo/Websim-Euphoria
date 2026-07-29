@@ -11,23 +11,7 @@ A lightweight player controller for three.js, ready out of the box. It provides 
 
 # Demo
 
-[![Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.jpg)](https://hh-hang.github.io/three-player-controller/index.html)
-
-### Standard Control
-
-![Standard Control Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/standard.gif)
-
-### Flight Control
-
-![Flight Control Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/flight.gif)
-
-### Vehicle Control
-
-![Vehicle Control Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/vehicle.gif)
-
-### Mobile Control
-
-![Mobile Control Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/mobile.gif)
+[![Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.png)](https://hh-hang.github.io/three-player-controller/index.html)
 
 # Installation
 

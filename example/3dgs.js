@@ -67,7 +67,7 @@ async function init() {
 
     // 背景
     new HDRLoader().load(
-        "./img/1.hdr",
+        "./img/env.hdr",
         (texture) => {
             texture.mapping = EquirectangularReflectionMapping;
             scene.background = texture;
@@ -101,7 +101,7 @@ async function init() {
     scene.add(splat);
 
     // 加载碰撞体
-    const colliderGltf = await gltfLoader.loadAsync("./glb/3dgsCollider.glb");
+    const colliderGltf = await gltfLoader.loadAsync("./glb/3dgs_collider.glb");
 
     // 人物控制器
     player = new playerController();
@@ -110,7 +110,7 @@ async function init() {
         camera,
         controls,
         playerModelConfig: {
-            url: "./glb/Josh.glb",
+            url: "./glb/josh.glb",
             scale: scaleNormal,
             idleAnim: "idle1",
             walkAnim: "walk",
