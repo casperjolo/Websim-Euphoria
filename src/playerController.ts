@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { MeshBVH, BVHHelper, acceleratedRaycast } from "three-mesh-bvh";
-import type { GLTF } from "three/examples/jsm/Addons.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
@@ -27,8 +26,15 @@ function isMobileDevice() {
 export class playerController {
 
     // ==================== 场景引用 ====================
+    /** GLTF加载器缓存。 */
+    private _loader: GLTFLoader | null = null;
     /** GLTF加载器。 */
-    loader: GLTFLoader = new GLTFLoader();
+    get loader(): GLTFLoader {
+        return this.initLoader();
+    }
+    set loader(loader: GLTFLoader) {
+        this._loader = loader;
+    }
     /** 三维场景。 */
     scene!: THREE.Scene;
     /** 透视相机。 */
@@ -267,9 +273,8 @@ export class playerController {
             await this.mobileControls.init(opts.mobileControls);
         }
 
-        await this.initLoader();
         this.buildStaticCollider(opts.staticCollider);
-        await this.loadPlayerModelGLB();
+        await this.loadPlayerModel();
 
         // 初始化时注册动态碰撞体
         if (opts.dynamicCollider) {
@@ -285,23 +290,39 @@ export class playerController {
     }
 
     /** 初始化加载器。 */
-    private async initLoader() {
+    private initLoader(): GLTFLoader {
+        if (this._loader) return this._loader;
+
+        const loader = new GLTFLoader();
         const dracoLoader = new DRACOLoader();
         dracoLoader.setDecoderPath("https://unpkg.com/three@0.182.0/examples/jsm/libs/draco/gltf/");
-        this.loader.setDRACOLoader(dracoLoader);
+        loader.setDRACOLoader(dracoLoader);
+        this._loader = loader;
+        return loader;
     }
 
     // ==================== 玩家模型 ====================
 
     /** 加载模型与动画。 */
-    private async loadPlayerModelGLB() {
+    private async loadPlayerModel() {
         try {
-            const gltf = await this.loader.loadAsync(this.playerModelConfig.url) as GLTF;
-            this.playerModel = gltf.scene;
+            const config = this.playerModelConfig;
+            let model: THREE.Object3D;
+            let animations: THREE.AnimationClip[];
+
+            if (config.model) {
+                model = config.model;
+                animations = config.animations;
+            } else {
+                const gltf = await this.loader.loadAsync(config.url);
+                model = gltf.scene;
+                animations = gltf.animations ?? [];
+            }
+
+            this.playerModel = model;
 
             // 初始化动画混合器
             this.animation.mixer = new THREE.AnimationMixer(this.playerModel);
-            const animations = gltf.animations ?? [];
             this.animation.clips = animations;
             this.animation.actions = new Map();
 
@@ -315,9 +336,9 @@ export class playerController {
                 [mc.leftWalkAnim || mc.walkAnim, "left_walking"],
                 [mc.rightWalkAnim || mc.walkAnim, "right_walking"],
                 [mc.backwardAnim || mc.walkAnim, "walking_backward"],
-                ...(isThreePartJump
-                    ? [] as [string, string][]
-                    : [[mc.jumpAnim as string, "jumping"]] as [string, string][]),
+                ...(typeof mc.jumpAnim === "string"
+                    ? [[mc.jumpAnim, "jumping"]] as [string, string][]
+                    : [] as [string, string][]),
                 [mc.runAnim, "running"],
                 [mc.flyIdleAnim || mc.idleAnim, "flyidle"],
                 [mc.flyAnim || mc.idleAnim, "flying"],
@@ -349,8 +370,8 @@ export class playerController {
             }
 
             // 注册三段跳跃动画
-            if (isThreePartJump) {
-                const [startClip, loopClip, endClip] = mc.jumpAnim as [string, string, string];
+            if (Array.isArray(mc.jumpAnim)) {
+                const [startClip, loopClip, endClip] = mc.jumpAnim;
                 const jumpDefs: [string, string, number, boolean][] = [
                     [startClip, "jumpStart", THREE.LoopOnce, true],
                     [loopClip, "jumpLoop", THREE.LoopRepeat, false],
@@ -482,7 +503,13 @@ export class playerController {
 
         // 更新比例相关参数
         const ratio = newPlayerModel.scale / this.playerModelConfig.scale;
-        this.playerModelConfig = { ...this.playerModelConfig, ...newPlayerModel };
+        this.playerModelConfig = {
+            ...this.playerModelConfig,
+            url: undefined,
+            model: undefined,
+            animations: undefined,
+            ...newPlayerModel,
+        } as PlayerModelOptions;
 
         this.gravity *= ratio;
         this.jumpHeight *= ratio;
@@ -495,7 +522,7 @@ export class playerController {
         this.cam.maxDist *= ratio;
         this.cam.originMaxDist *= ratio;
 
-        await this.loadPlayerModelGLB();
+        await this.loadPlayerModel();
         this.playerCapsule.position.copy(savedPos);
         this.playerCapsule.quaternion.copy(savedQuat);
         if (wasFirstPerson) this.cam.setFirstPerson();

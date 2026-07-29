@@ -4,10 +4,34 @@ import type { PathPlanner } from "../utils/pathPlanner";
 
 // ==================== 玩家配置 ====================
 
-/** 玩家模型、动画和移动参数。 */
-export type PlayerModelOptions = {
-    /** 模型路径（GLB/GLTF）。 */
+/** 已加载的玩家模型来源。 */
+export type LoadedPlayerModelSource = {
+    /** 已加载的模型根节点。 */
+    model: THREE.Object3D;
+    /** 模型使用的动画片段。 */
+    animations: THREE.AnimationClip[];
+    /** 已加载模型与旧模型路径不能同时使用。 */
+    url?: never;
+};
+
+/** 旧版 glTF 玩家模型来源。 */
+export type LegacyPlayerModelSource = {
+    /**
+     * 模型路径（GLB/GLTF）。
+     * @deprecated 请在外部加载模型，并传入 model 和 animations。
+     */
     url: string;
+    /** 模型路径与已加载模型不能同时使用。 */
+    model?: never;
+    /** 模型路径与外部动画片段不能同时使用。 */
+    animations?: never;
+};
+
+/** 玩家模型来源。 */
+export type PlayerModelSource = LoadedPlayerModelSource | LegacyPlayerModelSource;
+
+/** 玩家模型、动画和移动参数。 */
+export type PlayerModelOptions = PlayerModelSource & {
     /** 模型缩放。 */
     scale: number;
     /** 静止动画名。 */
