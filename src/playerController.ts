@@ -423,7 +423,10 @@ export class playerController {
                     if (this.animation.state === done) resolveGroundAnim();
                     return;
                 }
-                if (done === this.animation.actions?.get("enterCar")) this.vehicle.onEnterAnimFinished();
+                if (done === this.animation.actions?.get("enterCar")) {
+                    if (this.vehicle.isBoardingAnim) this.vehicle.onEnterAnimFinished();
+                    return;
+                }
             };
             this.animation.mixer.addEventListener("finished", this.animation.mixerCb);
 

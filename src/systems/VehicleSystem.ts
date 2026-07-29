@@ -114,6 +114,11 @@ export class VehicleSystem {
         }
     }
 
+    /** 当前车辆是否配置了开门动画。 */
+    hasOpenDoorAnim(v: VehicleInstance | null = this.active) {
+        return !!v?.vehicleActions?.get("openDoor");
+    }
+
     // 控制车门开关
     openDoor(isOpen = true) {
         const v = this.active;
@@ -227,12 +232,22 @@ export class VehicleSystem {
             this.targetDir = null;
             v.pathPlanner?.clearVisualization();
 
+            c.playerCapsule.rotation.copy(v.vehicleGroup.rotation);
+            c.playerCapsule.quaternion.multiply(this.flip180);
+
+            // 无开门动画：跳到上车末帧并直接入座，避免穿模爬车
+            if (!this.hasOpenDoorAnim(v)) {
+                c.animation.seekToEnd("enterCar");
+                this.isBoardingAnim = false;
+                this.doorClosed = false;
+                this.onEnterAnimFinished();
+                return;
+            }
+
             c.animation.playByName("enterCar");
             this.isBoardingAnim = true;
             this.doorClosed = false;
             if (!v.vehiclIsOpenDoor) this.openDoor();
-            c.playerCapsule.rotation.copy(v.vehicleGroup.rotation);
-            c.playerCapsule.quaternion.multiply(this.flip180);
         }
     }
 
@@ -266,17 +281,26 @@ export class VehicleSystem {
         this.waypointIdx = 0;
         this.targetDir = null;
 
-        // 静止才播放下车动画
         const vel = v.chassisBody.linvel();
-        if (Math.sqrt(vel.x ** 2 + vel.z ** 2) < 0.1) {
+        const canPlayExit = Math.sqrt(vel.x ** 2 + vel.z ** 2) < 0.1;
+        const hasDoor = this.hasOpenDoorAnim(v);
+
+        // 静止 + 有开门动画：正常播下车；静止 + 无开门：跳到末帧；移动中：直接 idle
+        if (canPlayExit && hasDoor) {
             c.animation.playByName("exitCar");
             this.isExitAnim = true;
             this.exitDoorClosed = false;
+            this.openDoor(true);
+        } else if (canPlayExit && !hasDoor) {
+            c.animation.seekToEnd("exitCar");
+            this.isExitAnim = false;
+            this.exitDoorClosed = false;
         } else {
             c.animation.playByName("idle");
+            this.isExitAnim = false;
+            this.exitDoorClosed = false;
         }
 
-        this.openDoor(true);
         c.controllerMode = 0;
         c.mobileControls?.syncControllerModeBtn(0);
         c.cam.setOverShoulder(c.enableOverShoulderView);
@@ -284,6 +308,9 @@ export class VehicleSystem {
         if (c.isFirstPerson) c.cam.setFirstPerson();
         c.syncDebugVisibility();
         this.setTransition();
+
+        // 无完整下车动画时立刻回调，否则一直等 isExitAnim
+        if (!this.isExitAnim) c.onVehicleExit?.(v);
     }
 
     // 取消上车流程

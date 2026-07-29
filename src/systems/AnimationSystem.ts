@@ -30,6 +30,7 @@ export class AnimationSystem {
         const prev = this.state;
         next.reset();
         next.setEffectiveWeight(1);
+        next.paused = false;
 
         // 上下车动画特殊处理：根据配置的上下车时间调整动画速度
         if (name === "enterCar" || name === "exitCar") {
@@ -46,6 +47,32 @@ export class AnimationSystem {
         else next.fadeIn(fade);
 
         this.state = next;
+        this.ctrl.onAnimationChange?.(name, next);
+    }
+
+    /** 跳到指定动画末帧并定格（用于无车门动画时的上下车）。 */
+    seekToEnd(name: string) {
+        if (!this.actions || !this.mixer) return;
+        const next = this.actions.get(name);
+        if (!next) return;
+
+        const prev = this.state;
+        const duration = next.getClip().duration;
+        next.reset();
+        next.setEffectiveWeight(1);
+        next.setEffectiveTimeScale(1);
+        next.setLoop(THREE.LoopOnce, 1);
+        next.clampWhenFinished = true;
+        next.enabled = true;
+        next.play();
+        next.paused = true;
+        next.time = duration;
+        if (prev && prev !== next) {
+            prev.stop();
+            prev.setEffectiveWeight(0);
+        }
+        this.state = next;
+        this.mixer.update(0);
         this.ctrl.onAnimationChange?.(name, next);
     }
 
