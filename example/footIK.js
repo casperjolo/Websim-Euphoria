@@ -10,7 +10,7 @@ import {
     LineSegments,
     Mesh,
     MeshStandardMaterial,
-    PCFShadowMap,
+    VSMShadowMap,
     PerspectiveCamera,
     Scene,
     BufferGeometry,
@@ -54,7 +54,7 @@ async function init() {
     renderer.toneMapping = ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = PCFShadowMap;
+    renderer.shadowMap.type = VSMShadowMap;
     renderer.setAnimationLoop(animate);
     container.appendChild(renderer.domElement);
 
@@ -95,7 +95,7 @@ async function init() {
     sun.shadow.camera.right = 12;
     sun.shadow.camera.top = 10;
     sun.shadow.camera.bottom = -10;
-    sun.shadow.bias = -0.0002;
+    sun.shadow.bias = -0.0005;
     scene.add(sun);
     sky = new Sky();
     sky.scale.setScalar(450000);
@@ -131,7 +131,7 @@ async function init() {
         camLookAtHeightRatio: 0.5,
         enableSpringCamera: true,
         playerModelConfig: {
-            // url: "./glb/person3.glb",
+            // url: "./glb/Maw_J_Laygo.glb",
             // scale: 0.01,
             // idleAnim: "idle",
             // walkAnim: "walk",
@@ -140,7 +140,7 @@ async function init() {
             // speed: 150,
             // runSpeed: 600,
 
-            // url: "./glb/person1.glb",
+            // url: "./glb/Josh.glb",
             // scale: 0.005,
             // idleAnim: "idle1",
             // walkAnim: "walk",
@@ -165,6 +165,8 @@ async function init() {
             flyHoverDownAnim: "flyHoverDown",
             speed: 100,
             runSpeed: 600,
+            headBoneName: "Head",
+            firstPersonCameraOffset: [0, 0.15, 0.12],
 
             rotateY: Math.PI / 2,
         },

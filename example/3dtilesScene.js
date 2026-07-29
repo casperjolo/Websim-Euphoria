@@ -142,9 +142,9 @@ async function initPlayer() {
         camera,
         controls,
         playerModelConfig: {
-            url: "./glb/person2.glb",
+            url: "./glb/Josh.glb",
             scale: 0.01,
-            idleAnim: "idle",
+            idleAnim: "idle1",
             walkAnim: "walk",
             runAnim: "run",
             jumpAnim: "jump",

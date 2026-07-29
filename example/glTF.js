@@ -97,8 +97,8 @@ function setPositionOnXPath(mesh, progress) {
 }
 
 const PLAYER_MODELS = {
-    person1: {
-        url: "./glb/person1.glb",
+    Josh: {
+        url: "./glb/Josh.glb",
         scale: 0.001,
         idleAnim: "idle1",
         walkAnim: "walk",
@@ -111,22 +111,8 @@ const PLAYER_MODELS = {
         headBoneName: "mixamorigHead",
         rotateY: Math.PI,
     },
-    person2: {
-        url: "./glb/person2.glb",
-        scale: 0.001,
-        idleAnim: "idle1",
-        walkAnim: "walk",
-        runAnim: "run",
-        jumpAnim: "jump",
-        flyAnim: "flying",
-        flyIdleAnim: "flyidle",
-        enterCarAnim: "enterCar",
-        exitCarAnim: "exitCar",
-        headBoneName: "mixamorigHead",
-        rotateY: Math.PI,
-    },
-    person3: {
-        url: "./glb/person3.glb",
+    Maw_J_Laygo: {
+        url: "./glb/Maw_J_Laygo.glb",
         scale: 0.005,
         idleAnim: "idle",
         walkAnim: "walk",
@@ -139,13 +125,13 @@ const PLAYER_MODELS = {
         headBoneName: "mixamorigHead",
         rotateY: Math.PI,
     },
-    person4: {
-        url: "./glb/UEPerson.glb",
+    UAL1_Standard: {
+        url: "./glb/UAL1_Standard.glb",
         scale: 0.001,
-        idleAnim: "idle",
-        walkAnim: "walk",
-        runAnim: "run",
-        jumpAnim: ["jumpStart", "jumpLoop", "jumpEnd"],
+        idleAnim: "Idle_Loop",
+        walkAnim: "Walk_Loop",
+        runAnim: "Sprint_Loop",
+        jumpAnim: ["Jump_Start", "Jump_Loop", "Jump_Land"],
         flyAnim: "fly",
         flyIdleAnim: "flyIdle",
         flyHoverForwardAnim: "flyHoverForward",
@@ -154,9 +140,10 @@ const PLAYER_MODELS = {
         flyHoverRightAnim: "flyHoverRight",
         flyHoverUpAnim: "flyHoverUp",
         flyHoverDownAnim: "flyHoverDown",
-        // headBoneName: "head",
-        // firstPersonCameraOffset: [0, 0, 0],
+        headBoneName: "Head",
         rotateY: Math.PI,
+        headBoneName: "Head",
+        firstPersonCameraOffset: [0, 0.15, 0.12],
     },
 };
 
@@ -410,7 +397,7 @@ async function init() {
         scene,
         camera,
         controls,
-        playerModelConfig: PLAYER_MODELS.person1,
+        playerModelConfig: PLAYER_MODELS.Josh,
         initPos: pos,
         minCamDistance: 50,
         maxCamDistance: 220,
@@ -526,7 +513,7 @@ async function replaceScene(file) {
     currentBlobUrl = blobUrl;
 
     // 进入预览模式
-    await enterPreviewMode(guiParams?.playerModel ?? "person1");
+    await enterPreviewMode(guiParams?.playerModel ?? "Josh");
 }
 
 // 进入预览模式
@@ -644,7 +631,7 @@ function onPreviewMouseMove(e) {
 async function onPreviewDblClick() {
     if (!previewMode || !previewMesh?.visible) return;
     const initPos = previewMesh.position.clone();
-    const spawnModel = getScaledModel(guiParams?.playerModel ?? "person1");
+    const spawnModel = getScaledModel(guiParams?.playerModel ?? "Josh");
     initPos.y += 180 * spawnModel.scale * 0.75;
     exitPreviewMode();
 
@@ -655,7 +642,7 @@ async function onPreviewDblClick() {
         scene,
         camera,
         controls,
-        playerModelConfig: getScaledModel(guiParams?.playerModel ?? "person1"),
+        playerModelConfig: getScaledModel(guiParams?.playerModel ?? "Josh"),
         initPos,
         minCamDistance: 50,
         maxCamDistance: 220,
@@ -740,7 +727,7 @@ function initGUI() {
     gui.add({ upload: () => uploadInput.click() }, "upload").name("Change Scene (.glb/.gltf)");
 
     const params = {
-        playerModel: "person1",
+        playerModel: "Josh",
         vehicleType: "bugatti",
         showFPS: true,
         showShadow: false,
@@ -777,23 +764,12 @@ function initGUI() {
                     child.castShadow = true;
                     child.receiveShadow = true;
                     setupCSMMaterial(child.material);
-                    if (v == "person4") {
+                    if (v == "UAL1_Standard") {
                         child.material.metalness = 0.8;
                         child.material.roughness = 0.0;
                     }
                 }
             });
-            if (v == "person4") {
-                player.registerAnimation("dodgeD", "dodgeD", {
-                    loop: false,
-                    clamp: true,
-                });
-                document.addEventListener("keydown", (e) => {
-                    if (e.key.toLowerCase() === "q" && player.isFlying) {
-                        player.playAnimation("dodgeD", { returnToPrev: true });
-                    }
-                });
-            }
 
             // 重建骨骼可视化
             if (skeletonHelper) {

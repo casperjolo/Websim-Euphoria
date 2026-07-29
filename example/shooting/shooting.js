@@ -18,9 +18,9 @@ const initPos = new THREE.Vector3(33.21, 4.6, 2.6);
 
 const NORMAL_MAX_CAM = 220;
 const MOUSE_SENSITIVITY = 5;
-const PLAYER_MODEL_URL = base + "./glb/person15.glb";
+const PLAYER_MODEL_URL = base + "./glb/Swat.glb";
 const FIRST_PERSON_PITCH_OFFSET_BY_MODEL = {
-    [base + "./glb/person15.glb"]: Math.PI * (16 / 180),
+    [base + "./glb/Swat.glb"]: Math.PI * (16 / 180),
 };
 
 async function init() {

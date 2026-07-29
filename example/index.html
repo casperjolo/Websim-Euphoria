@@ -192,6 +192,17 @@
                 object-fit: cover;
                 display: block;
             }
+            .card-thumb-placeholder {
+                display: grid;
+                place-items: center;
+                color: #fff;
+                background:
+                    radial-gradient(circle at 30% 25%, rgba(245, 181, 53, 0.7), transparent 35%),
+                    linear-gradient(135deg, #263238, #455a64);
+                font-size: clamp(1.8rem, 5vw, 3.5rem);
+                font-weight: 900;
+                letter-spacing: 0.12em;
+            }
             .card-info {
                 padding: 0.9rem 1.2rem;
                 display: flex;
@@ -314,7 +325,7 @@
                 <div class="grid">
                     <a class="card" href="./glTF.html">
                         <div class="card-thumb">
-                            <img src="./img/covers/glTF.gif" />
+                            <img src="./img/covers/glTF.png" />
                         </div>
                         <div class="card-info">
                             <span class="card-name">glTF Scene</span><em class="badge">Full Controls</em>
@@ -324,7 +335,7 @@
 
                     <a class="card" href="./3dtilesScene.html">
                         <div class="card-thumb">
-                            <img src="./img/covers/3dtilesScene.gif" />
+                            <img src="./img/covers/3dtiles.png" />
                         </div>
                         <div class="card-info">
                             <span class="card-name">3DTiles Scene</span>
@@ -334,7 +345,7 @@
 
                     <a class="card" href="./3dgs.html">
                         <div class="card-thumb">
-                            <img src="./img/covers/3dgs.gif" />
+                            <img src="./img/covers/3dgs.png" />
                         </div>
                         <div class="card-info">
                             <span class="card-name">3DGS Scene</span>
@@ -350,15 +361,6 @@
                     <div class="section-desc">Practical examples built with the character controller.</div>
                 </div>
                 <div class="grid">
-                    <a class="card" href="./ShinChan.html">
-                        <div class="card-thumb">
-                            <img src="./img/covers/ShinChan.jpg" />
-                        </div>
-                        <div class="card-info">
-                            <span class="card-name">ShinChan</span>
-                            <span class="play-btn"><svg viewBox="0 0 10 10"><polygon points="2,1 9,5 2,9" /></svg></span>
-                        </div>
-                    </a>
                     <a class="card" href="./OfficeBuilding.html">
                         <div class="card-thumb">
                             <img src="./img/covers/OfficeBuilding.jpg" />
@@ -383,32 +385,6 @@
                         </div>
                         <div class="card-info">
                             <span class="card-name">Foot IK</span>
-                            <span class="play-btn"><svg viewBox="0 0 10 10"><polygon points="2,1 9,5 2,9" /></svg></span>
-                        </div>
-                    </a>
-                </div>
-            </section>
-            <section class="section">
-                <div class="section-head">
-                    <div class="section-title">Multiplayer Online <span style="font-size:0.55rem;font-weight:700;letter-spacing:0.08em;background:#f5b535;color:#1a1200;border:1px solid #d49a00;border-radius:4px;padding:2px 6px;vertical-align:middle;margin-left:6px;">BETA</span></div>
-                    <div class="section-desc">Real-time multiplayer examples powered by Firebase.</div>
-                </div>
-                <div class="grid">
-                    <a class="card" href="./multiplayer-gltf.html">
-                        <div class="card-thumb">
-                            <img src="./img/covers/multiplayer-gltf.png" />
-                        </div>
-                        <div class="card-info">
-                            <span class="card-name">Multiplayer (GLTF)</span>
-                            <span class="play-btn"><svg viewBox="0 0 10 10"><polygon points="2,1 9,5 2,9" /></svg></span>
-                        </div>
-                    </a>
-                    <a class="card" href="./multiplayer-3dgs.html">
-                        <div class="card-thumb">
-                            <img src="./img/covers/multiplayer-3dgs.png" />
-                        </div>
-                        <div class="card-info">
-                            <span class="card-name">Multiplayer (3DGS)</span>
                             <span class="play-btn"><svg viewBox="0 0 10 10"><polygon points="2,1 9,5 2,9" /></svg></span>
                         </div>
                     </a>

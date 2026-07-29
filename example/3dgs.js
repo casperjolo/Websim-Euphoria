@@ -27,8 +27,8 @@ let stats;
 
 const pos = new Vector3(1.235, 1.21, -3.9);
 
-const scaleNormal = 0.009;
-const scaleSmall = 0.001;
+const scaleNormal = 0.01;
+const scaleSmall = scaleNormal / 9;
 let isSmallScale = false;
 let scaleAnimFrame = null;
 let isScaling = false;
@@ -62,7 +62,7 @@ async function init() {
     controls.target.set(pos.x, pos.y, pos.z + 1);
 
     // 环境光
-    const ambient = new AmbientLight(0xffffff, 10);
+    const ambient = new AmbientLight(0xffffff, 5);
     scene.add(ambient);
 
     // 背景
@@ -110,14 +110,14 @@ async function init() {
         camera,
         controls,
         playerModelConfig: {
-            url: "./glb/person5.glb",
+            url: "./glb/Josh.glb",
             scale: scaleNormal,
-            idleAnim: "Idle_4",
-            walkAnim: "Walking_3",
-            runAnim: "Run_2",
-            jumpAnim: "Jump_1",
+            idleAnim: "idle1",
+            walkAnim: "walk",
+            runAnim: "run",
+            jumpAnim: "jump",
             flyAnim: "flying",
-            flyIdleAnim: "flyIdle",
+            flyIdleAnim: "flyidle",
             headBoneName: "mixamorigHead",
             speed: 150,
             flySpeed: 1000,
@@ -126,18 +126,9 @@ async function init() {
         initPos: pos,
         minCamDistance: 50,
         maxCamDistance: 180,
-        camLookAtHeightRatio: 0.9,
+        camLookAtHeightRatio: 0.8,
         staticCollider: colliderGltf.scene,
         enableOverShoulderView: true,
-    });
-
-    // 设置材质
-    player.getPlayerModel()?.traverse((child) => {
-        if (child.isMesh) {
-            // 设置金属材质
-            child.material.metalness = 0.8;
-            child.material.roughness = 0.0;
-        }
     });
 
     window.addEventListener("resize", onWindowResize, false);
