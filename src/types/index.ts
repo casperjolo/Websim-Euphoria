@@ -186,21 +186,42 @@ export type PlayerControllerOptions = {
 
 // ==================== 车辆配置 ====================
 
-/** 车辆模型、物理和驾驶参数。 */
-export type VehicleOptions = {
-    /** 车辆模型路径（GLB/GLTF）。 */
+/** 已加载的车辆模型来源。 */
+export type LoadedVehicleModelSource = {
+    /** 已加载的模型根节点。 */
+    model: THREE.Object3D;
+    /** 模型使用的动画片段。 */
+    animations: THREE.AnimationClip[];
+    /** 已加载模型与旧模型路径不能同时使用。 */
+    url?: never;
+};
+
+/** 旧版 glTF 车辆模型来源。 */
+export type LegacyVehicleModelSource = {
+    /**
+     * 模型路径（GLB/GLTF）。
+     * @deprecated 请在外部加载模型，并传入 model 和 animations。
+     */
     url: string;
+    /** 模型路径与已加载模型不能同时使用。 */
+    model?: never;
+    /** 模型路径与外部动画片段不能同时使用。 */
+    animations?: never;
+};
+
+/** 车辆模型来源。 */
+export type VehicleModelSource = LoadedVehicleModelSource | LegacyVehicleModelSource;
+
+/** 车辆模型、物理和驾驶参数。 */
+export type VehicleOptions = VehicleModelSource & {
     /** 车辆初始世界坐标。 */
     position: THREE.Vector3;
     /** 车轮节点名，顺序为左前、右前、左后、右后。 */
     wheelsNames: string[];
     /** 车辆模型缩放，默认 1。 */
     scale?: number;
-    /** 车辆动画名称配置。 */
-    animations: {
-        /** 车门开关动画名。 */
-        openDoorAnim?: string;
-    };
+    /** 车门开关动画名。 */
+    openDoorAnim?: string;
     /** 上车点，使用车辆局部坐标。 */
     boardingPoint: THREE.Vector3;
     /** 角色上车后的座位偏移，默认 (0, 0, 0)。 */

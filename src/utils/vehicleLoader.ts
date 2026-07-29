@@ -121,17 +121,25 @@ export async function loadVehicleModel(
     vehicleParams.power.maxSpeed = 10000 * scale;
     vehicleParams.followVehicleDirection = opts.followVehicleDirection ?? true;
 
-    const vehicleModel = await loader.loadAsync(opts.url);
+    let model: THREE.Object3D;
+    let animations: THREE.AnimationClip[];
+    if (opts.model) {
+        model = opts.model;
+        animations = opts.animations;
+    } else {
+        const gltf = await loader.loadAsync(opts.url);
+        model = gltf.scene;
+        animations = gltf.animations ?? [];
+    }
 
     // 计算模型缩放比
-    const { size: originalSize } = getBbox(vehicleModel.scene);
+    const { size: originalSize } = getBbox(model);
     const modelScale = vehicleLength / Math.max(originalSize.x, originalSize.y, originalSize.z);
 
     // 绑定开门动画
-    const vehicleMixer = new THREE.AnimationMixer(vehicleModel.scene);
+    const vehicleMixer = new THREE.AnimationMixer(model);
     const vehicleActions = new Map<string, THREE.AnimationAction>();
-    const animations = vehicleModel.animations ?? [];
-    const openDoorClip = animations.find(a => a.name === (opts.animations?.openDoorAnim ?? ""));
+    const openDoorClip = animations.find(a => a.name === (opts.openDoorAnim ?? ""));
     if (openDoorClip) {
         const action = vehicleMixer.clipAction(openDoorClip);
         action.setLoop(THREE.LoopOnce, 1);
@@ -146,7 +154,7 @@ export async function loadVehicleModel(
     const wheelObjects: THREE.Object3D[] = [];
     for (const name of opts.wheelsNames) {
         let found = false;
-        vehicleModel.scene.traverse(child => {
+        model.traverse(child => {
             if (child.name === name && !found) { wheelObjects.push(child); found = true; }
         });
         if (!found) console.warn(`未找到轮子: ${name}`);
@@ -155,11 +163,11 @@ export async function loadVehicleModel(
     // 临时挂载获取世界坐标
     const tempGroup = new THREE.Group();
     scene.add(tempGroup);
-    vehicleModel.scene.scale.multiplyScalar(modelScale * scale);
-    vehicleModel.scene.rotateY(vehicleParams.model.rotation);
-    const { size, bbox, center } = getBbox(vehicleModel.scene);
-    vehicleModel.scene.position.set(-center.x, -center.y, -center.z);
-    tempGroup.add(vehicleModel.scene);
+    model.scale.multiplyScalar(modelScale * scale);
+    model.rotateY(vehicleParams.model.rotation);
+    const { size, bbox, center } = getBbox(model);
+    model.position.set(-center.x, -center.y, -center.z);
+    tempGroup.add(model);
     tempGroup.updateMatrixWorld(true);
 
     // 收集轮子世界变换信息
@@ -187,13 +195,13 @@ export async function loadVehicleModel(
         wheelsInfo.push({ axleCs: new THREE.Vector3(0, 0, -1), position: worldPos, quaternion: worldQuat, scale: worldScale, radius: wheelRadius, width: wheelWidth, suspensionRestLength, object: wheel });
     }
 
-    tempGroup.remove(vehicleModel.scene);
+    tempGroup.remove(model);
     scene.remove(tempGroup);
 
     // 创建车辆根节点
     const vehicleGroup = new THREE.Group();
     scene.add(vehicleGroup);
-    vehicleGroup.add(vehicleModel.scene);
+    vehicleGroup.add(model);
     vehicleGroup.updateMatrixWorld(true);
 
     // 轮子包装组（独立旋转）
@@ -218,7 +226,7 @@ export async function loadVehicleModel(
     // 创建车身物理碰撞体
     const halfExtents = size.clone().multiplyScalar(0.5);
     halfExtents.y -= chassisHeight / 2;
-    vehicleModel.scene.position.y -= chassisHeight / 2;
+    model.position.y -= chassisHeight / 2;
     halfExtents.x *= 0.95;
     halfExtents.z *= 0.95;
 

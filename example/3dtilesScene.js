@@ -175,9 +175,7 @@ async function initPlayer() {
             "WHEEL_LR", // 后左
             "WHEEL_RR", // 后右
         ],
-        animations: {
-            openDoorAnim: "opendoor",
-        },
+        openDoorAnim: "opendoor",
         boardingPoint: new Vector3(1, 0, 1.9),
         seatOffset: new Vector3(0.1, 0.5, 0),
         chassisRatio: 0.4,
