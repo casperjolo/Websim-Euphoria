@@ -18,7 +18,8 @@ import { getBbox } from "./utils/bbox";
 
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-const clock = new THREE.Clock();
+/** 未传入delta时计算帧间隔。 */
+let _lastUpdateTime = performance.now();
 
 function isMobileDevice() {
     return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
@@ -740,7 +741,12 @@ export class playerController {
     // ==================== 主循环 ====================
 
     /** 主循环。 */
-    async update(delta = clock.getDelta()) {
+    async update(delta?: number) {
+        if (delta === undefined) {
+            const now = performance.now();
+            delta = (now - _lastUpdateTime) / 1000;
+            _lastUpdateTime = now;
+        }
         if (!this.isupdate || !this.playerCapsule || !this.collider) return;
         delta = Math.min(delta, 1 / 40) * this.timeScale;
         this.currentDelta = delta;

@@ -3,7 +3,7 @@ import {
     AmbientLight,
     CircleGeometry,
     DoubleSide,
-    Clock,
+    Timer,
     EquirectangularReflectionMapping,
     Mesh,
     MeshBasicMaterial,
@@ -56,7 +56,7 @@ const dynamicPlatformXSegments = dynamicPlatformXPath.slice(0, -1).map((point, i
     length: point.distanceTo(dynamicPlatformXPath[index + 1]),
 }));
 const dynamicPlatformXLength = dynamicPlatformXSegments.reduce((sum, segment) => sum + segment.length, 0);
-const animClock = new Clock();
+const animTimer = new Timer();
 
 let globalScale = 1;
 let previewMesh = null;
@@ -246,7 +246,7 @@ function createDynamicPlatform({
 
 // 更新动态平台
 function updateDynamicPlatforms() {
-    const t = animClock.getElapsedTime();
+    const t = animTimer.getElapsed();
     dynamicPlatforms.forEach((entry) => {
         const { mesh, basePosition, motion, cloud } = entry;
         if (motion) {
@@ -632,7 +632,9 @@ async function onPreviewDblClick() {
 }
 
 // 每帧调用
-function animate() {
+function animate(timestamp) {
+    animTimer.update(timestamp);
+
     if (player) {
         player.update();
         updateCenterRaycast();
