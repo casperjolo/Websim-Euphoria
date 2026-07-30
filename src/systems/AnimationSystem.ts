@@ -10,7 +10,6 @@ export class AnimationSystem {
     state!: THREE.AnimationAction; // 当前播放状态
     sets = new Map<string, Map<string, THREE.AnimationAction>>(); // 动作集合组
     currentLocomotionSet: string | null = null; // 当前激活的动作集合名
-    recheckTimer: any = null; // 延迟重检定时器
     clips: THREE.AnimationClip[] = []; // 原始动画片段
     hasThreePartJump = false; // 是否使用三段跳跃动画
     isOverrideAnimationPlaying = false; // 动画锁，用于防止覆盖型动画被移动动画打断
@@ -315,7 +314,6 @@ export class AnimationSystem {
         v.cancelBoarding();
         if (v.isExitAnim) { v.isExitAnim = false; v.exitDoorClosed = false; }
         if (v.isBoardingAnim) { v.isBoardingAnim = false; v.doorClosed = false; }
-        if (v.doorTimer) { clearTimeout(v.doorTimer); v.doorTimer = null; }
 
         const { fwd, bkd, lft, rgt, shift, space } = this.ctrl.input;
 

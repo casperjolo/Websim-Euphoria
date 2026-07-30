@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { MeshBVH, BVHHelper, acceleratedRaycast } from "three-mesh-bvh";
+import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
@@ -14,6 +14,7 @@ import { CameraSystem } from "./systems/CameraSystem";
 import { InputSystem } from "./systems/InputSystem";
 import { VehicleSystem } from "./systems/VehicleSystem";
 import { applyCapsuleCollision, createCollisionTemps, type CollisionTemps } from "./utils/capsuleCollision";
+import { getBbox } from "./utils/bbox";
 
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
@@ -105,8 +106,6 @@ export class playerController {
     // ==================== 碰撞体 ====================
     /** 静态碰撞体。 */
     collider: THREE.Mesh | null = null;
-    /** BVH可视化。 */
-    private visualizer: BVHHelper | null = null;
     /** 静态几何收集。 */
     collected: THREE.BufferGeometry[] = [];
     /** 动态碰撞体列表。 */
@@ -136,18 +135,12 @@ export class playerController {
     mobileControls: MobileControls | null = null;
     /** 靠近车辆。 */
     private isNearVehicle = false;
-    /** 近距检测局部坐标。 */
-    private nearCheckLocal = new THREE.Vector3();
     /** 近距检测世界坐标。 */
     private nearCheckWorld = new THREE.Vector3();
 
     // ==================== 调试 ====================
-    /** 显示玩家碰撞体。 */
-    private displayPlayer = false;
     /** 显示场景碰撞体。 */
     private displayCollider = false;
-    /** 显示BVH辅助。 */
-    private displayVisualizer = false;
 
     // ==================== 方向常量 & 复用向量 ====================
     /** 朝向旋转速度。 */
@@ -434,7 +427,7 @@ export class playerController {
             this.playerModel.updateMatrixWorld(true);
 
             // 计算胶囊体尺寸
-            const { size } = this.getBbox(this.playerModel);
+            const { size } = getBbox(this.playerModel);
             const modelScale = this.playerCapsuleHeight / size.y;
 
             const s = this.playerModelConfig.scale;
@@ -464,7 +457,7 @@ export class playerController {
             };
             this.recomputeGroundThresholds();
             this.playerCapsule.name = "capsule";
-            (this.playerCapsule.material as THREE.Material).visible = this.displayPlayer;
+            (this.playerCapsule.material as THREE.Material).visible = false;
             this.scene.add(this.playerCapsule);
             this.reset();
             this.playerCapsule.rotateY(this.playerModelConfig.rotateY ?? 0);
@@ -514,16 +507,7 @@ export class playerController {
             ...newPlayerModel,
         } as PlayerModelOptions;
 
-        this.gravity *= ratio;
-        this.jumpHeight *= ratio;
-        this.playerSpeed *= ratio;
-        this.playerRunSpeed *= ratio;
-        this.playerFlySpeed *= ratio;
-        this.curPlayerSpeed *= ratio;
-        this.cam.epsilon *= ratio;
-        this.cam.minDist *= ratio;
-        this.cam.maxDist *= ratio;
-        this.cam.originMaxDist *= ratio;
+        this.applyGameplayScaleRatio(ratio);
 
         await this.loadPlayerModel();
         this.playerCapsule.position.copy(savedPos);
@@ -562,16 +546,6 @@ export class playerController {
     }
 
     // ==================== 碰撞体构建和查询 ====================
-
-    /** 获取包围盒。 */
-    private getBbox(object: THREE.Object3D) {
-        const bbox = new THREE.Box3().setFromObject(object);
-        const center = new THREE.Vector3();
-        const size = new THREE.Vector3();
-        bbox.getCenter(center);
-        bbox.getSize(size);
-        return { bbox, center, size };
-    }
 
     /** 补全必要属性。 */
     private ensureAttributesMinimal(geom: THREE.BufferGeometry): THREE.BufferGeometry | null {
@@ -674,11 +648,6 @@ export class playerController {
         this.collider.layers.enable(1);
 
         if (this.displayCollider) this.scene.add(this.collider);
-        if (this.displayVisualizer) {
-            if (this.visualizer) this.scene.remove(this.visualizer);
-            this.visualizer = new BVHHelper(this.collider, 10);
-            this.scene.add(this.visualizer);
-        }
     }
 
     /** 注册动态碰撞体。 */
@@ -993,9 +962,11 @@ export class playerController {
         if (this.isShowMobileControls && this.vehicle.list.length) {
             let near = false;
             for (const veh of this.vehicle.list) {
-                this.nearCheckLocal.copy(veh.boardingPoint).multiplyScalar(veh.scale);
-                veh.vehicleGroup.localToWorld(this.nearCheckWorld.copy(this.nearCheckLocal));
-                if (this.playerCapsule.position.distanceTo(this.nearCheckWorld) < 800 * this.playerModelConfig.scale) { near = true; break; }
+                this.vehicle.boardingWorldPoint(veh, this.nearCheckWorld);
+                if (this.vehicle.isInBoardingRange(
+                    this.playerCapsule.position.distanceTo(this.nearCheckWorld),
+                    this.playerModelConfig.scale,
+                )) { near = true; break; }
             }
             if (near !== this.isNearVehicle) {
                 this.isNearVehicle = near;
@@ -1084,6 +1055,21 @@ export class playerController {
         this.setOnGround(true);
     }
 
+    /** 按比例同步重力、速度、相机距离等玩法参数。 */
+    private applyGameplayScaleRatio(ratio: number) {
+        this.gravity *= ratio;
+        this.jumpHeight *= ratio;
+        this.playerSpeed *= ratio;
+        this.playerRunSpeed *= ratio;
+        this.playerFlySpeed *= ratio;
+        this.curPlayerSpeed *= ratio;
+        this.cam.epsilon *= ratio;
+        this.cam.minDist *= ratio;
+        this.cam.maxDist *= ratio;
+        this.cam.originMaxDist *= ratio;
+        this.controls.minDistance = this.cam.minDist;
+    }
+
     /** 重算站立 / 落地阈值（snapH / maxH）。仅在胶囊创建、缩放后调用。 */
     private recomputeGroundThresholds() {
         const info = this.playerCapsule?.capsuleInfo;
@@ -1101,17 +1087,7 @@ export class playerController {
         this.playerModelConfig.scale = newScale;
 
         // 更新比例相关参数
-        this.gravity *= ratio;
-        this.jumpHeight *= ratio;
-        this.playerSpeed *= ratio;
-        this.playerRunSpeed *= ratio;
-        this.playerFlySpeed *= ratio;
-        this.curPlayerSpeed *= ratio;
-        this.cam.epsilon *= ratio;
-        this.cam.minDist *= ratio;
-        this.controls.minDistance *= ratio;
-        this.cam.maxDist *= ratio;
-        this.cam.originMaxDist *= ratio;
+        this.applyGameplayScaleRatio(ratio);
 
         if (this.isFirstPerson) this.scene.attach(this.camera);
         this.playerCapsule?.scale.multiplyScalar(ratio);
@@ -1262,7 +1238,6 @@ export class playerController {
 
         // 清除碰撞体和相机
         this.cam.resetControls();
-        if (this.visualizer) { this.scene.remove(this.visualizer); this.visualizer = null; }
         if (this.collider) { this.scene.remove(this.collider); this.collider = null; }
         this.mobileControls?.destroy();
         this.mobileControls = null;

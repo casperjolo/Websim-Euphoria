@@ -42,11 +42,22 @@ export class VehicleSystem {
     doorClosed = false; // 上车门已关
     isExitAnim = false; // 下车动画中
     exitDoorClosed = false; // 下车门已关
-    doorTimer: any = null; // 开关门定时器
+    boardingDistFactor = 800; // 上车触发距离 = boardingDistFactor × 玩家 scale。
     flip180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI); // 180度翻转
 
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
+    }
+
+    /** 将车辆本地上车点写入世界坐标（写入 out 并返回）。 */
+    boardingWorldPoint(v: VehicleInstance, out: THREE.Vector3): THREE.Vector3 {
+        out.copy(v.boardingPoint).multiplyScalar(v.scale);
+        return v.vehicleGroup.localToWorld(out);
+    }
+
+    /** 是否在上车触发距离内。 */
+    isInBoardingRange(dist: number, playerScale: number): boolean {
+        return dist < this.boardingDistFactor * playerScale;
     }
 
     // 初始化物理引擎
@@ -155,14 +166,14 @@ export class VehicleSystem {
         let nearestDist = Infinity;
         let nearBoardingPoint: THREE.Vector3 | null = null;
 
+        const scratch = new THREE.Vector3();
         for (const v of this.list) {
-            const boardingLocal = v.boardingPoint.clone().multiplyScalar(v.scale);
-            const boardingWorld = v.vehicleGroup.localToWorld(boardingLocal);
-            const dist = this.ctrl.playerCapsule.position.distanceTo(boardingWorld);
-            if (dist < 800 * this.ctrl.playerModelConfig.scale && dist < nearestDist) {
+            this.boardingWorldPoint(v, scratch);
+            const dist = this.ctrl.playerCapsule.position.distanceTo(scratch);
+            if (this.isInBoardingRange(dist, this.ctrl.playerModelConfig.scale) && dist < nearestDist) {
                 nearestDist = dist;
                 nearest = v;
-                nearBoardingPoint = boardingWorld;
+                nearBoardingPoint = scratch.clone();
             }
         }
 

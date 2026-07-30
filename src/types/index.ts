@@ -4,8 +4,8 @@ import type { PathPlanner } from "../utils/pathPlanner";
 
 // ==================== 玩家配置 ====================
 
-/** 已加载的玩家模型来源。 */
-export type LoadedPlayerModelSource = {
+/** 已加载的模型来源（玩家/车辆共用结构）。 */
+export type LoadedModelSource = {
     /** 已加载的模型根节点。 */
     model: THREE.Object3D;
     /** 模型使用的动画片段。 */
@@ -14,8 +14,8 @@ export type LoadedPlayerModelSource = {
     url?: never;
 };
 
-/** 旧版 glTF 玩家模型来源。 */
-export type LegacyPlayerModelSource = {
+/** 旧版 glTF 模型路径来源（玩家/车辆共用结构）。 */
+export type LegacyModelSource = {
     /**
      * 模型路径（GLB/GLTF）。
      * @deprecated 请在外部加载模型，并传入 model 和 animations。
@@ -26,6 +26,12 @@ export type LegacyPlayerModelSource = {
     /** 模型路径与外部动画片段不能同时使用。 */
     animations?: never;
 };
+
+/** 已加载的玩家模型来源。 */
+export type LoadedPlayerModelSource = LoadedModelSource;
+
+/** 旧版 glTF 玩家模型来源。 */
+export type LegacyPlayerModelSource = LegacyModelSource;
 
 /** 玩家模型来源。 */
 export type PlayerModelSource = LoadedPlayerModelSource | LegacyPlayerModelSource;
@@ -187,27 +193,10 @@ export type PlayerControllerOptions = {
 // ==================== 车辆配置 ====================
 
 /** 已加载的车辆模型来源。 */
-export type LoadedVehicleModelSource = {
-    /** 已加载的模型根节点。 */
-    model: THREE.Object3D;
-    /** 模型使用的动画片段。 */
-    animations: THREE.AnimationClip[];
-    /** 已加载模型与旧模型路径不能同时使用。 */
-    url?: never;
-};
+export type LoadedVehicleModelSource = LoadedModelSource;
 
 /** 旧版 glTF 车辆模型来源。 */
-export type LegacyVehicleModelSource = {
-    /**
-     * 模型路径（GLB/GLTF）。
-     * @deprecated 请在外部加载模型，并传入 model 和 animations。
-     */
-    url: string;
-    /** 模型路径与已加载模型不能同时使用。 */
-    model?: never;
-    /** 模型路径与外部动画片段不能同时使用。 */
-    animations?: never;
-};
+export type LegacyVehicleModelSource = LegacyModelSource;
 
 /** 车辆模型来源。 */
 export type VehicleModelSource = LoadedVehicleModelSource | LegacyVehicleModelSource;

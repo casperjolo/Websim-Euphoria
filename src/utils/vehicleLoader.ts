@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { PathPlanner, type ObstacleChecker } from "./pathPlanner";
 import { createVehicleController } from "./vehicleController";
+import { getBbox } from "./bbox";
 import type { VehicleOptions, VehicleInstance } from "../types";
 
 export type VehicleLoaderContext = {
@@ -22,16 +23,6 @@ export type VehicleLoaderContext = {
 };
 
 // ==================== 工具函数 ====================
-
-// 获取包围盒
-function getBbox(object: THREE.Object3D) {
-    const bbox = new THREE.Box3().setFromObject(object);
-    const center = new THREE.Vector3();
-    const size = new THREE.Vector3();
-    bbox.getCenter(center);
-    bbox.getSize(size);
-    return { bbox, center, size };
-}
 
 // 创建障碍物检测器
 function createObstacleChecker(
