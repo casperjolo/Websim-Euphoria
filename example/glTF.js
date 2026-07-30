@@ -371,7 +371,7 @@ async function init() {
         initPos: pos,
         minCamDistance: 50,
         maxCamDistance: 220,
-        enableOverShoulderView: true,
+        enableOverShoulderView: false,
     });
 
     // 骨骼可视化
@@ -716,7 +716,7 @@ function initGUI() {
         thirdMouseMode: 1,
         enableZoom: false,
         debug: false,
-        enableOverShoulderView: true,
+        enableOverShoulderView: false,
         camOverShoulderOffsetRatio: 0.2,
         centerRaycast: false,
         showSkeleton: false,
