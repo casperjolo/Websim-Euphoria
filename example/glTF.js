@@ -151,8 +151,8 @@ const VEHICLE_CONFIG = {
     url: "./glb/sedan.glb",
     scale: 0.09,
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-    boardingPoint: new Vector3(0.6, 0, 1.9),
-    seatOffset: new Vector3(0.35, 0.65, 0.0),
+    boardingPoint: new Vector3(0.6, 0, 2),
+    seatOffset: new Vector3(0.35, 0.65, -0.1),
     chassisRatio: 0.35,
     suspensionRestLengthRatio: 0.2,
 };
