@@ -12,12 +12,4 @@ export default defineConfig({
     external: ["three", "three-mesh-bvh", "@dimforge/rapier3d-compat"],
     target: "es2020",
     minify: false,
-    esbuildOptions(options) {
-        options.loader = {
-            ...options.loader,
-            ".png": "dataurl",
-            ".jpg": "dataurl",
-            ".svg": "dataurl",
-        };
-    },
 });

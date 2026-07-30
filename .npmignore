@@ -1,9 +1,0 @@
-node_modules
-src
-example
-docs
-.git
-.gitignore
-tsconfig.json
-vite.config.ts
-tsup.config.ts
