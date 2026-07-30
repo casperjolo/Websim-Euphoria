@@ -194,7 +194,7 @@ async function init() {
     };
 
     footIK = new FootIK({
-        // skeleton,
+        skeleton,
         soleSkinThickness: 1.6,
     });
     player.use(footIK);
