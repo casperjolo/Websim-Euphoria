@@ -869,11 +869,14 @@ export class playerController {
                         // 从空中落下：只有本帧速度能到达落点才 snap，否则继续应用重力
                         const predictedY = this.playerCapsule.position.y + this.playerVelocity.y * delta;
                         if (predictedY <= snapY) {
-                            this.snapToGround(snapY);
+                            this.snapToGround(snapY, true, delta);
                         } else {
                             this.applyGravity(delta);
                         }
                     }
+                } else {
+                    // 近地但还在上升：仍当空中，继续重力
+                    this.applyGravity(delta);
                 }
             } else {
                 this.applyGravity(delta);
