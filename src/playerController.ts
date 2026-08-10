@@ -16,8 +16,6 @@ import { VehicleSystem } from "./systems/VehicleSystem";
 import { applyCapsuleCollision, createCollisionTemps, type CollisionTemps } from "./utils/capsuleCollision";
 import { getBbox } from "./utils/bbox";
 
-THREE.Mesh.prototype.raycast = acceleratedRaycast;
-
 /** 未传入delta时计算帧间隔。 */
 let _lastUpdateTime = performance.now();
 
@@ -646,6 +644,7 @@ export class playerController {
         if (!merged) { console.error("合并几何失败"); return; }
         (merged as any).boundsTree = new MeshBVH(merged, { maxDepth: 100 });
         this.collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ opacity: 0.5, transparent: true, wireframe: true, depthTest: true, side: THREE.DoubleSide }));
+        this.collider.raycast = acceleratedRaycast;
         this.collider.layers.enable(1);
 
         if (this.displayCollider) this.scene.add(this.collider);
@@ -678,6 +677,7 @@ export class playerController {
         (merged as any).boundsTree = new MeshBVH(merged);
 
         const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ opacity: 0.5, transparent: true, wireframe: true, depthTest: true, side: THREE.DoubleSide }));
+        mesh.raycast = acceleratedRaycast;
         mesh.matrixAutoUpdate = false;
         mesh.matrix.copy(source.matrixWorld);
         mesh.updateMatrixWorld(true);
