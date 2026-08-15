@@ -60,6 +60,9 @@ export class CameraSystem {
 
     // 第三人称相机看向点
     getLookAtPoint(): THREE.Vector3 {
+        if (this.ctrl.controllerMode === 1 && this.ctrl.vehicle.active) {
+            return this.lookAtPoint.copy(this.ctrl.vehicle.active.vehicleGroup.position);
+        }
         const capsuleInfo = this.ctrl.playerCapsule.capsuleInfo;
         const r = capsuleInfo.radius;
         const totalH = -capsuleInfo.segment.end.y + 2 * r;
@@ -181,7 +184,7 @@ export class CameraSystem {
     // 处理鼠标朝向
     setToward(dx: number, dy: number, speed: number) {
         this.ctrl.onTowardChange?.(dx, dy, speed);
-        if (!this.ctrl.enableToward || (this.ctrl.controllerMode === 0 && this.ctrl.isFirstPerson && this.ctrl.vehicle.isMovingToBoarding)) return;
+        if (!this.ctrl.enableToward) return;
         const sens = this.sensitivity;
         if (this.ctrl.controllerMode === 0) {
             // 步行第一人称
@@ -223,6 +226,37 @@ export class CameraSystem {
             target.z + distance * Math.sin(phi) * Math.cos(theta),
         );
         this.ctrl.camera.lookAt(target);
+    }
+
+    // 载具第三人称：弹簧跟随 + 射线避障 + 速度方向
+    updateThirdPersonVehicle(delta: number) {
+        const v = this.ctrl.vehicle.active;
+        if (!v) return;
+
+        const lookTarget = this.springTarget(v.vehicleGroup.position, delta).clone();
+        this.ctrl.camera.position.sub(this.ctrl.controls.target);
+        this.ctrl.controls.target.copy(lookTarget);
+        this.ctrl.camera.position.add(lookTarget);
+        this.ctrl.controls.update();
+
+        const desiredDist = Math.max(this.minDist, v.size.l * 0.8);
+        this.updateWithRaycast(this.ctrl.controls.target, desiredDist);
+
+        if ((this.ctrl.input.fwd || this.ctrl.input.bkd) && v.followVehicleDirection) {
+            const vel = v.chassisBody.linvel();
+            if (Math.hypot(vel.x, vel.z) > 0.3) {
+                const targetAngle = Math.atan2(-vel.x, -vel.z);
+                const offX = this.ctrl.camera.position.x - this.ctrl.controls.target.x;
+                const offZ = this.ctrl.camera.position.z - this.ctrl.controls.target.z;
+                const radius = Math.hypot(offX, offZ);
+                const curAngle = Math.atan2(offX, offZ);
+                const diff = Math.atan2(Math.sin(targetAngle - curAngle), Math.cos(targetAngle - curAngle));
+                const newAngle = curAngle + diff * this.vehicleTurnLerp;
+                this.ctrl.camera.position.x = this.ctrl.controls.target.x + Math.sin(newAngle) * radius;
+                this.ctrl.camera.position.z = this.ctrl.controls.target.z + Math.cos(newAngle) * radius;
+                this.ctrl.controls.update();
+            }
+        }
     }
 
     // 射线防穿墙

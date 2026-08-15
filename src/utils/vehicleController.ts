@@ -15,7 +15,7 @@ export function createVehicleController(
     wheels: (THREE.Object3D | null)[],
     wheelsInfo: WheelInfo[],
 ) {
-    if (!world || !chassisBody) return { vehicle: null, updateWheelVisuals: () => {} };
+    if (!world || !chassisBody) return { vehicle: null, updateWheelVisuals: () => {}, destroy: () => {} };
 
     const vehicle = world.createVehicleController(chassisBody);
     const suspensionDirection = new THREE.Vector3(0, -1, 0);

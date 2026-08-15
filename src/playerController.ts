@@ -134,8 +134,6 @@ export class playerController {
     mobileControls: MobileControls | null = null;
     /** 靠近车辆。 */
     private isNearVehicle = false;
-    /** 近距检测世界坐标。 */
-    private nearCheckWorld = new THREE.Vector3();
 
     // ==================== 调试 ====================
     /** 显示场景碰撞体。 */
@@ -340,8 +338,7 @@ export class playerController {
                 [mc.flyHoverRightAnim || mc.flyIdleAnim || mc.idleAnim, "flyHoverRight"],
                 [mc.flyHoverUpAnim || mc.flyIdleAnim || mc.idleAnim, "flyHoverUp"],
                 [mc.flyHoverDownAnim || mc.flyIdleAnim || mc.idleAnim, "flyHoverDown"],
-                [mc.enterCarAnim || mc.idleAnim, "enterCar"],
-                [mc.exitCarAnim || mc.idleAnim, "exitCar"],
+                [mc.drivingAnim || mc.idleAnim, "driving"],
             ];
 
             for (const [clipName, actionName] of mappings) {
@@ -413,10 +410,6 @@ export class playerController {
                 }
                 if (done === this.animation.actions?.get("jumpEnd")) {
                     if (this.animation.state === done) resolveGroundAnim();
-                    return;
-                }
-                if (done === this.animation.actions?.get("enterCar")) {
-                    if (this.vehicle.isBoardingAnim) this.vehicle.onEnterAnimFinished();
                     return;
                 }
             };
@@ -751,10 +744,13 @@ export class playerController {
         delta = Math.min(delta, 1 / 40) * this.timeScale;
         this.currentDelta = delta;
         if (this.controllerMode === 1) {
-            this.vehicle.updateVehicle(delta);
+            this.vehicle.preparePhysics(delta);
+            this.vehicle.finishPhysics(delta);
+            if (!this.isFirstPerson) this.cam.updateThirdPersonVehicle(delta);
+            this.runAnimationPass(delta);
         } else {
             this.updatePlayer(delta);
-            if (this.isChangeControllerTransitionTimer) this.vehicle.updateInertia(delta);
+            if (this.isChangeControllerTransitionTimer) this.vehicle.finishPhysics(delta);
         }
     }
 
@@ -762,36 +758,6 @@ export class playerController {
     updatePlayer(delta: number) {
         // 更新动态碰撞体位置与增量
         this.updateDynamicColliders();
-
-        const v = this.vehicle;
-        if (v.isMovingToBoarding) v.updateMoveTo(delta);
-
-        // 上车关门计时
-        if (v.isBoardingAnim) {
-            const action = this.animation.actions?.get("enterCar");
-            if (action) {
-                const duration = action.getClip().duration;
-                const remaining = ((duration - action.time) / action.getEffectiveTimeScale()) * 1000;
-                if (!v.doorClosed && remaining <= 500) { v.doorClosed = true; v.openDoor(false); }
-                if (action.time >= duration) {
-                    v.isBoardingAnim = false;
-                    v.doorClosed = false;
-                    v.onEnterAnimFinished();
-                    return;
-                }
-            }
-        }
-
-        // 下车关门计时
-        if (v.isExitAnim) {
-            const action = this.animation.actions?.get("exitCar");
-            if (action) {
-                const duration = action.getClip().duration;
-                const remaining = ((duration - action.time) / action.getEffectiveTimeScale()) * 1000;
-                if (!v.exitDoorClosed && remaining <= 500) { v.exitDoorClosed = true; v.openDoor(false); }
-                if (action.time >= duration) { v.isExitAnim = false; v.exitDoorClosed = false; this.onVehicleExit?.(v.active!); }
-            }
-        }
 
         // 车辆模式下退出
         if (this.controllerMode === 1) {
@@ -897,7 +863,7 @@ export class playerController {
             this.playerCapsule.position.addScaledVector(this.xzDir, stepDist);
             this.playerCapsule.updateMatrixWorld();
 
-            if (!v.isMovingToBoarding && !this.skipCapsuleCollision) {
+            if (!this.skipCapsuleCollision) {
                 // 静态碰撞检测
                 applyCapsuleCollision(
                     this.playerCapsule,
@@ -971,11 +937,7 @@ export class playerController {
         if (this.isShowMobileControls && this.vehicle.list.length) {
             let near = false;
             for (const veh of this.vehicle.list) {
-                this.vehicle.boardingWorldPoint(veh, this.nearCheckWorld);
-                if (this.vehicle.isInBoardingRange(
-                    this.playerCapsule.position.distanceTo(this.nearCheckWorld),
-                    this.playerModelConfig.scale,
-                )) { near = true; break; }
+                if (this.vehicle.isInBoardingRange(veh, this.playerCapsule.position)) { near = true; break; }
             }
             if (near !== this.isNearVehicle) {
                 this.isNearVehicle = near;
@@ -1111,8 +1073,46 @@ export class playerController {
     /** 重置玩家位置。 */
     reset(position?: THREE.Vector3) {
         if (!this.playerCapsule) return;
+        if (this.controllerMode === 1) {
+            this.vehicle.stopActive();
+            this.controllerMode = 0;
+            this.mobileControls?.syncControllerModeBtn(0);
+            this.scene.attach(this.playerCapsule);
+            this.animation.playByName("idle");
+            this.syncDebugVisibility();
+            this.vehicle.setTransition();
+        }
         this.playerVelocity.set(0, 0, 0);
         this.playerCapsule.position.copy(position ?? this.initPos);
+    }
+
+    /** 站立时胶囊原点应离地的高度。 */
+    getCapsuleGroundHeight() { return this.snapH; }
+
+    /** 动态碰撞体列表（供车辆下车检测使用）。 */
+    getDynamicColliderEntries() { return this.dynamicColliders; }
+
+    /** 将人物模型挂载到车辆座位点。 */
+    syncMountedPlayer(vehicle: VehicleInstance) {
+        const cap = this.playerCapsule;
+        if (!cap) return;
+        if (cap.parent !== vehicle.vehicleGroup) vehicle.vehicleGroup.attach(cap);
+        cap.position.copy(vehicle.driverSeatPosition).multiplyScalar(vehicle.scale);
+        cap.quaternion.setFromAxisAngle(this.upVector, vehicle.driverSeatRotation);
+    }
+
+    /** 在车辆下车位置恢复人物控制。 */
+    leaveVehicleAt(position: THREE.Vector3, forward: THREE.Vector3) {
+        const cap = this.playerCapsule;
+        if (!cap) return;
+        this.scene.attach(cap);
+        cap.position.copy(position);
+        const lookTarget = position.clone().add(forward);
+        this.targetMat.lookAt(position, lookTarget, this.upVector);
+        cap.quaternion.setFromRotationMatrix(this.targetMat);
+        this.playerVelocity.set(0, 0, 0);
+        this.setOnGround(false);
+        if (this.isFirstPerson) this.cam.setFirstPerson();
     }
 
     // ==================== API ====================
@@ -1227,6 +1227,8 @@ export class playerController {
     // --- 载具 ---
     /** 加载车辆模型。 */
     loadVehicleModel(opts: VehicleOptions) { return this.vehicle.load(opts); }
+    /** 将当前驾驶车辆翻正复位。 */
+    resetVehicle() { this.vehicle.resetUpright(); }
 
     // --- 销毁 ---
     /** 销毁控制器并释放资源。 */
@@ -1255,8 +1257,6 @@ export class playerController {
         this.clearDynamicColliders();
 
         // 清除所有车辆
-        for (const v of this.vehicle.list) { this.scene.remove(v.vehicleGroup); v.pathPlanner?.dispose(); v.vehicleController?.destroy?.(); }
-        this.vehicle.list = [];
-        this.vehicle.active = null;
+        this.vehicle.destroy();
     }
 }

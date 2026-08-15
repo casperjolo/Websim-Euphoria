@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import type { RigidBody } from "@dimforge/rapier3d-compat";
-import type { PathPlanner } from "../utils/pathPlanner";
 
 // ==================== 玩家配置 ====================
 
@@ -70,10 +69,8 @@ export type PlayerModelOptions = PlayerModelSource & {
     flyHoverUpAnim?: string;
     /** 飞行下降悬停动画，默认复用 flyIdleAnim。 */
     flyHoverDownAnim?: string;
-    /** 上车动画名。 */
-    enterCarAnim?: string;
-    /** 下车动画名。 */
-    exitCarAnim?: string;
+    /** 驾驶循环动画名，默认复用 idleAnim。 */
+    drivingAnim?: string;
     /** 重力基准值（按 scale 缩放），默认 -2400。 */
     gravity?: number;
     /** 跳跃高度基准值（按 scale 缩放），默认 600。 */
@@ -209,20 +206,24 @@ export type VehicleOptions = VehicleModelSource & {
     wheelsNames: string[];
     /** 车辆模型缩放，默认 1。 */
     scale?: number;
-    /** 车门开关动画名。 */
-    openDoorAnim?: string;
-    /** 上车点，使用车辆局部坐标。 */
-    boardingPoint: THREE.Vector3;
-    /** 角色上车后的座位偏移，默认 (0, 0, 0)。 */
-    seatOffset?: THREE.Vector3;
+    /** 驾驶位胶囊中心，使用车辆底盘局部坐标。 */
+    driverSeatPosition: THREE.Vector3;
+    /** 驾驶位相对车辆底盘局部的水平旋转（弧度），默认 0。 */
+    driverSeatRotation?: number;
     /** 底盘高度比例，默认 0.2。 */
     chassisRatio?: number;
     /** 悬挂静止长度比例，默认 0.2。 */
     suspensionRestLengthRatio?: number;
     /** 驾驶时镜头是否跟随车辆朝向，默认 true。 */
     followVehicleDirection?: boolean;
-    /** 单车速度倍率，默认 1。 */
-    speedMultiplier?: number;
+    /** 车辆质量基准（kg，按 scale 缩放），默认 1500。 */
+    mass?: number;
+    /** 最高速度基准（km/h，按 scale 缩放），默认 300。 */
+    maxSpeed?: number;
+    /** 加速度基准（m/s²，按 scale 缩放），默认 8。 */
+    acceleration?: number;
+    /** 制动减速度基准（m/s²，按 scale 缩放），默认 8。 */
+    deceleration?: number;
 };
 
 /** 已加载车辆的运行时对象。 */
@@ -235,24 +236,18 @@ export type VehicleInstance = {
     vehicleController: any;
     /** 同步车轮视觉的回调。 */
     updateWheelVisuals: () => void;
-    /** 车辆动画混合器。 */
-    vehicleMixer?: THREE.AnimationMixer;
-    /** 车辆动画动作表。 */
-    vehicleActions?: Map<string, THREE.AnimationAction>;
-    /** 车门是否打开。 */
-    vehiclIsOpenDoor: boolean;
-    /** 车辆包围盒。 */
-    vehicleBBox: THREE.Box3;
-    /** 上车路径规划器。 */
-    pathPlanner: PathPlanner;
+    /** 销毁车辆控制器的回调。 */
+    destroyVehicleController: () => void;
     /** 车辆缩放。 */
     scale: number;
-    /** 上车点，使用车辆局部坐标。 */
-    boardingPoint: THREE.Vector3;
-    /** 座位偏移。 */
-    seatOffset: THREE.Vector3;
-    /** 上车动画时长。 */
-    enterVehicleTime: number;
+    /** 车辆模型归一化缩放。 */
+    modelScale: number;
+    /** 驾驶位胶囊中心，使用车辆底盘局部坐标。 */
+    driverSeatPosition: THREE.Vector3;
+    /** 驾驶位相对车辆底盘局部的水平旋转（弧度）。 */
+    driverSeatRotation: number;
+    /** 由前后轮中心推算的车辆底盘本地前向。 */
+    forwardLocal: THREE.Vector3;
     /** 底盘高度比例。 */
     chassisRatio: number;
     /** 悬挂静止长度比例。 */
@@ -263,8 +258,18 @@ export type VehicleInstance = {
         w: number;
         h: number;
     };
-    /** 单车速度倍率。 */
-    speedMultiplier: number;
+    /** 底盘碰撞盒半边长（Rapier 局部坐标）。 */
+    halfExtents: THREE.Vector3;
+    /** 车辆质量（kg）。 */
+    mass: number;
+    /** 最高速度（km/h）。 */
+    maxSpeed: number;
+    /** 加速度（m/s²）。 */
+    acceleration: number;
+    /** 制动减速度（m/s²）。 */
+    deceleration: number;
+    /** 相机是否跟随车辆方向。 */
+    followVehicleDirection: boolean;
     /** 物理盒体调试网格。 */
     physicsBoxMesh?: THREE.Mesh;
 };

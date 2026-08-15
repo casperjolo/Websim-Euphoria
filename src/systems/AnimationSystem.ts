@@ -31,47 +31,12 @@ export class AnimationSystem {
         next.setEffectiveWeight(1);
         next.paused = false;
 
-        // 上下车动画特殊处理：根据配置的上下车时间调整动画速度
-        if (name === "enterCar" || name === "exitCar") {
-            const duration = next.getClip().duration;
-            const enterTime = this.ctrl.vehicle.active?.enterVehicleTime ?? 1.5;
-            next.setEffectiveTimeScale(duration / enterTime);
-            next.setLoop(THREE.LoopOnce, 1);
-            next.clampWhenFinished = true;
-        }
-
         next.play();
         // 平滑过渡动画
         if (prev && prev !== next) { prev.fadeOut(fade); next.fadeIn(fade); }
         else next.fadeIn(fade);
 
         this.state = next;
-        this.ctrl.onAnimationChange?.(name, next);
-    }
-
-    /** 跳到指定动画末帧并定格（用于无车门动画时的上下车）。 */
-    seekToEnd(name: string) {
-        if (!this.actions || !this.mixer) return;
-        const next = this.actions.get(name);
-        if (!next) return;
-
-        const prev = this.state;
-        const duration = next.getClip().duration;
-        next.reset();
-        next.setEffectiveWeight(1);
-        next.setEffectiveTimeScale(1);
-        next.setLoop(THREE.LoopOnce, 1);
-        next.clampWhenFinished = true;
-        next.enabled = true;
-        next.play();
-        next.paused = true;
-        next.time = duration;
-        if (prev && prev !== next) {
-            prev.stop();
-            prev.setEffectiveWeight(0);
-        }
-        this.state = next;
-        this.mixer.update(0);
         this.ctrl.onAnimationChange?.(name, next);
     }
 
@@ -269,7 +234,6 @@ export class AnimationSystem {
     // 更新所有混合器
     updateMixers(delta: number) {
         this.mixer?.update(delta);
-        for (const v of this.ctrl.vehicle.list) v.vehicleMixer?.update(delta);
     }
 
     // 按键状态触发动画
@@ -303,17 +267,7 @@ export class AnimationSystem {
         // 恢复相机距离
         this.ctrl.cam.maxDist = this.ctrl.cam.originMaxDist;
 
-        const v = this.ctrl.vehicle;
-        // 上下车流程中：有移动键输入才允许打断，否则不干预
-        if (v.isMovingToBoarding || v.isBoardingAnim || v.isExitAnim) {
-            const { fwd, bkd, lft, rgt } = this.ctrl.input;
-            if (!fwd && !bkd && !lft && !rgt) return;
-        }
-
-        // 取消上下车过程
-        v.cancelBoarding();
-        if (v.isExitAnim) { v.isExitAnim = false; v.exitDoorClosed = false; }
-        if (v.isBoardingAnim) { v.isBoardingAnim = false; v.doorClosed = false; }
+        if (this.ctrl.controllerMode === 1) return;
 
         const { fwd, bkd, lft, rgt, shift, space } = this.ctrl.input;
 

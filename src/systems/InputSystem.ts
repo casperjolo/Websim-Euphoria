@@ -169,7 +169,6 @@ export class InputSystem {
             // 跳跃
             case "jump":
                 if (pressed) {
-                    c.vehicle.cancelBoarding(); // 取消载具模式下的下车
                     this.space = true;
                     if (c.controllerMode === 1) return; // 载具模式不跳跃
                     if (c.isFlying) { c.animation.setAnimationByPressed(); return; } // 飞行中仅切动画

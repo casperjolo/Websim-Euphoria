@@ -136,8 +136,6 @@ async function init() {
             jumpAnim: "jump",
             flyAnim: "flying",
             flyIdleAnim: "flyidle",
-            enterCarAnim: "enterCar",
-            exitCarAnim: "exitCar",
             headBoneName: "mixamorigHead",
             firstPersonPitchOffset: FIRST_PERSON_PITCH_OFFSET_BY_MODEL[PLAYER_MODEL_URL] ?? 0,
             rotateY: - Math.PI / 2,

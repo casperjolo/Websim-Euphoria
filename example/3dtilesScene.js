@@ -138,7 +138,6 @@ async function initPlayer() {
     const gltfLoader = new GLTFLoader();
     gltfLoader.setDRACOLoader(dracoLoader);
     const colliderGltf = await gltfLoader.loadAsync("./glb/eiffel_collider.glb");
-    // collider-forge(ENU) 与 ReorientationPlugin(OBJECT_FRAME) 绕竖直轴差 180°
     colliderGltf.scene.rotation.y = Math.PI;
 
     // 初始化玩家控制器
@@ -156,8 +155,6 @@ async function initPlayer() {
             jumpAnim: "jump",
             flyAnim: "flying",
             flyIdleAnim: "flyidle",
-            enterCarAnim: "enterCar",
-            exitCarAnim: "exitCar",
             headBoneName: "mixamorigHead",
         },
         initPos: new Vector3(105.96, 81.25, 62.92),
@@ -172,14 +169,17 @@ async function initPlayer() {
     await player.loadVehicleModel({
         position: new Vector3(101.96, 81.25, 62.92),
         url: "./glb/sedan.glb",
-        scale: 0.9,
+        scale: 1.0,
         wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-        boardingPoint: new Vector3(0.6, 0, 1.9),
-        seatOffset: new Vector3(0.35, 0.65, 0.0),
+        driverSeatPosition: new Vector3(0.35, 0.65, 0.0),
+        driverSeatRotation: 0,
         chassisRatio: 0.35,
         suspensionRestLengthRatio: 0.2,
         followVehicleDirection: false,
-        speedMultiplier: 1.5,
+        mass: 1500,
+        maxSpeed: 450,
+        acceleration: 12,
+        deceleration: 8,
     });
 
     const vehicle = player.getAllVehicles().at(-1);
@@ -188,6 +188,11 @@ async function initPlayer() {
             child.material.metalness = 0.8;
             child.material.roughness = 0.0;
         }
+    });
+
+    window.addEventListener("keydown", (e) => {
+        if (e.code !== "KeyR" || e.repeat) return;
+        player.resetVehicle();
     });
 }
 

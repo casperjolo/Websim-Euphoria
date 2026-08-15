@@ -103,11 +103,17 @@ const PLAYER_MODELS = {
         idleAnim: "idle1",
         walkAnim: "walk",
         runAnim: "run",
-        jumpAnim: "jump",
-        flyAnim: "flying",
-        flyIdleAnim: "flyidle",
-        enterCarAnim: "enterCar",
-        exitCarAnim: "exitCar",
+        // jumpAnim: "jump",
+        jumpAnim: ["jump", "Jump_Loop", "Jump_Land"],
+        flyAnim: "fly",
+        flyIdleAnim: "flyIdle",
+        flyHoverForwardAnim: "flyHoverForward",
+        flyHoverBackAnim: "flyHoverBack",
+        flyHoverLeftAnim: "flyHoverLeft",
+        flyHoverRightAnim: "flyHoverRight",
+        flyHoverUpAnim: "flyHoverUp",
+        flyHoverDownAnim: "flyHoverDown",
+        drivingAnim: "Driving_Loop",
         headBoneName: "mixamorigHead",
         rotateY: Math.PI,
     },
@@ -120,8 +126,6 @@ const PLAYER_MODELS = {
         jumpAnim: "jump",
         flyAnim: "flying",
         flyIdleAnim: "flyidle",
-        enterCarAnim: "enterCar",
-        exitCarAnim: "exitCar",
         headBoneName: "mixamorigHead",
         rotateY: Math.PI,
     },
@@ -140,6 +144,7 @@ const PLAYER_MODELS = {
         flyHoverRightAnim: "flyHoverRight",
         flyHoverUpAnim: "flyHoverUp",
         flyHoverDownAnim: "flyHoverDown",
+        drivingAnim: "Driving_Loop",
         headBoneName: "Head",
         rotateY: Math.PI,
         firstPersonCameraOffset: [0, 0.15, 0.12],
@@ -149,12 +154,16 @@ const PLAYER_MODELS = {
 // 车辆配置（Generic Sedan Car by MMC Works, CC BY 4.0）
 const VEHICLE_CONFIG = {
     url: "./glb/sedan.glb",
-    scale: 0.09,
+    scale: 0.1,
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-    boardingPoint: new Vector3(0.6, 0, 2),
-    seatOffset: new Vector3(0.35, 0.65, -0.1),
     chassisRatio: 0.35,
     suspensionRestLengthRatio: 0.2,
+    mass: 1500,
+    maxSpeed: 300,
+    acceleration: 8,
+    deceleration: 8,
+    driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
+    driverSeatRotation: -Math.PI / 2,
 };
 
 init();
@@ -371,6 +380,7 @@ async function init() {
         initPos: pos,
         minCamDistance: 50,
         maxCamDistance: 220,
+        enableSpringCamera: true,
         enableOverShoulderView: false,
     });
 
@@ -406,6 +416,11 @@ async function init() {
 
     // 调试
     initGUI();
+
+    window.addEventListener("keydown", (e) => {
+        if (e.code !== "KeyR" || e.repeat) return;
+        player.resetVehicle();
+    });
 
     window.addEventListener("resize", onWindowResize, false);
 
@@ -617,6 +632,7 @@ async function onPreviewDblClick() {
         minCamDistance: 50,
         maxCamDistance: 220,
         colliderMeshUrl: currentBlobUrl,
+        enableSpringCamera: guiParams?.enableSpringCamera ?? true,
         enableOverShoulderView: guiParams?.enableOverShoulderView ?? true,
         camOverShoulderOffsetRatio: guiParams?.camOverShoulderOffsetRatio ?? 0.2,
         thirdMouseMode: guiParams?.thirdMouseMode ?? 1,
@@ -713,7 +729,7 @@ function initGUI() {
         minCamDistance: 50,
         maxCamDistance: 220,
         camLookAtHeightRatio: 0.8,
-        enableSpringCamera: false,
+        enableSpringCamera: true,
         springCameraTime: 0.05,
         thirdMouseMode: 1,
         enableZoom: false,
@@ -722,17 +738,9 @@ function initGUI() {
         camOverShoulderOffsetRatio: 0.2,
         centerRaycast: false,
         showSkeleton: false,
-        pathPlannerDebug: false,
     };
 
     const defaults = { ...params };
-
-    const setPathPlannerDebug = (enabled) => {
-        player.getAllVehicles().forEach((v) => {
-            v.pathPlanner?.updateConfig({ debugEnabled: enabled });
-            if (!enabled) v.pathPlanner?.clearVisualization();
-        });
-    };
 
     const spawnController = gui.add(
         {
@@ -759,7 +767,6 @@ function initGUI() {
                     position: spawnPos,
                 });
                 const spawned = player.getAllVehicles().at(-1);
-                spawned?.pathPlanner?.updateConfig({ debugEnabled: params.pathPlannerDebug });
                 spawned?.vehicleGroup?.traverse((child) => {
                     if (child.isMesh) {
                         child.castShadow = true;
@@ -834,8 +841,6 @@ function initGUI() {
     gui.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).onChange((v) => player.setThirdMouseMode(Number(v)));
     gui.add(params, "enableZoom").onChange((v) => player.setEnableZoom(v));
     gui.add(params, "debug").onChange((v) => player.setDebug(v));
-    gui.add(params, "pathPlannerDebug").name("Path Planner Debug")
-        .onChange((v) => setPathPlannerDebug(v));
     gui.add(params, "enableOverShoulderView").onChange((v) => player.setOverShoulderView(v));
     gui.add(params, "centerRaycast").name("Center Raycast Debug")
         .onChange((v) => { if (!v) raycastSphere.visible = false; });
@@ -860,7 +865,6 @@ function initGUI() {
                 player.setThirdMouseMode(defaults.thirdMouseMode);
                 player.setEnableZoom(defaults.enableZoom);
                 player.setDebug(defaults.debug);
-                setPathPlannerDebug(defaults.pathPlannerDebug);
                 player.setOverShoulderView(defaults.enableOverShoulderView);
                 player.setCamOverShoulderOffsetRatio(defaults.camOverShoulderOffsetRatio);
                 raycastSphere.visible = false;
