@@ -30,6 +30,8 @@ export type FootIKPlayer = {
     playerModel: Object3D | null;
     playerIsOnGround: boolean;
     isFlying?: boolean;
+    /** 角色世界速度；预测落点用水平分量。 */
+    playerVelocity: Vector3;
     playerModelConfig: {
         scale: number;
         walkAnim: string;
@@ -116,6 +118,65 @@ export type FootIKOptions = {
     footPhaseMinContactRatio?: number;
     /** 支撑脚水平速度过滤倍率，默认 1.35。 */
     footPhaseSpeedSlack?: number;
+    /**
+     * 是否启用预测脚步 IK。默认 false（保持反应式贴地）。
+     * 开启后仅在循环 locomotion 中预测落点并采样 FootPath；Idle / 落地缓冲仍用反应式。
+     */
+    predictive?: boolean;
+    /** 实际落点与预测点水平距离小于该值时，用预测点作为新落点（scale=1 基准），默认 6。 */
+    plantSnapEpsilon?: number;
+    /**
+     * 落地边沿后硬锁定落点的时长（秒），默认 0.1。
+     * 超时或抬脚/水平滑出阈值后立即解锁，避免 toe-off 仍钉在旧世界落点。
+     */
+    plantLockDuration?: number;
+    /** 动画脚相对落点上抬超过该值则提前解锁（scale=1 基准），默认 4。 */
+    plantUnlockLift?: number;
+    /** 动画脚相对落点水平偏离超过该值则提前解锁（scale=1 基准），默认 10。 */
+    plantUnlockHoriz?: number;
+    /** FootPath 两端对向迭代细分次数，默认 5。 */
+    footPathIterations?: number;
+    /** 离地再落地后强制使用反应式 IK 的宽限时间（秒），默认 0.35。 */
+    predictiveLandingGrace?: number;
+    /** 预测模式下盆骨重建弹簧阻尼速度，默认 12。 */
+    pelvisSpring?: number;
+    /** FootPath 中段相对端点的额外抬高（scale=1 基准），默认 28。平地也会形成摆腿弧；走路步幅短时还会按步长比例加高。 */
+    pathMidLift?: number;
+    /** 上下坡时叠加到 FootPath 上的动画抬脚高度缩放，默认 0.35。 */
+    animLiftScaleOnSlope?: number;
+    /** 预测模式下上楼时盆骨额外下压（scale=1 基准），默认 5。 */
+    stairPelvisDropUp?: number;
+    /** 预测模式下下楼时盆骨额外下压（scale=1 基准），默认 8。 */
+    stairPelvisDropDown?: number;
+    /** 预测模式下 mesh 台阶补偿限幅缩放（0~1），默认 0.25。 */
+    meshStepPredictiveScale?: number;
+};
+
+/** 单只脚的预测落点 / FootPath 运行时状态。 */
+export type PredictiveFootState = {
+    /** 上一次落脚世界坐标（踩下瞬间固定，用于 FootPath 起点 / Debug）。 */
+    lastPlantWorld: Vector3;
+    /**
+     * 落点相对胶囊的水平偏移（踩下时记录）。
+     * 每帧用当前胶囊还原锚点后再 × 剩余时间外推，避免 timeToLand→0 时预测塌回旧世界落点。
+     */
+    lastPlantLocal: Vector3;
+    /** 当前预测的下一步落脚世界坐标。 */
+    predictedWorld: Vector3;
+    /** 踩下锁定的世界坐标。 */
+    lockedPlantWorld: Vector3;
+    /** 当前步伐 FootPath 采样点。 */
+    pathPoints: Vector3[];
+    /** 是否已记录过至少一次落点。 */
+    hasPlant: boolean;
+    /** 是否处于踩下短时锁定（刚落地窗口，非整个 contact）。 */
+    locked: boolean;
+    /** 短时锁定剩余时间（秒）。 */
+    lockRemaining: number;
+    /** 上一帧相位是否 planted，用于边沿检测。 */
+    wasPlanted: boolean;
+    /** 本帧 Path 采样得到的世界高度增量目标。 */
+    pathSample: Vector3;
 };
 
 // 单个地面探测采样点的运行时数据。

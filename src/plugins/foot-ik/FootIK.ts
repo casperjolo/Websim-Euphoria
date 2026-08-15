@@ -24,14 +24,33 @@ import {
 } from "./internal/skeleton";
 import {
     createDebugObjects,
+    createEmptyPredictiveDebug,
+    createPredictiveDebugObjects,
     createSoleSampleDebugObjects,
+    disposeDebugObjects,
+    disposePredictiveDebugObjects,
     getFootPhaseDebugText,
     setDebugVisible,
+    setPredictiveDebugVisible,
     setSoleSampleDebugVisible,
     updateFootDebug,
+    updatePredictiveDebug,
     updateSoleSampleDebugObjects,
-    disposeDebugObjects,
+    type PredictiveDebugObjects,
 } from "./internal/debug";
+import {
+    createPredictiveFootState,
+    predictPlantWorld,
+    predictiveTargetDamp,
+    recordPlantOnLand,
+    resetPredictiveFootState,
+    tickPlantLock,
+} from "./internal/predictive-plant";
+import {
+    buildFootPath,
+    sampleFootPath,
+} from "./internal/foot-path";
+import { computePelvisRebuildOffset } from "./internal/pelvis-rebuild";
 import type {
     FootIKBonePose,
     FootIKLeg,
@@ -44,6 +63,7 @@ import type {
     FootPhaseControllerState,
     FootPhaseDatabase,
     FootPhaseOptions,
+    PredictiveFootState,
     ReadyFootIKLeg,
 } from "./types";
 import type { TwoBoneIKScratch } from "./internal/two-bone-ik";
@@ -61,6 +81,8 @@ export class FootIK {
     private disposed = false;
     private debug: boolean;
     private soleSampleDebug: boolean;
+    /** 预测脚步 IK 开关；默认关闭，关闭时走现有反应式路径。 */
+    private predictive: boolean;
 
     // IK 距离、角度和脚掌贴合配置。
     private maxPelvisDrop = 20;
@@ -79,6 +101,19 @@ export class FootIK {
     private sampleRayOriginY = 90;
     private raycastFar = 440;
     private snapEpsilon = 0.02;
+    private plantSnapEpsilon = 6;
+    private plantLockDuration = 0.1;
+    private plantUnlockLift = 4;
+    private plantUnlockHoriz = 10;
+    private footPathIterations = 5;
+    private predictiveLandingGrace = 0.35;
+    private pelvisSpring = 12;
+    private pathMidLift = 28;
+    private animLiftScaleOnSlope = 0.35;
+    private stairPelvisDropUp = 5;
+    private stairPelvisDropDown = 8;
+    private meshStepPredictiveScale = 0.25;
+    private pathBumpEpsilon = 0.5;
     // 当前距离字段已烘焙进去的 scale；改 scale 时按 ratio 连乘。
     private appliedScale = 1;
 
@@ -133,11 +168,26 @@ export class FootIK {
     private hips: Bone | null = null;
     private legs: FootIKLegs;
 
+    // 预测 IK 每脚状态与落地宽限。
+    private readonly predictiveFeet: Record<FootIKSide, PredictiveFootState> = {
+        left: createPredictiveFootState(),
+        right: createPredictiveFootState(),
+    };
+    private wasAirborne = false;
+    private landingGraceRemaining = 0;
+    private readonly animFootWorld: Record<FootIKSide, Vector3> = {
+        left: new Vector3(),
+        right: new Vector3(),
+    };
+    private readonly plantAnchorWorld = new Vector3();
+    private readonly predictiveDebug: PredictiveDebugObjects = createEmptyPredictiveDebug();
+
     /** 创建 FootIK 插件。 */
     constructor(options: FootIKOptions = {}) {
         this.enabled = options.enabled ?? true;
         this.debug = options.debug ?? false; // 是否显示脚底 IK 调试对象，默认 false
         this.soleSampleDebug = options.soleSampleDebug ?? false; // 是否显示始终跟随 foot 骨骼的脚底采样点
+        this.predictive = options.predictive ?? false;
 
         // 距离类参数先写入 scale=1 基准值，挂载后按 playerModelConfig.scale 连乘。
         this.maxPelvisDrop = Math.max(0, options.maxPelvisDrop ?? this.maxPelvisDrop);
@@ -150,6 +200,23 @@ export class FootIK {
         this.maxMeshStepRaise = Math.max(0, options.maxMeshStepRaise ?? this.maxMeshStepRaise);
         this.meshStepCoplanarThreshold = Math.max(0, options.meshStepCoplanarThreshold ?? this.meshStepCoplanarThreshold);
         this.footPhaseGroundThreshold = Math.max(0, options.footPhaseGroundThreshold ?? this.footPhaseGroundThreshold);
+        this.plantSnapEpsilon = Math.max(0, options.plantSnapEpsilon ?? this.plantSnapEpsilon);
+        this.plantLockDuration = Math.max(0, options.plantLockDuration ?? this.plantLockDuration);
+        this.plantUnlockLift = Math.max(0, options.plantUnlockLift ?? this.plantUnlockLift);
+        this.plantUnlockHoriz = Math.max(0, options.plantUnlockHoriz ?? this.plantUnlockHoriz);
+        this.pathMidLift = Math.max(0, options.pathMidLift ?? this.pathMidLift);
+        this.stairPelvisDropUp = Math.max(0, options.stairPelvisDropUp ?? this.stairPelvisDropUp);
+        this.stairPelvisDropDown = Math.max(0, options.stairPelvisDropDown ?? this.stairPelvisDropDown);
+
+        this.footPathIterations = Math.max(1, Math.floor(options.footPathIterations ?? this.footPathIterations));
+        this.predictiveLandingGrace = Math.max(0, options.predictiveLandingGrace ?? this.predictiveLandingGrace);
+        this.pelvisSpring = Math.max(0.1, options.pelvisSpring ?? this.pelvisSpring);
+        this.animLiftScaleOnSlope = MathUtils.clamp(options.animLiftScaleOnSlope ?? this.animLiftScaleOnSlope, 0, 1);
+        this.meshStepPredictiveScale = MathUtils.clamp(
+            options.meshStepPredictiveScale ?? this.meshStepPredictiveScale,
+            0,
+            1,
+        );
 
         this.footAlignWeight = MathUtils.clamp(options.footAlignWeight ?? 1, 0, 1); // 脚掌贴合地面法线的强度
         this.maxFootTilt = MathUtils.clamp(options.maxFootTilt ?? Math.PI / 2, 0, Math.PI); // 脚掌贴坡最大旋转角
@@ -229,6 +296,7 @@ export class FootIK {
         this.footPhaseClips.clear();
         this.adjusted.clear();
         this.poseCache.clear();
+        disposePredictiveDebugObjects(this.predictiveDebug);
     }
 
     // 模型切换后释放旧调试对象，并基于新模型重新绑定全部运行时数据。
@@ -236,6 +304,8 @@ export class FootIK {
         if (!this.player?.playerModel) return;
         this.restore();
         disposeDebugObjects(this.legs);
+        disposePredictiveDebugObjects(this.predictiveDebug);
+        this.clearPredictiveState();
         this.syncDistanceScale();
         this.bindSkeleton();
     }
@@ -291,6 +361,13 @@ export class FootIK {
         this.sampleRayOriginY *= ratio;
         this.raycastFar *= ratio;
         this.snapEpsilon *= ratio;
+        this.plantSnapEpsilon *= ratio;
+        this.plantUnlockLift *= ratio;
+        this.plantUnlockHoriz *= ratio;
+        this.pathMidLift *= ratio;
+        this.stairPelvisDropUp *= ratio;
+        this.stairPelvisDropDown *= ratio;
+        this.pathBumpEpsilon *= ratio;
         this.raycaster.far = this.raycastFar;
         this.footPhaseOptions.groundThreshold = this.footPhaseGroundThreshold;
         this.appliedScale = next;
@@ -304,11 +381,38 @@ export class FootIK {
             this.restore();
             this.resetMeshStepOffsetImmediately();
             this.pelvisOffset = 0;
+            this.clearPredictiveState();
             this.setDebugVisible(false);
             this.setSoleSampleDebugVisible(false);
         } else if (this.debug) {
             this.setDebugEnabled(true);
         }
+    }
+
+    /** 启用或关闭预测脚步 IK；关闭时清空预测缓存并回退反应式。 */
+    setPredictiveEnabled(enabled: boolean): void {
+        if (this.disposed) return;
+        if (this.predictive === enabled) return;
+        this.predictive = enabled;
+        this.clearPredictiveState();
+        this.landingGraceRemaining = 0;
+        this.wasAirborne = false;
+        if (this.debug) {
+            this.createPredictiveDebugObjects();
+            this.setPredictiveDebugVisible(enabled);
+        }
+    }
+
+    /** 当前是否启用预测脚步 IK。 */
+    isPredictiveEnabled(): boolean {
+        return this.predictive;
+    }
+
+    /** 清空落点 / FootPath 缓存，避免模式切换串数据。 */
+    private clearPredictiveState(): void {
+        resetPredictiveFootState(this.predictiveFeet.left);
+        resetPredictiveFootState(this.predictiveFeet.right);
+        this.setPredictiveDebugVisible(false);
     }
 
     // 保存玩家控制器引用并初始化模型相关状态。
@@ -327,6 +431,7 @@ export class FootIK {
         this.restore();
         this.resetMeshStepOffsetImmediately();
         disposeDebugObjects(this.legs);
+        disposePredictiveDebugObjects(this.predictiveDebug);
         this.footPhaseClips.clear();
         this.adjusted.clear();
         this.poseCache.clear();
@@ -337,6 +442,9 @@ export class FootIK {
         this.player = null;
         this.meshStepOffsetY = 0;
         this.pelvisOffset = 0;
+        this.clearPredictiveState();
+        this.landingGraceRemaining = 0;
+        this.wasAirborne = false;
     }
 
     // 创建尚未绑定骨骼的左右腿占位状态。
@@ -394,9 +502,21 @@ export class FootIK {
             || !this.player.playerIsOnGround
             || this.player.isFlying
         ) {
+            this.wasAirborne = true;
             this.resetMeshStepOffset(delta);
+            this.clearPredictiveState();
             this.setDebugVisible(false);
             return;
+        }
+
+        // 离地再落地：宽限期内强制反应式，并重置预测参数。
+        if (this.wasAirborne) {
+            this.wasAirborne = false;
+            this.clearPredictiveState();
+            this.landingGraceRemaining = this.predictive ? this.predictiveLandingGrace : 0;
+        }
+        if (this.landingGraceRemaining > 0) {
+            this.landingGraceRemaining = Math.max(0, this.landingGraceRemaining - delta);
         }
 
         const model = this.player.playerModel;
@@ -404,6 +524,19 @@ export class FootIK {
 
         // moving 决定移动与静止 IK 策略：移动使用脚步相位和稳定直弯 pole，静止保留动画 pole。
         const moving = this.isLocomotion();
+        const usePredictive = this.shouldUsePredictive(moving);
+
+        if (usePredictive) {
+            this.applyMeshStepOffset(delta, this.meshStepPredictiveScale);
+            model?.updateMatrixWorld(true);
+            this.updatePredictiveFeet(delta);
+            this.applyPelvisRebuild(delta);
+            this.applyLeg("left", moving);
+            this.applyLeg("right", moving);
+            this.syncFootBoneDebugMarkers();
+            this.updatePredictiveDebugObjects();
+            return;
+        }
 
         // 先处理胶囊上台阶带来的视觉高度差，再算脚目标。
         this.applyMeshStepOffset(delta);
@@ -415,6 +548,16 @@ export class FootIK {
         this.applyPelvis(delta);
         this.applyLeg("left", moving);
         this.applyLeg("right", moving);
+        this.setPredictiveDebugVisible(false);
+    }
+
+    /** 预测分支门控：开关开、循环 locomotion、宽限结束、双脚相位可用。 */
+    private shouldUsePredictive(moving: boolean): boolean {
+        if (!this.predictive || !moving) return false;
+        if (this.landingGraceRemaining > 0) return false;
+        const clipName = this.footPhaseState.clipName;
+        if (!clipName || !this.footPhaseClips.has(clipName)) return false;
+        return true;
     }
 
     // 构建脚步相位库。具体采样和过滤逻辑在 foot-phase.ts 中。
@@ -526,6 +669,247 @@ export class FootIK {
         leg.smoothedTarget.copy((leg.planted || leg.movePenetrating) ? target : footWorld);
 
         this.updateFootDebug(leg, leg.footSamplePoint, hit.point);
+    }
+
+    /**
+     * 预测 IK：记录落点 → 速度×timeToLand 预测 → FootPath 采样增量 → 踩下锁定。
+     * 首步尚无落点记录时，单脚回退反应式 updateFoot。
+     */
+    private updatePredictiveFeet(delta: number): void {
+        const velocity = this.player?.playerVelocity;
+        const vx = velocity?.x ?? 0;
+        const vz = velocity?.z ?? 0;
+
+        for (const side of ["left", "right"] as const) {
+            const leg = this.legs[side];
+            if (!isReadyLeg(leg)) continue;
+            this.animFootWorld[side].copy(leg.foot.getWorldPosition(this.tmpV1));
+        }
+
+        // 先处理落地边沿与预测刷新，再算目标（对侧预测依赖本帧新落点）。
+        for (const side of ["left", "right"] as const) {
+            this.syncPredictivePlant(side, vx, vz, delta);
+        }
+
+        for (const side of ["left", "right"] as const) {
+            this.applyPredictiveFootTarget(side, delta);
+        }
+    }
+
+    /** 落地边沿记落点，短时硬锁，并刷新该脚下一步预测位置。 */
+    private syncPredictivePlant(side: FootIKSide, velocityX: number, velocityZ: number, delta: number): void {
+        const leg = this.legs[side];
+        if (!isReadyLeg(leg)) return;
+
+        const capsule = this.player?.playerCapsule;
+        if (!capsule) return;
+
+        const state = this.predictiveFeet[side];
+        const phase = this.footPhaseState[side];
+        const planted = !!phase?.planted;
+        const animFoot = this.animFootWorld[side];
+
+        if (planted && !state.wasPlanted) {
+            const hit = this.castGroundAtSample(animFoot);
+            const actual = this.tmpV2.copy(animFoot);
+            if (hit) {
+                actual.copy(hit.point);
+                actual.y += this.soleSkinThickness;
+            }
+            recordPlantOnLand(
+                state,
+                actual,
+                capsule.position,
+                this.plantSnapEpsilon,
+                this.plantLockDuration,
+                this.tmpV3,
+            );
+            state.pathPoints.length = 0;
+        }
+
+        state.wasPlanted = planted;
+        tickPlantLock(state, {
+            planted,
+            animFootWorld: animFoot,
+            delta,
+            unlockLift: this.plantUnlockLift,
+            unlockHoriz: this.plantUnlockHoriz,
+        });
+
+        if (!state.hasPlant) return;
+
+        // 硬锁期间预测点钉在落点；其余时间用 Actor 局部锚点 + 剩余时间外推
+        const timeToLand = state.locked ? 0 : (phase?.timeToLand ?? 0);
+        predictPlantWorld(
+            state,
+            capsule.position,
+            velocityX,
+            velocityZ,
+            timeToLand,
+            (x, y, z) => this.castGroundFrom(x, y, z),
+            this.sampleRayOriginY,
+            this.soleSkinThickness,
+            this.plantAnchorWorld,
+            state.predictedWorld,
+        );
+
+        if (state.locked) {
+            state.predictedWorld.copy(state.lockedPlantWorld);
+        }
+    }
+
+    /** 根据相位采样 FootPath 或锁定落点，写出 leg.smoothedTarget。 */
+    /** 根据相位采样 FootPath 或锁定落点，写出 leg.smoothedTarget。 */
+    private applyPredictiveFootTarget(side: FootIKSide, delta: number): void {
+        const leg = this.legs[side];
+        if (!isReadyLeg(leg)) return;
+
+        const state = this.predictiveFeet[side];
+        const phase = this.footPhaseState[side];
+        const animFoot = this.animFootWorld[side];
+
+        // 尚无落点：回退反应式单脚逻辑
+        if (!state.hasPlant) {
+            this.updateFoot(side, delta, true);
+            return;
+        }
+
+        const planted = !!phase?.planted;
+        leg.planted = planted;
+
+        // 穿透兜底：始终检测
+        const hit = this.castBestFootGround(leg, animFoot);
+        if (hit) {
+            this.getWorldHitNormal(hit, leg.hitNormal);
+            leg.hitPoint.copy(hit.point);
+        }
+
+        if (this.hasFootHitAboveCapsuleBottom(leg)) {
+            leg.weight = 0;
+            leg.plantedWeight = 0;
+            leg.offsetY = 0;
+            leg.movePenetrating = false;
+            leg.smoothedTarget.copy(animFoot);
+            this.updateFootDebug(leg, leg.footSamplePoint, hit?.point ?? animFoot);
+            return;
+        }
+
+        const liftAmount = this.getMovePenetrationLift(leg);
+        leg.movePenetrating = liftAmount > this.moveLiftThreshold;
+
+        const wantedPlantedWeight = planted || state.locked ? 1 : 0;
+        leg.plantedWeight = MathUtils.damp(leg.plantedWeight ?? 0, wantedPlantedWeight, 18, delta);
+
+        // 预测模式：只要有落点记录就全力解 IK，否则脚跟不上橙球目标
+        leg.weight = 1;
+
+        const target = this.tmpV2.copy(animFoot);
+
+        if (state.locked) {
+            // 落地短窗口：钉在世界落点
+            target.copy(state.lockedPlantWorld);
+            target.y += liftAmount;
+            this.followPredictiveTarget(leg, target, predictiveTargetDamp(1, true, true), delta);
+            state.pathSample.copy(leg.smoothedTarget);
+        } else if (planted) {
+            // 支撑：水平/高度跟动画，仅防穿地抬升——保留原动画抬脚，不被落点压扁
+            target.copy(animFoot);
+            if (hit) {
+                const groundY = hit.point.y + this.soleSkinThickness;
+                if (target.y < groundY) target.y = groundY;
+            }
+            target.y += liftAmount;
+            this.followPredictiveTarget(leg, target, predictiveTargetDamp(1, true, false), delta);
+            state.pathSample.copy(leg.smoothedTarget);
+        } else {
+            const progress = MathUtils.clamp(phase?.progress ?? 0, 0, 1);
+            const plant = state.lastPlantWorld;
+            const predict = state.predictedWorld;
+
+            buildFootPath(
+                plant,
+                predict,
+                {
+                    iterations: this.footPathIterations,
+                    castGround: (x, y, z) => this.castGroundFrom(x, y, z),
+                    probeHeight: this.sampleRayOriginY * 0.35,
+                    soleOffset: this.soleSkinThickness,
+                    midLift: this.pathMidLift,
+                    bumpEpsilon: this.pathBumpEpsilon,
+                    arcSegments: Math.max(8, this.footPathIterations + 4),
+                },
+                state.pathPoints,
+            );
+
+            sampleFootPath(state.pathPoints, progress, state.pathSample);
+
+            // 严格跟 FootPath 采样点；仅落地末段收束到预测落点
+            const landPull = MathUtils.smoothstep(0.85, 1, progress);
+            target.copy(state.pathSample);
+            target.lerp(predict, landPull);
+            target.y += liftAmount;
+            // 无阻尼：IK 目标每帧等于线路点，避免脚在蓝线下方拖行
+            leg.smoothedTarget.copy(target);
+        }
+
+        leg.offsetY = (leg.smoothedTarget.y - animFoot.y) * leg.weight;
+        // 橙/青球改在 applyLeg 之后贴脚骨；这里只更新射线参考
+        if (this.debug) {
+            const hitPt = hit?.point ?? leg.smoothedTarget;
+            if (leg.rayLine) {
+                leg.rayLine.visible = true;
+                leg.rayLine.geometry.setFromPoints([animFoot, hitPt]);
+            }
+        }
+    }
+
+    /** 让 smoothedTarget 快速跟上预测目标，减少脚与调试橙球脱节。 */
+    private followPredictiveTarget(
+        leg: FootIKLeg,
+        target: Vector3,
+        damp: number,
+        delta: number,
+    ): void {
+        leg.smoothedTarget.x = MathUtils.damp(leg.smoothedTarget.x, target.x, damp, delta);
+        leg.smoothedTarget.y = MathUtils.damp(leg.smoothedTarget.y, target.y, damp, delta);
+        leg.smoothedTarget.z = MathUtils.damp(leg.smoothedTarget.z, target.z, damp, delta);
+        // 若仍落后较多则直接拉近，避免高速奔跑时目标甩在身前
+        const lagSq = leg.smoothedTarget.distanceToSquared(target);
+        const snapDist = this.plantUnlockHoriz * 0.35;
+        if (lagSq > snapDist * snapDist) {
+            leg.smoothedTarget.lerp(target, 0.65);
+        }
+    }
+
+    /** 预测模式：由较低脚反推骨盆高度，弹簧平滑。 */
+    private applyPelvisRebuild(delta: number): void {
+        if (!this.hips) return;
+
+        const leftLeg = this.legs.left;
+        const rightLeg = this.legs.right;
+        if (!isReadyLeg(leftLeg) || !isReadyLeg(rightLeg)) return;
+
+        const hipsWorldY = this.hips.getWorldPosition(this.tmpV1).y;
+        const wantedWorldOffset = computePelvisRebuildOffset({
+            leftFootY: leftLeg.smoothedTarget.y,
+            rightFootY: rightLeg.smoothedTarget.y,
+            animLeftFootY: this.animFootWorld.left.y,
+            animRightFootY: this.animFootWorld.right.y,
+            hipsWorldY,
+            stairDropUp: this.stairPelvisDropUp,
+            stairDropDown: this.stairPelvisDropDown,
+            stairThreshold: this.meshStepCoplanarThreshold,
+            maxDrop: this.maxPelvisDrop,
+            maxRaise: this.pelvisMaxRaise * 2,
+        });
+
+        this.pelvisOffset = MathUtils.damp(this.pelvisOffset, wantedWorldOffset, this.pelvisSpring, delta);
+        if (Math.abs(this.pelvisOffset) < this.snapEpsilon) return;
+
+        this.capture(this.hips);
+        const parentScale = this.hips.parent?.getWorldScale(this.tmpV1).y || 1;
+        this.hips.position.y += this.pelvisOffset / parentScale;
+        this.hips.updateMatrixWorld(true);
     }
 
     // 对一只脚的四个虚拟脚底点分别向下射线，选择命中高度最高的点作为本帧调试/法线参考。
@@ -650,7 +1034,8 @@ export class FootIK {
     // 当胶囊支撑高度与双脚地面不一致时，用 mesh 做视觉台阶补偿：
     // - 双脚同平面且高于胶囊 → 上抬 mesh，避免只抬脚导致深蹲
     // - 脚地面低于胶囊 → 下拽 mesh（胶囊已上台阶、脚还在低处）
-    private applyMeshStepOffset(delta: number): void {
+    // strength：预测模式下缩小限幅，避免与盆骨重建抢高度。
+    private applyMeshStepOffset(delta: number, strength = 1): void {
         const model = this.player?.playerModel;
         const capsule = this.player?.playerCapsule;
         if (!model || !capsule) return;
@@ -690,6 +1075,7 @@ export class FootIK {
         const supportY = Math.min(leftGroundY, rightGroundY);
         const planeDelta = Math.abs(leftGroundY - rightGroundY);
         const heightDelta = supportY - capsuleGroundY;
+        const scale = MathUtils.clamp(strength, 0, 1);
 
         let wantedOffset = 0;
         if (
@@ -697,10 +1083,10 @@ export class FootIK {
             && heightDelta > this.meshStepEpsilon
         ) {
             // 双脚近似同平面且明显高于胶囊地面：抬 mesh 对齐支撑面，站直。
-            wantedOffset = MathUtils.clamp(heightDelta, 0, this.maxMeshStepRaise);
+            wantedOffset = MathUtils.clamp(heightDelta, 0, this.maxMeshStepRaise) * scale;
         } else if (heightDelta < -this.meshStepEpsilon) {
             // 有脚还在更低地面：下拽 mesh（分平面时也按较低脚处理）。
-            wantedOffset = MathUtils.clamp(heightDelta, -this.maxMeshStepDrop, 0);
+            wantedOffset = MathUtils.clamp(heightDelta, -this.maxMeshStepDrop, 0) * scale;
         }
 
         this.setMeshStepOffset(wantedOffset, delta);
@@ -821,6 +1207,23 @@ export class FootIK {
         this.preserveFootWorldRotation(leg, this.savedFootWorldQ, leg.weight);
         this.alignFootToGround(leg);
         this.correctPostAlignSoleContact(leg, useStraightPole);
+
+        // 腿色球贴在解算后的脚骨上（不是 IK 目标）；目标用预测黄线表示
+        if (this.debug && leg.marker) {
+            leg.marker.visible = true;
+            leg.foot.getWorldPosition(leg.marker.position);
+        }
+    }
+
+    /** 预测模式下腿色球始终对齐脚骨世界位置。 */
+    private syncFootBoneDebugMarkers(): void {
+        if (!this.debug) return;
+        for (const side of ["left", "right"] as const) {
+            const leg = this.legs[side];
+            if (!leg.marker || !isReadyLeg(leg)) continue;
+            leg.marker.visible = true;
+            leg.foot.getWorldPosition(leg.marker.position);
+        }
     }
 
     // 抵消腿部 IK 对 foot 子骨骼造成的被动旋转，保留动画本来的脚掌朝向。
@@ -950,6 +1353,37 @@ export class FootIK {
     // 创建调试用的脚目标标记和射线线段。
     private createDebugObjects(): void {
         createDebugObjects(this.player?.scene ?? null, this.legs, this.debug);
+        this.createPredictiveDebugObjects();
+    }
+
+    private createPredictiveDebugObjects(): void {
+        createPredictiveDebugObjects(
+            this.player?.scene ?? null,
+            this.predictiveDebug,
+            this.debug && this.predictive,
+        );
+    }
+
+    private updatePredictiveDebugObjects(): void {
+        if (!this.debug || !this.predictive) {
+            setPredictiveDebugVisible(this.predictiveDebug, false);
+            return;
+        }
+        this.createPredictiveDebugObjects();
+        updatePredictiveDebug(
+            this.debug,
+            true,
+            this.predictiveDebug,
+            this.predictiveFeet,
+            {
+                left: this.legs.left.smoothedTarget,
+                right: this.legs.right.smoothedTarget,
+            },
+        );
+    }
+
+    private setPredictiveDebugVisible(visible: boolean): void {
+        setPredictiveDebugVisible(this.predictiveDebug, visible);
     }
 
     // 更新单只脚的调试标记和检测线位置。
@@ -960,6 +1394,7 @@ export class FootIK {
     // 统一切换腿部 IK 调试对象的显示状态。
     private setDebugVisible(visible: boolean): void {
         setDebugVisible(this.legs, visible);
+        if (!visible) this.setPredictiveDebugVisible(false);
     }
 
     // 按需创建跟随 foot 骨骼的脚底本地采样点调试对象。
@@ -991,8 +1426,14 @@ export class FootIK {
         this.debug = enabled;
         if (enabled) {
             this.createDebugObjects();
+            this.createPredictiveDebugObjects();
         }
         this.setDebugVisible(enabled);
+        if (enabled && this.predictive) {
+            this.setPredictiveDebugVisible(true);
+        } else {
+            this.setPredictiveDebugVisible(false);
+        }
     }
 
     /** 控制四个 foot-local 脚底采样点调试对象的显隐。 */
@@ -1011,6 +1452,7 @@ export class FootIK {
             enabled: this.enabled,
             debug: this.debug,
             soleSampleDebug: this.soleSampleDebug,
+            predictive: this.predictive,
             maxPelvisDrop: this.toBaseDistance(this.maxPelvisDrop),
             soleHalfWidth: this.toBaseDistance(this.soleHalfWidth),
             soleToeExtend: this.toBaseDistance(this.soleToeExtend),
@@ -1028,6 +1470,18 @@ export class FootIK {
             footPhaseGroundThreshold: this.toBaseDistance(this.footPhaseGroundThreshold),
             footPhaseMinContactRatio: this.footPhaseOptions.minContactRatio,
             footPhaseSpeedSlack: this.footPhaseOptions.speedSlack,
+            plantSnapEpsilon: this.toBaseDistance(this.plantSnapEpsilon),
+            plantLockDuration: this.plantLockDuration,
+            plantUnlockLift: this.toBaseDistance(this.plantUnlockLift),
+            plantUnlockHoriz: this.toBaseDistance(this.plantUnlockHoriz),
+            footPathIterations: this.footPathIterations,
+            predictiveLandingGrace: this.predictiveLandingGrace,
+            pelvisSpring: this.pelvisSpring,
+            pathMidLift: this.toBaseDistance(this.pathMidLift),
+            animLiftScaleOnSlope: this.animLiftScaleOnSlope,
+            stairPelvisDropUp: this.toBaseDistance(this.stairPelvisDropUp),
+            stairPelvisDropDown: this.toBaseDistance(this.stairPelvisDropDown),
+            meshStepPredictiveScale: this.meshStepPredictiveScale,
         };
     }
 
@@ -1042,6 +1496,7 @@ export class FootIK {
         if (options.enabled !== undefined) this.setEnabled(options.enabled);
         if (options.debug !== undefined) this.setDebugEnabled(options.debug);
         if (options.soleSampleDebug !== undefined) this.setSoleSampleDebugEnabled(options.soleSampleDebug);
+        if (options.predictive !== undefined) this.setPredictiveEnabled(options.predictive);
 
         let soleDirty = false;
         let phaseDirty = false;
@@ -1093,6 +1548,42 @@ export class FootIK {
             this.footPhaseOptions.groundThreshold = this.footPhaseGroundThreshold;
             phaseDirty = true;
         }
+        if (options.plantSnapEpsilon !== undefined) {
+            this.plantSnapEpsilon = this.scaleDistance(options.plantSnapEpsilon);
+        }
+        if (options.plantLockDuration !== undefined) {
+            this.plantLockDuration = Math.max(0, options.plantLockDuration);
+        }
+        if (options.plantUnlockLift !== undefined) {
+            this.plantUnlockLift = this.scaleDistance(options.plantUnlockLift);
+        }
+        if (options.plantUnlockHoriz !== undefined) {
+            this.plantUnlockHoriz = this.scaleDistance(options.plantUnlockHoriz);
+        }
+        if (options.footPathIterations !== undefined) {
+            this.footPathIterations = Math.max(1, Math.floor(options.footPathIterations));
+        }
+        if (options.predictiveLandingGrace !== undefined) {
+            this.predictiveLandingGrace = Math.max(0, options.predictiveLandingGrace);
+        }
+        if (options.pelvisSpring !== undefined) {
+            this.pelvisSpring = Math.max(0.1, options.pelvisSpring);
+        }
+        if (options.pathMidLift !== undefined) {
+            this.pathMidLift = this.scaleDistance(options.pathMidLift);
+        }
+        if (options.animLiftScaleOnSlope !== undefined) {
+            this.animLiftScaleOnSlope = MathUtils.clamp(options.animLiftScaleOnSlope, 0, 1);
+        }
+        if (options.stairPelvisDropUp !== undefined) {
+            this.stairPelvisDropUp = this.scaleDistance(options.stairPelvisDropUp);
+        }
+        if (options.stairPelvisDropDown !== undefined) {
+            this.stairPelvisDropDown = this.scaleDistance(options.stairPelvisDropDown);
+        }
+        if (options.meshStepPredictiveScale !== undefined) {
+            this.meshStepPredictiveScale = MathUtils.clamp(options.meshStepPredictiveScale, 0, 1);
+        }
 
         if (
             options.footPhaseSampleCount !== undefined
@@ -1119,7 +1610,14 @@ export class FootIK {
 
     /** 返回指定脚当前动画相位的调试文本。 */
     getFootPhaseDebugText(side: FootIKSide): string {
-        return getFootPhaseDebugText(this.footPhaseState, this.footPhaseClips, side);
+        const moving = this.isLocomotion();
+        return getFootPhaseDebugText(
+            this.footPhaseState,
+            this.footPhaseClips,
+            side,
+            this.predictive,
+            this.shouldUsePredictive(moving),
+        );
     }
 
 }

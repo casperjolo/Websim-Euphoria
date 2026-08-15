@@ -220,6 +220,8 @@ function createDebugPanel() {
         footIKDebug: options.debug ?? false,
         // 显示脚底四个本地采样点
         soleSampleDebug: options.soleSampleDebug ?? false,
+        // 预测脚步 IK（落点预测 + FootPath）；默认关
+        predictive: options.predictive ?? false,
         // 是否把左右脚相位文字刷到面板
         footPhaseDebug: false,
         // 左脚相位调试文本（只读）
@@ -281,6 +283,9 @@ function createDebugPanel() {
     });
     debugFolder.add(params, "soleSampleDebug").name("Sole Samples").onChange(value => {
         footIK?.setSoleSampleDebugEnabled(value);
+    });
+    debugFolder.add(params, "predictive").name("Predictive IK").onChange(value => {
+        footIK?.setPredictiveEnabled(value);
     });
     debugFolder.add(params, "footPhaseDebug").name("Phase Debug");
     debugFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
