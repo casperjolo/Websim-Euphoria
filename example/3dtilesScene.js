@@ -173,6 +173,7 @@ async function initPlayer() {
         maxCamDistance: 250,
         staticCollider: colliderGltf.scene,
         thirdMouseMode: 1,
+        enableSpringCamera: true,
     });
 
     initRegionCull();
