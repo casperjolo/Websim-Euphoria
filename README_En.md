@@ -4,14 +4,25 @@
 
 [![NPM Package][npm]][npm-url]
 [![Github][github]][github-url]
-[![X][x]][x-url]
 [![CesiumJS](https://img.shields.io/badge/CesiumJS-player_controller-blue)](https://github.com/hh-hang/cesium-player-controller)
 
-A lightweight player controller for three.js, ready out of the box. It provides capsule-based character collision, animation, first/third-person view switching, and camera obstacle avoidance, with three-mesh-bvh accelerating collision detection for high performance in large scenes.
+A lightweight player controller for three.js, ready out of the box. It provides capsule-based character collision, animation, first/third-person view switching, camera obstacle avoidance, and optional vehicle driving (Rapier required), with three-mesh-bvh accelerating collision detection for high performance in large scenes.
 
 # Demo
 
 [![Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.png)](https://hh-hang.github.io/three-player-controller/index.html)
+
+[glTF Scene](https://hh-hang.github.io/three-player-controller/glTF.html)
+
+[3DTiles Scene](https://hh-hang.github.io/three-player-controller/3dtilesScene.html)
+
+[3DGS Scene](https://hh-hang.github.io/three-player-controller/3dgs.html)
+
+[Office Building](https://hh-hang.github.io/three-player-controller/OfficeBuilding.html)
+
+[FPS Game](https://hh-hang.github.io/three-player-controller/shooting/shooting.html)
+
+[Foot IK](https://hh-hang.github.io/three-player-controller/footIK.html)
 
 # Installation
 
@@ -42,6 +53,7 @@ Open `http://localhost:5173/three-player-controller/`.
 ```ts
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { playerController } from "three-player-controller";
 
 // Set up the three.js environment (scene / camera / renderer / controls)
@@ -52,6 +64,10 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 
+const gltfLoader = new GLTFLoader();
+const playerGltf = await gltfLoader.loadAsync("./glb/person.glb");
+const vehicleGltf = await gltfLoader.loadAsync("./glb/bugatti.glb");
+
 // playerController core usage
 const player = new playerController();
 
@@ -61,22 +77,24 @@ await player.init({
     camera,   // three.js camera instance
     controls, // external camera controller
     playerModelConfig: {
-        url: "./glb/person.glb",   // model path (GLB/GLTF)
-        scale: 0.001,              // model scale
-        idleAnim: "idle",          // idle clip name
-        walkAnim: "walk",          // walk clip name
-        runAnim: "run",            // run clip name
-        jumpAnim: "jump",          // jump clip name; or pass ["start", "loop", "land"] for a three-phase jump
+        model: playerGltf.scene,           // preloaded model root
+        animations: playerGltf.animations, // animation clips
+        scale: 0.001,                      // model scale
+        idleAnim: "idle",                  // idle clip name
+        walkAnim: "walk",                  // walk clip name
+        runAnim: "run",                    // run clip name
+        jumpAnim: "jump",                  // jump clip name; or pass ["start", "loop", "land"] for a three-phase jump
     },
     initPos: new THREE.Vector3(0, 0, 0),  // initial spawn position
 });
 
 // Vehicle controller initialization (optional)
 await player.loadVehicleModel({
-    url: "./glb/bugatti.glb",                                      // vehicle model URL
+    model: vehicleGltf.scene,                                      // preloaded model root
+    animations: vehicleGltf.animations,                            // animation clips
     position: new THREE.Vector3(0, 0, 0),                          // vehicle position
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"], // order: front-left, front-right, rear-left, rear-right
-    boardingPoint: new THREE.Vector3(0.5, 0, 1.8),                 // boarding trigger point, local coordinates
+    driverSeatPosition: new THREE.Vector3(-0.6, 0.7, 0.4),         // driver seat, chassis-local coordinates
 });
 
 // Called every frame
@@ -89,6 +107,8 @@ animate();
 ```
 
 > `player.update()` already drives the camera controller you passed in. Do not call `controls.update()` again in your render loop, or it will conflict with the internal camera logic.
+>
+> Prefer loading player / vehicle models yourself and passing `model` and `animations`. The built-in `url` path uses `GLTFLoader` and only supports glTF / GLB. External models commonly come from glTF / GLB, FBX, and similar.
 
 ### Full Parameter Example
 
@@ -101,8 +121,9 @@ await player.init({
     camera,   // three.js camera instance
     controls, // external camera controller
     playerModelConfig: {
-        url: "./glb/person.glb",   // model path (GLB/GLTF)
-        scale: 0.001,              // model scale
+        model: playerGltf.scene,           // preloaded model root
+        animations: playerGltf.animations, // animation clips
+        scale: 0.001,                      // model scale
         idleAnim: "idle",          // idle clip name
         walkAnim: "walk",          // walk clip name
         runAnim: "run",            // run clip name
@@ -120,8 +141,7 @@ await player.init({
         flyHoverRightAnim: "flyRight",    // falls back to flyIdleAnim
         flyHoverUpAnim: "flyUp",          // falls back to flyIdleAnim
         flyHoverDownAnim: "flyDown",      // falls back to flyIdleAnim
-        enterCarAnim: "enterCar",         // enter-vehicle clip (recommended when using vehicle support)
-        exitCarAnim: "exitCar",           // exit-vehicle clip (recommended when using vehicle support)
+        drivingAnim: "idle",              // driving clip, falls back to idleAnim
 
         // Physics params (optional)
         gravity: -2400,     // gravity base value, scaled by scale
@@ -164,8 +184,8 @@ await player.init({
         backward: ["KeyS", "ArrowDown"],     // move backward
         left: ["KeyA", "ArrowLeft"],         // move left
         right: ["KeyD", "ArrowRight"],       // move right
-        sprint: ["ShiftLeft", "ShiftRight"], // sprint
-        jump: ["Space"],                     // jump
+        sprint: ["ShiftLeft", "ShiftRight"], // sprint; handbrake while driving
+        jump: ["Space"],                     // jump; brake while driving
         toggleView: ["KeyV"],                // toggle view
         toggleFly: ["KeyF"],                 // toggle flight mode
         toggleVehicle: ["KeyE"],             // enter / exit vehicle
@@ -191,22 +211,22 @@ await player.init({
 
 ```ts
 await player.loadVehicleModel({
-    // Required
-    url: "./glb/bugatti.glb",                                      // vehicle model URL
+    model: vehicleGltf.scene,                                      // preloaded model root
+    animations: vehicleGltf.animations,                            // animation clips (empty array allowed)
     position: new THREE.Vector3(0, 0, 0),                          // vehicle position
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"], // order: front-left, front-right, rear-left, rear-right
-    boardingPoint: new THREE.Vector3(0.5, 0, 1.8),                 // boarding trigger point, local coordinates
+    driverSeatPosition: new THREE.Vector3(-0.6, 0.7, 0.4),      // driver seat, chassis-local coordinates
 
     // Optional
     scale: 0.1,                                // vehicle model scale, default 1
-    animations: {
-        openDoorAnim: "openDoorLF",            // door open/close clip name
-    },
-    seatOffset: new THREE.Vector3(0, 0.6, 0),  // seat offset, default (0,0,0)
+    driverSeatRotation: 0,                     // driver-seat yaw relative to chassis local (radians), default 0
     chassisRatio: 0.15,                        // chassis height ratio, default 0.2
     suspensionRestLengthRatio: 0.2,            // suspension rest length ratio, default 0.2
     followVehicleDirection: true,              // camera follows vehicle direction while driving, default true
-    speedMultiplier: 1,                        // per-vehicle speed multiplier, default 1
+    mass: 1500,                                // vehicle mass base value (kg), scaled by scale, default 1500
+    maxSpeed: 300,                             // max speed base value (km/h), scaled by scale, default 300
+    acceleration: 8,                           // acceleration base value (m/s²), scaled by scale, default 8
+    deceleration: 8,                           // braking deceleration base value (m/s²), scaled by scale, default 8
 });
 ```
 
@@ -252,7 +272,7 @@ player.unuse(footIK); // reversible detach
 footIK.dispose();     // terminal cleanup
 ```
 
-`player.destroy()` disposes registered plugins automatically. Distance options are scale=1 base values (multiplied by `playerModelConfig.scale` internally) and angle options use radians. See [`example/footIK.js`](https://github.com/hh-hang/three-player-controller/blob/master/example/footIK.js) for a complete example.
+`player.destroy()` disposes registered plugins automatically. Distance options are scale=1 base values (multiplied by `playerModelConfig.scale` internally) and angle options use radians. See `FootIKOptions` for the remaining options. See [`example/footIK.js`](https://github.com/hh-hang/three-player-controller/blob/master/example/footIK.js) for a complete example.
 
 # API
 
@@ -264,8 +284,12 @@ footIK.dispose();     // terminal cleanup
 | `update(dt?)` | Update movement, collision, and animation each frame. It already drives the camera controller you passed in, so you don't need to call `controls.update()` in your loop. |
 | `destroy()` | Dispose the controller and remove listeners. |
 | `reset(pos?)` | Reset the character to `pos` or the initial position. |
+| `use(plugin)` | Register a plugin. See `PlayerPlugin`. |
+| `unuse(plugin)` | Unregister a previously added plugin. |
+| `getPlugins()` | Return a read-only copy of the current plugin list. |
 | `switchPlayerModel(model)` | Swap the current player model while preserving position and facing. |
 | `loadVehicleModel(opts)` | Load a vehicle. Can be called multiple times for multiple vehicles. |
+| `resetVehicle()` | Reset the current vehicle upright. No-op when not driving. |
 | `changeView()` | Toggle first-person / third-person. |
 | `setFirstPersonCamera(vertAngle?)` | Switch directly to first-person with an optional initial vertical angle. |
 | `buildStaticCollider(sources?)` | Build the static collider. If omitted, traverses the whole scene. |
@@ -335,8 +359,8 @@ player.onAllEvent();  // re-enable keyboard / mouse listeners
 | `backward` | `S` / `ArrowDown` | Move backward |
 | `left` | `A` / `ArrowLeft` | Move left |
 | `right` | `D` / `ArrowRight` | Move right |
-| `sprint` | `Shift` | Sprint |
-| `jump` | `Space` | Jump |
+| `sprint` | `Shift` | Sprint; handbrake drift while driving |
+| `jump` | `Space` | Jump; ascend while flying; four-wheel brake while driving |
 | `toggleView` | `V` | Toggle view |
 | `toggleFly` | `F` | Toggle flight mode |
 | `toggleVehicle` | `E` | Enter / exit vehicle |
@@ -381,8 +405,8 @@ player.setInput({
     moveY: number,        // forward/back axis from -1 to 1; positive moves forward
     lookDeltaX: number,   // horizontal look delta, typically from mousemove's movementX
     lookDeltaY: number,   // vertical look delta, typically from mousemove's movementY
-    jump: boolean,        // jump, held state (true = pressed, false = released); ascends while flying
-    shift: boolean,       // sprint, held state (true = pressed, false = released)
+    jump: boolean,        // jump, held state (true = pressed, false = released); ascends while flying; brakes while driving
+    shift: boolean,       // sprint on foot, handbrake while driving, held state (true = pressed, false = released)
     toggleView: boolean,  // trigger: pass true to toggle first/third-person view
     toggleFly: boolean,   // trigger: pass true to toggle flight mode
     toggleVehicle: boolean, // trigger: pass true to enter / exit vehicle
@@ -484,7 +508,9 @@ player.onTowardChange = (dx, dy, speed) => {};     // fired when look / facing i
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `url` | `string` | Yes | — | Player model path (GLB/GLTF). |
+| `model` | `THREE.Object3D` | one of two | — | Preloaded player model root. Mutually exclusive with `url`. |
+| `animations` | `THREE.AnimationClip[]` | with `model` | — | Player animation clips. Pass together with `model`. |
+| `url` | `string` | one of two | — | Player model path (GLB/GLTF). |
 | `scale` | `number` | Yes | — | Player model scale. |
 | `idleAnim` | `string` | Yes | — | Idle clip name. |
 | `walkAnim` | `string` | Yes | — | Walk clip name. |
@@ -501,8 +527,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // fired when look / facing i
 | `flyHoverRightAnim` | `string` | No | `flyIdleAnim` | Hover clip while flying right; falls back to `flyIdleAnim`. |
 | `flyHoverUpAnim` | `string` | No | `flyIdleAnim` | Hover clip while ascending; falls back to `flyIdleAnim`. |
 | `flyHoverDownAnim` | `string` | No | `flyIdleAnim` | Hover clip while descending; falls back to `flyIdleAnim`. |
-| `enterCarAnim` | `string` | No | — | Enter-vehicle clip; recommended when using vehicle support. |
-| `exitCarAnim` | `string` | No | — | Exit-vehicle clip; recommended when using vehicle support. |
+| `drivingAnim` | `string` | No | `idleAnim` | Driving loop clip; falls back to `idleAnim`. |
 | `gravity` | `number` | No | `-2400` | Gravity base value (scaled by `scale`). |
 | `jumpHeight` | `number` | No | `600` | Jump height base value (scaled by `scale`). |
 | `speed` | `number` | No | `200` | Move speed base value (scaled by `scale`). |
@@ -539,17 +564,21 @@ player.onTowardChange = (dx, dy, speed) => {};     // fired when look / facing i
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `url` | `string` | Yes | — | Vehicle model path (GLB/GLTF). |
+| `model` | `THREE.Object3D` | one of two | — | Preloaded vehicle model root. Mutually exclusive with `url`. |
+| `animations` | `THREE.AnimationClip[]` | with `model` | — | Vehicle animation clips; an empty array is allowed. Pass together with `model`. |
+| `url` | `string` | one of two | — | Vehicle model path (GLB/GLTF). |
 | `position` | `THREE.Vector3` | Yes | — | Initial world position. |
 | `wheelsNames` | `string[]` | Yes | — | Wheel node names in order: front-left, front-right, rear-left, rear-right. |
 | `scale` | `number` | No | `1` | Vehicle model scale. |
-| `animations.openDoorAnim` | `string` | No | — | Door open/close clip name. |
-| `boardingPoint` | `THREE.Vector3` | Yes | — | Boarding point in local space. |
-| `seatOffset` | `THREE.Vector3` | No | `(0, 0, 0)` | Seat offset applied after entering the vehicle. |
+| `driverSeatPosition` | `THREE.Vector3` | Yes | — | Driver-seat capsule center in chassis-local coordinates. |
+| `driverSeatRotation` | `number` | No | `0` | Horizontal driver-seat rotation relative to chassis local axes (radians). |
 | `chassisRatio` | `number` | No | `0.2` | Chassis height ratio. |
 | `suspensionRestLengthRatio` | `number` | No | `0.2` | Suspension rest length ratio. |
 | `followVehicleDirection` | `boolean` | No | `true` | Whether the camera follows the vehicle direction while driving. |
-| `speedMultiplier` | `number` | No | `1` | Per-vehicle speed multiplier. |
+| `mass` | `number` | No | `1500` | Vehicle mass base value (kg, scaled by `scale`). |
+| `maxSpeed` | `number` | No | `300` | Max speed base value (km/h, scaled by `scale`). |
+| `acceleration` | `number` | No | `8` | Acceleration base value (m/s², scaled by `scale`). |
+| `deceleration` | `number` | No | `8` | Braking deceleration base value (m/s², scaled by `scale`). |
 
 # Feedback
 
@@ -561,9 +590,10 @@ If you have any questions or good ideas, feel free to submit an [issue](https://
 
 [three](https://github.com/mrdoob/three.js)
 
+[rapier](https://github.com/dimforge/rapier.js)
+
 [npm]: https://img.shields.io/npm/v/three-player-controller
 [npm-url]: https://www.npmjs.com/package/three-player-controller
 [github]: https://img.shields.io/badge/-hh--hang-181717?style=flat&logo=github&logoColor=white&labelColor=888
 [github-url]: https://github.com/hh-hang
-[x]: https://img.shields.io/badge/-vgyuvhang-000000?style=flat&logo=x&logoColor=white&labelColor=888
-[x-url]: https://x.com/vgyuvhang
+

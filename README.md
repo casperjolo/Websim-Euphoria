@@ -4,14 +4,25 @@
 
 [![NPM Package][npm]][npm-url]
 [![Github][github]][github-url]
-[![X][x]][x-url]
 [![CesiumJS](https://img.shields.io/badge/CesiumJS-player_controller-blue)](https://github.com/hh-hang/cesium-player-controller)
 
-基于 three.js 的轻量级玩家控制器，开箱即用，提供人物胶囊体碰撞、动画、第一 / 三人称切换、相机避障；借助 three-mesh-bvh 加速碰撞检测，大场景下高性能运行。
+基于 three.js 的轻量级玩家控制器，开箱即用，提供人物胶囊体碰撞、动画、第一 / 三人称切换、相机避障，以及可选的车辆驾驶（需 Rapier）；借助 three-mesh-bvh 加速碰撞检测，大场景下高性能运行。
 
 # 示例
 
 [![在线示例](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.png)](https://hh-hang.github.io/three-player-controller/index.html)
+
+[glTF Scene](https://hh-hang.github.io/three-player-controller/glTF.html)
+
+[3DTiles Scene](https://hh-hang.github.io/three-player-controller/3dtilesScene.html)
+
+[3DGS Scene](https://hh-hang.github.io/three-player-controller/3dgs.html)
+
+[Office Building](https://hh-hang.github.io/three-player-controller/OfficeBuilding.html)
+
+[FPS Game](https://hh-hang.github.io/three-player-controller/shooting/shooting.html)
+
+[Foot IK](https://hh-hang.github.io/three-player-controller/footIK.html)
 
 # 安装
 
@@ -42,6 +53,7 @@ npm run dev
 ```ts
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { playerController } from "three-player-controller";
 
 // 搭建 three.js 环境（场景 / 相机 / 渲染器 / 控制器）
@@ -52,6 +64,10 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 
+const gltfLoader = new GLTFLoader();
+const playerGltf = await gltfLoader.loadAsync("./glb/person.glb");
+const vehicleGltf = await gltfLoader.loadAsync("./glb/bugatti.glb");
+
 // playerController 核心用法
 const player = new playerController();
 
@@ -61,22 +77,24 @@ await player.init({
     camera,   // three.js 相机实例
     controls, // 外部相机控制器
     playerModelConfig: {
-        url: "./glb/person.glb",   // 模型路径（GLB/GLTF）
-        scale: 0.001,              // 模型缩放
-        idleAnim: "idle",          // 静止动画名
-        walkAnim: "walk",          // 行走动画名
-        runAnim: "run",            // 跑步动画名
-        jumpAnim: "jump",          // 跳跃动画名；或传 ["起跳", "循环", "落地"] 分三段播放
+        model: playerGltf.scene,           // 外部加载后的模型根节点
+        animations: playerGltf.animations, // 动画片段
+        scale: 0.001,                      // 模型缩放
+        idleAnim: "idle",                  // 静止动画名
+        walkAnim: "walk",                  // 行走动画名
+        runAnim: "run",                    // 跑步动画名
+        jumpAnim: "jump",                  // 跳跃动画名；或传 ["起跳", "循环", "落地"] 分三段播放
     },
     initPos: new THREE.Vector3(0, 0, 0),  // 人物初始坐标
 });
 
 // 车辆控制初始化（可选）
 await player.loadVehicleModel({
-    url: "./glb/bugatti.glb",                                      // 车辆模型 URL
+    model: vehicleGltf.scene,                                      // 外部加载后的模型根节点
+    animations: vehicleGltf.animations,                            // 动画片段
     position: new THREE.Vector3(0, 0, 0),                          // 车辆位置
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"], // 顺序：左前、右前、左后、右后
-    boardingPoint: new THREE.Vector3(0.5, 0, 1.8),                 // 上车触发点，局部坐标
+    driverSeatPosition: new THREE.Vector3(-0.6, 0.7, 0.4),         // 驾驶位，底盘局部坐标
 });
 
 // 每帧调用
@@ -89,6 +107,8 @@ animate();
 ```
 
 > `player.update()` 内部已接管传入的相机控制器，渲染循环中请勿再调用 `controls.update()`，否则会与内部的相机逻辑冲突。
+>
+> 推荐在外部加载人物 / 车辆模型后传入 `model` 和 `animations`。内置 `url` 只走 `GLTFLoader`，仅支持 glTF / GLB；外部传入常见如 glTF / GLB、FBX 等。
 
 ### 完整参数示例
 
@@ -101,8 +121,9 @@ await player.init({
     camera,   // three.js 相机实例
     controls, // 外部相机控制器
     playerModelConfig: {
-        url: "./glb/person.glb",   // 模型路径（GLB/GLTF）
-        scale: 0.001,              // 模型缩放
+        model: playerGltf.scene,           // 外部加载后的模型根节点
+        animations: playerGltf.animations, // 动画片段
+        scale: 0.001,                      // 模型缩放
         idleAnim: "idle",          // 静止动画名
         walkAnim: "walk",          // 行走动画名
         runAnim: "run",            // 跑步动画名
@@ -120,8 +141,7 @@ await player.init({
         flyHoverRightAnim: "flyRight",    // 默认复用 flyIdleAnim
         flyHoverUpAnim: "flyUp",          // 默认复用 flyIdleAnim
         flyHoverDownAnim: "flyDown",      // 默认复用 flyIdleAnim
-        enterCarAnim: "enterCar",         // 上车动画（使用车辆功能时必须配置）
-        exitCarAnim: "exitCar",           // 下车动画（使用车辆功能时必须配置）
+        drivingAnim: "idle",              // 驾驶动画，默认复用 idleAnim
 
         // 物理参数（可选）
         gravity: -2400,     // 重力基准值，会按 scale 缩放
@@ -164,8 +184,8 @@ await player.init({
         backward: ["KeyS", "ArrowDown"],     // 后退
         left: ["KeyA", "ArrowLeft"],         // 左移
         right: ["KeyD", "ArrowRight"],       // 右移
-        sprint: ["ShiftLeft", "ShiftRight"], // 冲刺
-        jump: ["Space"],                     // 跳跃
+        sprint: ["ShiftLeft", "ShiftRight"], // 冲刺；开车时为手刹
+        jump: ["Space"],                     // 跳跃；开车时为刹车
         toggleView: ["KeyV"],                // 切换视角
         toggleFly: ["KeyF"],                 // 切换飞行模式
         toggleVehicle: ["KeyE"],             // 上 / 下车
@@ -191,22 +211,22 @@ await player.init({
 
 ```ts
 await player.loadVehicleModel({
-    // 必填
-    url: "./glb/bugatti.glb",                                      // 车辆模型 URL
+    model: vehicleGltf.scene,                                      // 外部加载后的模型根节点
+    animations: vehicleGltf.animations,                            // 动画片段（可传空数组）
     position: new THREE.Vector3(0, 0, 0),                          // 车辆位置
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"], // 顺序：左前、右前、左后、右后
-    boardingPoint: new THREE.Vector3(0.5, 0, 1.8),                 // 上车触发点，局部坐标
+    driverSeatPosition: new THREE.Vector3(-0.6, 0.7, 0.4),      // 驾驶位，底盘局部坐标
 
     // 可选
     scale: 0.1,                                // 车辆模型缩放，默认 1
-    animations: {
-        openDoorAnim: "openDoorLF",            // 车门开关动画名
-    },
-    seatOffset: new THREE.Vector3(0, 0.6, 0),  // 角色座位偏移，默认 (0,0,0)
+    driverSeatRotation: 0,                     // 驾驶位相对底盘局部的水平旋转（弧度），默认 0
     chassisRatio: 0.15,                        // 底盘高度比例，默认 0.2
     suspensionRestLengthRatio: 0.2,            // 悬挂静止长度比例，默认 0.2
     followVehicleDirection: true,              // 驾驶时镜头跟随车辆朝向，默认 true
-    speedMultiplier: 1,                        // 单车速度倍率，默认 1
+    mass: 1500,                                // 车辆质量基准值（kg），会按 scale 缩放，默认 1500
+    maxSpeed: 300,                             // 最高速度基准值（km/h），会按 scale 缩放，默认 300
+    acceleration: 8,                           // 加速度基准值（m/s²），会按 scale 缩放，默认 8
+    deceleration: 8,                           // 制动减速度基准值（m/s²），会按 scale 缩放，默认 8
 });
 ```
 
@@ -252,7 +272,7 @@ player.unuse(footIK); // 可逆卸载
 footIK.dispose();     // 终止使用并释放资源
 ```
 
-`player.destroy()` 会自动销毁已注册插件。距离类配置为 scale=1 基准值（内部乘以 `playerModelConfig.scale`），角度配置使用弧度。完整示例见 [`example/footIK.js`](https://github.com/hh-hang/three-player-controller/blob/master/example/footIK.js)。
+`player.destroy()` 会自动销毁已注册插件。距离类配置为 scale=1 基准值（内部乘以 `playerModelConfig.scale`），角度配置使用弧度。其余选项见 `FootIKOptions`。完整示例见 [`example/footIK.js`](https://github.com/hh-hang/three-player-controller/blob/master/example/footIK.js)。
 
 # API
 
@@ -264,8 +284,12 @@ footIK.dispose();     // 终止使用并释放资源
 | `update(dt?)` | 每帧更新移动、碰撞和动画；内部已接管传入的相机控制器，渲染循环中无需再调用 `controls.update()`。 |
 | `destroy()` | 销毁控制器并移除事件监听。 |
 | `reset(pos?)` | 将角色重置到指定位置或初始位置。 |
+| `use(plugin)` | 注册插件，见 `PlayerPlugin`。 |
+| `unuse(plugin)` | 卸载已注册插件。 |
+| `getPlugins()` | 返回当前插件列表的只读副本。 |
 | `switchPlayerModel(model)` | 运行时切换角色模型，并保留当前位置和朝向。 |
 | `loadVehicleModel(opts)` | 加载车辆，可重复调用加载多辆车。 |
+| `resetVehicle()` | 将当前驾驶车辆翻正复位（未上车时无效）。 |
 | `changeView()` | 切换第一 / 第三人称视角。 |
 | `setFirstPersonCamera(vertAngle?)` | 直接进入第一人称，可指定初始垂直角度。 |
 | `buildStaticCollider(sources?)` | 构建静态碰撞体；不传则遍历整个场景。 |
@@ -335,8 +359,8 @@ player.onAllEvent();  // 重新开启键盘和鼠标输入监听
 | `backward` | `S` / `ArrowDown` | 后退 |
 | `left` | `A` / `ArrowLeft` | 左移 |
 | `right` | `D` / `ArrowRight` | 右移 |
-| `sprint` | `Shift` | 冲刺 |
-| `jump` | `Space` | 跳跃 |
+| `sprint` | `Shift` | 冲刺；开车时为手刹漂移 |
+| `jump` | `Space` | 跳跃；飞行时上升；开车时为四轮刹车 |
 | `toggleView` | `V` | 切换视角 |
 | `toggleFly` | `F` | 切换飞行模式 |
 | `toggleVehicle` | `E` | 上车 / 下车 |
@@ -381,8 +405,8 @@ player.setInput({
     moveY: number,        // 纵向移动轴，范围 -1～1，正数向前
     lookDeltaX: number,   // 视角水平增量，通常来自 mousemove 的 movementX
     lookDeltaY: number,   // 视角垂直增量，通常来自 mousemove 的 movementY
-    jump: boolean,        // 跳跃，持续状态（true=按下，false=松开）；飞行时控制上升
-    shift: boolean,       // 冲刺/加速，持续状态（true=按下，false=松开）
+    jump: boolean,        // 跳跃，持续状态（true=按下，false=松开）；飞行时控制上升；开车时为刹车
+    shift: boolean,       // 人物冲刺，开车时为手刹，持续状态（true=按下，false=松开）
     toggleView: boolean,  // 触发式，传 true 切换第一/第三人称视角
     toggleFly: boolean,   // 触发式，传 true 切换飞行模式
     toggleVehicle: boolean, // 触发式，传 true 上车 / 下车
@@ -484,7 +508,9 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
-| `url` | `string` | 是 | — | 人物模型路径（GLB/GLTF）。 |
+| `model` | `THREE.Object3D` | 二选一 | — | 已加载的人物模型根节点。与 `url` 互斥。 |
+| `animations` | `THREE.AnimationClip[]` | 与 `model` 同用 | — | 人物动画片段。与 `model` 一起传入。 |
+| `url` | `string` | 二选一 | — | 人物模型路径（GLB/GLTF）。 |
 | `scale` | `number` | 是 | — | 人物模型缩放。 |
 | `idleAnim` | `string` | 是 | — | Idle 动画名。 |
 | `walkAnim` | `string` | 是 | — | Walk 动画名。 |
@@ -501,8 +527,7 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 | `flyHoverRightAnim` | `string` | 否 | `flyIdleAnim` | 飞行右移时的悬停动画名，不填则复用 `flyIdleAnim`。 |
 | `flyHoverUpAnim` | `string` | 否 | `flyIdleAnim` | 飞行上升时的悬停动画名，不填则复用 `flyIdleAnim`。 |
 | `flyHoverDownAnim` | `string` | 否 | `flyIdleAnim` | 飞行下降时的悬停动画名，不填则复用 `flyIdleAnim`。 |
-| `enterCarAnim` | `string` | 否 | — | 上车动画名；使用车辆功能时必须配置。 |
-| `exitCarAnim` | `string` | 否 | — | 下车动画名；使用车辆功能时必须配置。 |
+| `drivingAnim` | `string` | 否 | `idleAnim` | 驾驶循环动画名，不填则复用 `idleAnim`。 |
 | `gravity` | `number` | 否 | `-2400` | 重力基准值（按 `scale` 缩放）。 |
 | `jumpHeight` | `number` | 否 | `600` | 跳跃高度基准值（按 `scale` 缩放）。 |
 | `speed` | `number` | 否 | `200` | 移动速度基准值（按 `scale` 缩放）。 |
@@ -539,17 +564,21 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
-| `url` | `string` | 是 | — | 车辆模型路径（GLB/GLTF）。 |
+| `model` | `THREE.Object3D` | 二选一 | — | 已加载的车辆模型根节点。与 `url` 互斥。 |
+| `animations` | `THREE.AnimationClip[]` | 与 `model` 同用 | — | 车辆动画片段，可传空数组。与 `model` 一起传入。 |
+| `url` | `string` | 二选一 | — | 车辆模型路径（GLB/GLTF）。 |
 | `position` | `THREE.Vector3` | 是 | — | 车辆初始世界坐标。 |
 | `wheelsNames` | `string[]` | 是 | — | 车轮节点名数组，顺序为左前、右前、左后、右后。 |
 | `scale` | `number` | 否 | `1` | 车辆模型缩放。 |
-| `animations.openDoorAnim` | `string` | 否 | — | 车门开关动画名。 |
-| `boardingPoint` | `THREE.Vector3` | 是 | — | 上车点，局部坐标。 |
-| `seatOffset` | `THREE.Vector3` | 否 | `(0, 0, 0)` | 角色上车后座位偏移。 |
+| `driverSeatPosition` | `THREE.Vector3` | 是 | — | 驾驶位胶囊中心，车辆底盘局部坐标。 |
+| `driverSeatRotation` | `number` | 否 | `0` | 驾驶位相对车辆底盘局部的水平旋转（弧度）。 |
 | `chassisRatio` | `number` | 否 | `0.2` | 底盘高度比例。 |
 | `suspensionRestLengthRatio` | `number` | 否 | `0.2` | 悬挂静止长度比例。 |
 | `followVehicleDirection` | `boolean` | 否 | `true` | 驾驶时镜头是否跟随车辆朝向。 |
-| `speedMultiplier` | `number` | 否 | `1` | 单车速度倍率。 |
+| `mass` | `number` | 否 | `1500` | 车辆质量基准值（kg，按 `scale` 缩放）。 |
+| `maxSpeed` | `number` | 否 | `300` | 最高速度基准值（km/h，按 `scale` 缩放）。 |
+| `acceleration` | `number` | 否 | `8` | 加速度基准值（m/s²，按 `scale` 缩放）。 |
+| `deceleration` | `number` | 否 | `8` | 制动减速度基准值（m/s²，按 `scale` 缩放）。 |
 
 # 反馈
 
@@ -561,9 +590,10 @@ player.onTowardChange = (dx, dy, speed) => {};     // 朝向 / 视角输入更�
 
 [three](https://github.com/mrdoob/three.js)
 
+[rapier](https://github.com/dimforge/rapier.js)
+
 [npm]: https://img.shields.io/npm/v/three-player-controller
 [npm-url]: https://www.npmjs.com/package/three-player-controller
 [github]: https://img.shields.io/badge/-hh--hang-181717?style=flat&logo=github&logoColor=white&labelColor=888
 [github-url]: https://github.com/hh-hang
-[x]: https://img.shields.io/badge/-vgyuvhang-000000?style=flat&logo=x&logoColor=white&labelColor=888
-[x-url]: https://x.com/vgyuvhang
+
