@@ -20,6 +20,7 @@ import {
 } from "three";
 import { Sky } from "three/addons/objects/Sky.js";
 import { MapControls } from "three/examples/jsm/Addons.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GUI } from "three/examples/jsm/libs/lil-gui.module.min.js";
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import { playerController } from "../src/playerController";
@@ -119,6 +120,9 @@ async function init() {
     addGroundGrid(scene);
 
     // 人物控制器
+    const gltfLoader = new GLTFLoader();
+    const playerGltf = await gltfLoader.loadAsync("./glb/ual.glb");
+
     player = new playerController();
     await player.init({
         scene,
@@ -131,25 +135,8 @@ async function init() {
         camLookAtHeightRatio: 0.5,
         enableSpringCamera: true,
         playerModelConfig: {
-            // url: "./glb/maw.glb",
-            // scale: 0.01,
-            // idleAnim: "idle",
-            // walkAnim: "walk",
-            // runAnim: "run",
-            // jumpAnim: "jump",
-            // speed: 150,
-            // runSpeed: 600,
-
-            // url: "./glb/josh.glb",
-            // scale: 0.005,
-            // idleAnim: "idle1",
-            // walkAnim: "walk",
-            // runAnim: "run",
-            // jumpAnim: "jump",
-            // speed: 160,
-            // runSpeed: 600,
-
-            url: "./glb/ual.glb",
+            model: playerGltf.scene,
+            animations: playerGltf.animations,
             scale: 0.005,
             idleAnim: "Idle_Loop",
             walkAnim: "Walk_Loop",

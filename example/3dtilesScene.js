@@ -140,6 +140,9 @@ async function initPlayer() {
     const colliderGltf = await gltfLoader.loadAsync("./glb/eiffel_collider.glb");
     colliderGltf.scene.rotation.y = Math.PI;
 
+    const playerGltf = await gltfLoader.loadAsync("./glb/josh.glb");
+    const vehicleGltf = await gltfLoader.loadAsync("./glb/sedan.glb");
+
     // 初始化玩家控制器
     player = new playerController();
     await player.init({
@@ -147,7 +150,8 @@ async function initPlayer() {
         camera,
         controls,
         playerModelConfig: {
-            url: "./glb/josh.glb",
+            model: playerGltf.scene,
+            animations: playerGltf.animations,
             scale: 0.01,
             idleAnim: "idle1",
             walkAnim: "walk",
@@ -175,7 +179,8 @@ async function initPlayer() {
 
     await player.loadVehicleModel({
         position: new Vector3(101.96, 81.25, 62.92),
-        url: "./glb/sedan.glb",
+        model: vehicleGltf.scene,
+        animations: vehicleGltf.animations,
         scale: 1,
         wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
         chassisRatio: 0.35,

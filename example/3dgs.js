@@ -102,6 +102,7 @@ async function init() {
 
     // 加载碰撞体
     const colliderGltf = await gltfLoader.loadAsync("./glb/3dgs_collider.glb");
+    const playerGltf = await gltfLoader.loadAsync("./glb/josh.glb");
 
     // 人物控制器
     player = new playerController();
@@ -110,7 +111,8 @@ async function init() {
         camera,
         controls,
         playerModelConfig: {
-            url: "./glb/josh.glb",
+            model: playerGltf.scene,
+            animations: playerGltf.animations,
             scale: scaleNormal,
             idleAnim: "idle1",
             walkAnim: "walk",

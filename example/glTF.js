@@ -208,9 +208,31 @@ function recreateCSM(scale) {
     });
 }
 
-function getScaledModel(key) {
+function getModelScale(key) {
+    return PLAYER_MODELS[key].scale * globalScale;
+}
+
+async function loadPlayerModelConfig(key) {
     const m = PLAYER_MODELS[key];
-    return { ...m, scale: m.scale * globalScale };
+    const gltf = await gltfLoader.loadAsync(m.url);
+    const { url, ...rest } = m;
+    return {
+        ...rest,
+        model: gltf.scene,
+        animations: gltf.animations,
+        scale: rest.scale * globalScale,
+    };
+}
+
+async function loadVehicleConfig(extra = {}) {
+    const gltf = await gltfLoader.loadAsync(VEHICLE_CONFIG.url);
+    const { url, ...rest } = VEHICLE_CONFIG;
+    return {
+        ...rest,
+        model: gltf.scene,
+        animations: gltf.animations,
+        ...extra,
+    };
 }
 
 // 创建动态平台
@@ -375,7 +397,7 @@ async function init() {
         scene,
         camera,
         controls,
-        playerModelConfig: PLAYER_MODELS.josh,
+        playerModelConfig: await loadPlayerModelConfig("josh"),
         initPos: pos,
         minCamDistance: 50,
         maxCamDistance: 220,
@@ -615,8 +637,9 @@ function onPreviewMouseMove(e) {
 async function onPreviewDblClick() {
     if (!previewMode || !previewMesh?.visible) return;
     const initPos = previewMesh.position.clone();
-    const spawnModel = getScaledModel(guiParams?.playerModel ?? "josh");
-    initPos.y += 180 * spawnModel.scale * 0.75;
+    const spawnKey = guiParams?.playerModel ?? "josh";
+    const spawnScale = getModelScale(spawnKey);
+    initPos.y += 180 * spawnScale * 0.75;
     exitPreviewMode();
 
     recreateCSM(globalScale);
@@ -626,7 +649,7 @@ async function onPreviewDblClick() {
         scene,
         camera,
         controls,
-        playerModelConfig: getScaledModel(guiParams?.playerModel ?? "josh"),
+        playerModelConfig: await loadPlayerModelConfig(spawnKey),
         initPos,
         minCamDistance: 50,
         maxCamDistance: 220,
@@ -760,11 +783,10 @@ function initGUI() {
                 const spawnPos = playerPos.clone().addScaledVector(camDir, 0.5);
                 spawnPos.y = playerPos.y;
 
-                await player.loadVehicleModel({
-                    ...VEHICLE_CONFIG,
+                await player.loadVehicleModel(await loadVehicleConfig({
                     scale: VEHICLE_CONFIG.scale * globalScale,
                     position: spawnPos,
-                });
+                }));
                 const spawned = player.getAllVehicles().at(-1);
                 spawned?.vehicleGroup?.traverse((child) => {
                     if (child.isMesh) {
@@ -788,7 +810,7 @@ function initGUI() {
     gui.add(params, "playerModel", Object.keys(PLAYER_MODELS))
         .name("Player Model")
         .onChange(async (v) => {
-            await player.switchPlayerModel(getScaledModel(v));
+            await player.switchPlayerModel(await loadPlayerModelConfig(v));
             player.getPlayerModel()?.traverse((child) => {
                 if (child.isMesh) {
                     child.castShadow = true;

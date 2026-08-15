@@ -124,11 +124,14 @@ async function init() {
 
     document.addEventListener("contextmenu", (e) => e.preventDefault());
 
+    const playerGltf = await gltfLoader.loadAsync(PLAYER_MODEL_URL);
+
     // ==================== 4. 本地玩家 ====================
     localPlayer = new LocalPlayer({ scene, camera, controls });
     await localPlayer.init({
         playerModelConfig: {
-            url: PLAYER_MODEL_URL,
+            model: playerGltf.scene,
+            animations: playerGltf.animations,
             scale: 0.01,
             idleAnim: "idle1",
             walkAnim: "walk",

@@ -1008,13 +1008,16 @@ async function initPlayer() {
     renderer.render(scene, camera);
     isUpdatePlayer = true;
 
+    const playerGltf = await gltfLoader.loadAsync("./glb/ual.glb");
+
     player = new playerController();
     await player.init({
         scene,
         camera,
         controls,
         playerModelConfig: {
-            url: "./glb/ual.glb",
+            model: playerGltf.scene,
+            animations: playerGltf.animations,
             scale: 0.01,
             idleAnim: "Idle_Loop",
             walkAnim: "Walk_Loop",
