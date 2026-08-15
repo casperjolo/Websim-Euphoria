@@ -160,7 +160,7 @@ const VEHICLE_CONFIG = {
     mass: 1500,
     maxSpeed: 300,
     acceleration: 8,
-    deceleration: 8,
+    deceleration: 30,
     driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
     driverSeatRotation: -Math.PI / 2,
 };
