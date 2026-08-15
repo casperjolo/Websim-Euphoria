@@ -103,7 +103,6 @@ const PLAYER_MODELS = {
         idleAnim: "idle1",
         walkAnim: "walk",
         runAnim: "run",
-        // jumpAnim: "jump",
         jumpAnim: ["jump", "Jump_Loop", "Jump_Land"],
         flyAnim: "fly",
         flyIdleAnim: "flyIdle",
