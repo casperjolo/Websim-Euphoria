@@ -151,6 +151,7 @@ async function initPlayer() {
             scale: 0.01,
             idleAnim: "idle1",
             walkAnim: "walk",
+            runAnim: "run",
             jumpAnim: ["jump", "Jump_Loop", "Jump_Land"],
             flyAnim: "fly",
             flyIdleAnim: "flyIdle",
@@ -182,7 +183,7 @@ async function initPlayer() {
         mass: 1500,
         maxSpeed: 300,
         acceleration: 8,
-        deceleration: 8,
+        deceleration: 30,
         driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
         driverSeatRotation: -Math.PI / 2,
     });
