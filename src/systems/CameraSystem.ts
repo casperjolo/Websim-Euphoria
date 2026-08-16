@@ -264,11 +264,11 @@ export class CameraSystem {
         const hits: THREE.Intersection[] = this.ctrl.isStaticColliderUsable() && this.ctrl.collider
             ? this.raycaster.intersectObject(this.ctrl.collider, false)
             : [];
-        for (const entry of this.ctrl.getDynamicColliderEntries()) {
-            if (!this.ctrl.isDynamicColliderUsable(entry)) continue;
-            const dynHits = this.raycaster.intersectObject(entry.mesh, false);
-            if (dynHits[0] && (!hits[0] || dynHits[0].distance < hits[0].distance)) {
-                hits[0] = dynHits[0];
+        for (const entry of this.ctrl.getKinematicColliderEntries()) {
+            if (!this.ctrl.isKinematicColliderUsable(entry)) continue;
+            const kinHits = this.raycaster.intersectObject(entry.mesh, false);
+            if (kinHits[0] && (!hits[0] || kinHits[0].distance < hits[0].distance)) {
+                hits[0] = kinHits[0];
             }
         }
         return hits;

@@ -164,8 +164,8 @@ export type PlayerControllerOptions = {
     staticCollider?: THREE.Object3D | THREE.Object3D[];
     /** 构建静态碰撞体时的可选配置。 */
     staticColliderOptions?: BuildStaticColliderOptions;
-    /** 初始化时注册的动态碰撞体。 */
-    dynamicCollider?: THREE.Object3D | THREE.Object3D[];
+    /** 初始化时注册的运动学碰撞体。 */
+    kinematicCollider?: THREE.Object3D | THREE.Object3D[];
     /** 移动端是否显示虚拟控制 UI，默认 true。 */
     isShowMobileControls?: boolean;
     /** 移动端按钮显隐配置。 */
@@ -286,8 +286,8 @@ export type BuildStaticColliderOptions = {
     useWorker?: boolean;
 };
 
-/** 注册动态碰撞体时的可选配置。 */
-export type AddDynamicColliderOptions = {
+/** 注册运动学碰撞体时的可选配置。 */
+export type AddKinematicColliderOptions = {
     /**
      * 是否在 Web Worker 中构建 MeshBVH。
      * 完成前该碰撞体不参与胶囊、地面射线和相机墙检。
@@ -295,8 +295,8 @@ export type AddDynamicColliderOptions = {
     useWorker?: boolean;
 };
 
-/** 动态碰撞体的 BVH 与帧间变换数据。 */
-export type DynamicColliderEntry = {
+/** 运动学碰撞体的 BVH 与帧间变换数据。 */
+export type KinematicColliderEntry = {
     /** 原始物体。 */
     source: THREE.Object3D;
     /** BVH 网格，使用本地空间几何。 */

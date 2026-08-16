@@ -3,9 +3,9 @@ export type { PlayerPlugin } from "./plugins/types";
 export { BVHVehicleController } from "./utils/vehiclePhysics/BVHVehicleController";
 export { VehicleRigidBody } from "./utils/vehiclePhysics/VehicleRigidBody";
 export type {
-    AddDynamicColliderOptions,
+    AddKinematicColliderOptions,
     BuildStaticColliderOptions,
-    DynamicColliderEntry,
+    KinematicColliderEntry,
     JumpButtonOptions,
     KeyAction,
     KeyMap,

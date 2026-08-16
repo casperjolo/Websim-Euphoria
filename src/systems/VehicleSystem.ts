@@ -80,7 +80,7 @@ export class VehicleSystem {
             });
 
             this.list.push(instance);
-            this.ctrl.addDynamicCollider(instance.vehicleGroup);
+            this.ctrl.addKinematicCollider(instance.vehicleGroup);
             this.setTransition();
             return instance;
         } catch (e) {
@@ -290,7 +290,7 @@ export class VehicleSystem {
         return out.copy(this.scratchLocal);
     }
 
-    /** 检测下车点处胶囊是否与静态/其他动态碰撞体重叠。 */
+    /** 检测下车点处胶囊是否与静态/其他运动学碰撞体重叠。 */
     private isCharacterPositionFree(position: THREE.Vector3, v: VehicleInstance): boolean {
         const cap = this.ctrl.playerCapsule;
         const info = cap.capsuleInfo;
@@ -304,7 +304,7 @@ export class VehicleSystem {
         cap.updateMatrixWorld(true);
         const before = position.clone();
         applyCapsuleCollision(cap, info, this.ctrl.collider, this.exitCheckTemps);
-        for (const entry of this.ctrl.getDynamicColliderEntries()) {
+        for (const entry of this.ctrl.getKinematicColliderEntries()) {
             if (entry.source === v.vehicleGroup) continue;
             cap.updateMatrixWorld(true);
             applyCapsuleCollision(cap, info, entry.mesh, this.exitCheckTemps);
