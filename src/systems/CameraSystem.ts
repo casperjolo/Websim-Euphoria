@@ -259,6 +259,21 @@ export class CameraSystem {
         }
     }
 
+    // 收集相机射线碰撞
+    private collectCameraHits() {
+        const hits: THREE.Intersection[] = this.ctrl.isStaticColliderUsable() && this.ctrl.collider
+            ? this.raycaster.intersectObject(this.ctrl.collider, false)
+            : [];
+        for (const entry of this.ctrl.getDynamicColliderEntries()) {
+            if (!this.ctrl.isDynamicColliderUsable(entry)) continue;
+            const dynHits = this.raycaster.intersectObject(entry.mesh, false);
+            if (dynHits[0] && (!hits[0] || dynHits[0].distance < hits[0].distance)) {
+                hits[0] = dynHits[0];
+            }
+        }
+        return hits;
+    }
+
     // 射线防穿墙
     updateWithRaycast(origin: THREE.Vector3, maxDist: number = this.maxDist, minDist = this.minDist) {
         this.playerToCam.subVectors(this.ctrl.camera.position, origin);
@@ -266,7 +281,7 @@ export class CameraSystem {
         this.raycaster.set(origin, direction);
         this.raycaster.far = maxDist;
 
-        const hits = this.raycaster.intersectObject(this.ctrl.collider!, false);
+        const hits = this.collectCameraHits();
         // 有遮挡：贴近安全距离
         if (hits.length > 0) {
             const safeDist = Math.max(hits[0].distance - this.epsilon, minDist);
@@ -274,7 +289,7 @@ export class CameraSystem {
         } else {
             // 无遮挡：尝试拉到最大距离
             this.raycaster.far = maxDist;
-            const maxHits = this.raycaster.intersectObject(this.ctrl.collider!, false);
+            const maxHits = this.collectCameraHits();
             const safeDist = maxHits.length > 0 ? Math.min(maxDist, maxHits[0].distance - this.epsilon) : maxDist;
             this.ctrl.camera.position.lerp(origin.clone().add(direction.multiplyScalar(safeDist)), this.collisionLerp);
         }
@@ -287,7 +302,9 @@ export class CameraSystem {
         this.centerRay.layers.set(1);
         this.centerRay.layers.enable(2);
 
-        const checkTargets = this.ctrl.collider ? [this.ctrl.collider, ...this.ctrl.scene.children] : this.ctrl.scene.children;
+        const checkTargets = this.ctrl.isStaticColliderUsable() && this.ctrl.collider
+            ? [this.ctrl.collider, ...this.ctrl.scene.children]
+            : this.ctrl.scene.children;
         const hits = this.centerRay.intersectObjects(checkTargets, true);
         hits.sort((a, b) => a.distance - b.distance);
         if (hits[0]) return hits[0];

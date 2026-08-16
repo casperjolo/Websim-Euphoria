@@ -861,7 +861,7 @@ function initGUI() {
     gui.add(params, "springCameraTime", 0.01, 1, 0.01).name("Spring Time").onChange((v) => player.cam.springCameraTime = v);
     gui.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).onChange((v) => player.setThirdMouseMode(Number(v)));
     gui.add(params, "enableZoom").onChange((v) => player.setEnableZoom(v));
-    gui.add(params, "debug").onChange((v) => player.setDebug(v));
+    gui.add(params, "debug").onChange((v) => player.setColliderDebug(v));
     gui.add(params, "enableOverShoulderView").onChange((v) => player.setOverShoulderView(v));
     gui.add(params, "centerRaycast").name("Center Raycast Debug")
         .onChange((v) => { if (!v) raycastSphere.visible = false; });
@@ -885,7 +885,7 @@ function initGUI() {
                 player.setMaxCamDistance(defaults.maxCamDistance);
                 player.setThirdMouseMode(defaults.thirdMouseMode);
                 player.setEnableZoom(defaults.enableZoom);
-                player.setDebug(defaults.debug);
+                player.setColliderDebug(defaults.debug);
                 player.setOverShoulderView(defaults.enableOverShoulderView);
                 player.setCamOverShoulderOffsetRatio(defaults.camOverShoulderOffsetRatio);
                 raycastSphere.visible = false;

@@ -161,6 +161,8 @@ export type PlayerControllerOptions = {
     camLookAtHeightRatio?: number;
     /** 静态碰撞体来源；未传时遍历整个场景。 */
     staticCollider?: THREE.Object3D | THREE.Object3D[];
+    /** 构建静态碰撞体时的可选配置。 */
+    staticColliderOptions?: BuildStaticColliderOptions;
     /** 初始化时注册的动态碰撞体。 */
     dynamicCollider?: THREE.Object3D | THREE.Object3D[];
     /** 移动端是否显示虚拟控制 UI，默认 true。 */
@@ -274,6 +276,24 @@ export type VehicleInstance = {
     physicsBoxMesh?: THREE.Mesh;
 };
 
+/** 构建静态碰撞体时的可选配置。 */
+export type BuildStaticColliderOptions = {
+    /**
+     * 是否在 Web Worker 中构建 MeshBVH。
+     * 完成前角色不与该静态碰撞体相交。
+     */
+    useWorker?: boolean;
+};
+
+/** 注册动态碰撞体时的可选配置。 */
+export type AddDynamicColliderOptions = {
+    /**
+     * 是否在 Web Worker 中构建 MeshBVH。
+     * 完成前该碰撞体不参与胶囊、地面射线和相机墙检。
+     */
+    useWorker?: boolean;
+};
+
 /** 动态碰撞体的 BVH 与帧间变换数据。 */
 export type DynamicColliderEntry = {
     /** 原始物体。 */
@@ -286,4 +306,8 @@ export type DynamicColliderEntry = {
     deltaPos: THREE.Vector3;
     /** 本帧 Y 轴旋转增量，单位为弧度。 */
     deltaRotY: number;
+    /** Worker / 同步 BVH 是否已就绪。 */
+    ready: boolean;
+    /** 用于作废过期的异步 BVH 构建结果。 */
+    buildId: number;
 };

@@ -7,7 +7,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 import { MobileControls } from "./utils/mobileControls";
-import type { PlayerControllerOptions, PlayerModelOptions, VehicleInstance, VehicleOptions, DynamicColliderEntry, KeyMap } from "./types";
+import type { PlayerControllerOptions, PlayerModelOptions, VehicleInstance, VehicleOptions, DynamicColliderEntry, KeyMap, AddDynamicColliderOptions, BuildStaticColliderOptions } from "./types";
 import type { PlayerPlugin } from "./plugins/types";
 import { AnimationSystem } from "./systems/AnimationSystem";
 import { CameraSystem } from "./systems/CameraSystem";
@@ -15,6 +15,7 @@ import { InputSystem } from "./systems/InputSystem";
 import { VehicleSystem } from "./systems/VehicleSystem";
 import { applyCapsuleCollision, createCollisionTemps, type CollisionTemps } from "./utils/capsuleCollision";
 import { getBbox } from "./utils/bbox";
+import { BvhWorkerPool } from "./utils/bvhWorkerPool";
 
 /** 未传入delta时计算帧间隔。 */
 let _lastUpdateTime = performance.now();
@@ -105,12 +106,18 @@ export class playerController {
     // ==================== 碰撞体 ====================
     /** 静态碰撞体。 */
     collider: THREE.Mesh | null = null;
+    /** 静态碰撞 BVH 是否已就绪。 */
+    private staticColliderReady = false;
+    /** 静态碰撞构建代数，用于丢弃过期的 worker 结果。 */
+    private staticColliderBuildId = 0;
     /** 静态几何收集。 */
     collected: THREE.BufferGeometry[] = [];
     /** 动态碰撞体列表。 */
     private dynamicColliders: DynamicColliderEntry[] = [];
     /** 当前站立的动态碰撞体。 */
     activeDynamicCollider: DynamicColliderEntry | null = null;
+    /** 异步 BVH 构建队列。 */
+    private readonly bvhWorkerPool = new BvhWorkerPool();
 
     // ==================== 碰撞阈值 ====================
     /** 悬空胶囊离地高度。 */
@@ -138,6 +145,8 @@ export class playerController {
     // ==================== 调试 ====================
     /** 显示场景碰撞体。 */
     private displayCollider = false;
+    /** 显示玩家胶囊线框，默认 true。 */
+    private displayPlayerCapsule = true;
 
     // ==================== 方向常量 & 复用向量 ====================
     /** 朝向旋转速度。 */
@@ -163,6 +172,10 @@ export class playerController {
     private moveDir = new THREE.Vector3();
     /** 步进方向缓存。 */
     private xzDir = new THREE.Vector3();
+    /** 本步移动前的胶囊位置。 */
+    private moveStepOrigin = new THREE.Vector3();
+    /** 单帧胶囊碰撞子步上限。 */
+    maxMoveSteps = 8;
     /** 目标四元数。 */
     targetQuat = new THREE.Quaternion();
     /** 目标变换矩阵。 */
@@ -263,7 +276,7 @@ export class playerController {
             await this.mobileControls.init(opts.mobileControls);
         }
 
-        this.buildStaticCollider(opts.staticCollider);
+        this.buildStaticCollider(opts.staticCollider, opts.staticColliderOptions);
         await this.loadPlayerModel();
 
         // 初始化时注册动态碰撞体
@@ -505,7 +518,7 @@ export class playerController {
         this.playerCapsule.position.copy(savedPos);
         this.playerCapsule.quaternion.copy(savedQuat);
         if (wasFirstPerson) this.cam.setFirstPerson();
-        this.setDebug(this.displayCollider);
+        this.setColliderDebug(this.displayCollider);
         for (const plugin of this.plugins) plugin.onPlayerModelChange?.();
     }
 
@@ -542,6 +555,11 @@ export class playerController {
     /** 补全必要属性。 */
     private ensureAttributesMinimal(geom: THREE.BufferGeometry): THREE.BufferGeometry | null {
         if (!geom.attributes.position) return null;
+        const position = geom.attributes.position.array;
+        for (let i = 0; i < position.length; i++) {
+            if (!Number.isFinite(position[i])) return null;
+        }
+        if (geom.attributes.position.count < 3) return null;
         if (!geom.attributes.normal) geom.computeVertexNormals();
         if (!geom.attributes.uv) {
             const count = geom.attributes.position.count;
@@ -595,8 +613,11 @@ export class playerController {
         return collected;
     }
 
-    /** 构建静态碰撞体。 */
-    buildStaticCollider(sources?: THREE.Object3D | THREE.Object3D[]) {
+    /** 构建静态碰撞体。`options.useWorker` 时完成前不参与查询。 */
+    buildStaticCollider(sources?: THREE.Object3D | THREE.Object3D[], options?: BuildStaticColliderOptions) {
+        this.staticColliderBuildId += 1;
+        const buildId = this.staticColliderBuildId;
+        this.staticColliderReady = false;
         this.collected = [];
         if (this.collider) { this.scene.remove(this.collider); this.collider = null; }
 
@@ -635,16 +656,33 @@ export class playerController {
         // 合并并构建BVH
         const merged = BufferGeometryUtils.mergeGeometries(this.collected, false);
         if (!merged) { console.error("合并几何失败"); return; }
-        (merged as any).boundsTree = new MeshBVH(merged, { maxDepth: 100 });
         this.collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ opacity: 0.5, transparent: true, wireframe: true, depthTest: true, side: THREE.DoubleSide }));
         this.collider.raycast = acceleratedRaycast;
         this.collider.layers.enable(1);
 
+        if (options?.useWorker) {
+            void this.bvhWorkerPool.generate(merged).then((bvh) => {
+                if (buildId !== this.staticColliderBuildId || this.collider?.geometry !== merged) return;
+                (merged as any).boundsTree = bvh;
+                this.staticColliderReady = true;
+                if (this.displayCollider && !this.scene.children.includes(this.collider)) this.scene.add(this.collider);
+            }).catch((error) => {
+                if (buildId !== this.staticColliderBuildId || this.collider?.geometry !== merged) return;
+                console.warn("异步构建静态碰撞 BVH 失败，回退到主线程：", error);
+                (merged as any).boundsTree = new MeshBVH(merged, { maxDepth: 100 });
+                this.staticColliderReady = true;
+                if (this.displayCollider && !this.scene.children.includes(this.collider)) this.scene.add(this.collider);
+            });
+            return;
+        }
+
+        (merged as any).boundsTree = new MeshBVH(merged, { maxDepth: 100 });
+        this.staticColliderReady = true;
         if (this.displayCollider) this.scene.add(this.collider);
     }
 
     /** 注册动态碰撞体。 */
-    addDynamicCollider(source: THREE.Object3D) {
+    addDynamicCollider(source: THREE.Object3D, options?: AddDynamicColliderOptions) {
         if (this.dynamicColliders.find(e => e.source === source)) return;
         source.updateMatrixWorld(true);
 
@@ -667,7 +705,6 @@ export class playerController {
         const unified = this.unifiedAttribute(collected);
         const merged = BufferGeometryUtils.mergeGeometries(unified, false);
         if (!merged) { console.error("合并动态几何失败"); return; }
-        (merged as any).boundsTree = new MeshBVH(merged);
 
         const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ opacity: 0.5, transparent: true, wireframe: true, depthTest: true, side: THREE.DoubleSide }));
         mesh.raycast = acceleratedRaycast;
@@ -675,8 +712,46 @@ export class playerController {
         mesh.matrix.copy(source.matrixWorld);
         mesh.updateMatrixWorld(true);
 
-        this.dynamicColliders.push({ source, mesh, prevWorldMatrix: new THREE.Matrix4().copy(source.matrixWorld), deltaPos: new THREE.Vector3(), deltaRotY: 0 });
+        const entry: DynamicColliderEntry = {
+            source,
+            mesh,
+            prevWorldMatrix: new THREE.Matrix4().copy(source.matrixWorld),
+            deltaPos: new THREE.Vector3(),
+            deltaRotY: 0,
+            ready: !options?.useWorker,
+            buildId: 1,
+        };
+        this.dynamicColliders.push(entry);
+
+        if (options?.useWorker) {
+            const buildId = entry.buildId;
+            void this.bvhWorkerPool.generate(merged).then((bvh) => {
+                if (entry.buildId !== buildId || !this.dynamicColliders.includes(entry)) return;
+                (merged as any).boundsTree = bvh;
+                entry.ready = true;
+                if (this.displayCollider && !this.scene.children.includes(mesh)) this.scene.add(mesh);
+            }).catch((error) => {
+                if (entry.buildId !== buildId || !this.dynamicColliders.includes(entry)) return;
+                console.warn("异步构建动态碰撞 BVH 失败，回退到主线程：", error);
+                (merged as any).boundsTree = new MeshBVH(merged);
+                entry.ready = true;
+                if (this.displayCollider && !this.scene.children.includes(mesh)) this.scene.add(mesh);
+            });
+            return;
+        }
+
+        (merged as any).boundsTree = new MeshBVH(merged);
         if (this.displayCollider) this.scene.add(mesh);
+    }
+
+    /** 静态碰撞体是否已就绪。 */
+    isStaticColliderUsable() {
+        return this.staticColliderReady && Boolean(this.collider && (this.collider.geometry as any).boundsTree);
+    }
+
+    /** 动态碰撞体是否已就绪。 */
+    isDynamicColliderUsable(entry: DynamicColliderEntry) {
+        return entry.ready && Boolean((entry.mesh.geometry as any).boundsTree);
     }
 
     /** 注销动态碰撞体。 */
@@ -684,6 +759,7 @@ export class playerController {
         const idx = this.dynamicColliders.findIndex(e => e.source === source);
         if (idx === -1) return;
         const entry = this.dynamicColliders[idx];
+        entry.buildId += 1;
         this.scene.remove(entry.mesh);
         entry.mesh.geometry.dispose();
         (entry.mesh.material as THREE.Material).dispose();
@@ -694,6 +770,7 @@ export class playerController {
     /** 清除所有动态碰撞体。 */
     clearDynamicColliders() {
         for (const entry of this.dynamicColliders) {
+            entry.buildId += 1;
             this.scene.remove(entry.mesh);
             entry.mesh.geometry.dispose();
             (entry.mesh.material as THREE.Material).dispose();
@@ -806,12 +883,15 @@ export class playerController {
 
         // 地面检测
         this.groundRaycaster.ray.origin.copy(this.playerCapsule.position);
-        const staticHits = this.groundRaycaster.intersectObject(this.collider!, false);
+        const staticHits = this.isStaticColliderUsable()
+            ? this.groundRaycaster.intersectObject(this.collider!, false)
+            : [];
 
         // 同时检测动态碰撞体，取最高地面点
         let bestHit: THREE.Intersection | undefined = staticHits[0];
         let hitEntry: DynamicColliderEntry | null = null;
         for (const entry of this.dynamicColliders) {
+            if (!this.isDynamicColliderUsable(entry)) continue;
             const dynHits = this.groundRaycaster.intersectObject(entry.mesh, false);
             if (dynHits.length > 0 && (!bestHit || dynHits[0].point.y > bestHit.point.y)) {
                 bestHit = dynHits[0];
@@ -857,23 +937,28 @@ export class playerController {
         const totalDist = this.isFlying ? this.playerVelocity.length() * delta : xzSpeed * delta;
         this.xzDir.set(this.playerVelocity.x, this.isFlying ? this.playerVelocity.y : 0, this.playerVelocity.z).normalize();
         const maxStep = capsuleInfo.radius * 0.8;
-        const steps = Math.ceil(totalDist / maxStep) || 1;
+        const steps = Math.min(Math.max(1, Math.ceil(totalDist / maxStep)), this.maxMoveSteps);
         const stepDist = totalDist / steps;
+        const blockedEpsSq = (maxStep * 0.05) ** 2;
         for (let i = 0; i < steps; i++) {
+            this.moveStepOrigin.copy(this.playerCapsule.position);
             this.playerCapsule.position.addScaledVector(this.xzDir, stepDist);
             this.playerCapsule.updateMatrixWorld();
 
             if (!this.skipCapsuleCollision) {
                 // 静态碰撞检测
-                applyCapsuleCollision(
-                    this.playerCapsule,
-                    capsuleInfo,
-                    this.collider!,
-                    this.staticTemps,
-                );
+                if (this.isStaticColliderUsable()) {
+                    applyCapsuleCollision(
+                        this.playerCapsule,
+                        capsuleInfo,
+                        this.collider!,
+                        this.staticTemps,
+                    );
+                }
 
                 // 动态碰撞检测
                 for (const dynEntry of this.dynamicColliders) {
+                    if (!this.isDynamicColliderUsable(dynEntry)) continue;
                     this.playerCapsule.updateMatrixWorld();
                     applyCapsuleCollision(
                         this.playerCapsule,
@@ -881,6 +966,10 @@ export class playerController {
                         dynEntry.mesh,
                         this.dynTemps,
                     );
+                }
+
+                if (this.playerCapsule.position.distanceToSquared(this.moveStepOrigin) < blockedEpsSq) {
+                    break;
                 }
             }
         }
@@ -966,19 +1055,21 @@ export class playerController {
         const dbg = this.displayCollider;
         const isVehicle = this.controllerMode === 1;
 
-        // 静态碰撞体：两种模式下都显示
+        // 静态碰撞体：两种模式下都显示，BVH 未就绪时不挂线框
         if (this.collider) {
-            if (dbg) { if (!this.scene.children.includes(this.collider)) this.scene.add(this.collider); }
-            else this.scene.remove(this.collider);
+            if (dbg && this.isStaticColliderUsable()) {
+                if (!this.scene.children.includes(this.collider)) this.scene.add(this.collider);
+            } else this.scene.remove(this.collider);
         }
 
         // 玩家胶囊线框：步行模式才显示
-        (this.playerCapsule.material as THREE.Material).visible = dbg && !isVehicle;
+        (this.playerCapsule.material as THREE.Material).visible = dbg && !isVehicle && this.displayPlayerCapsule;
 
-        // 动态碰撞体线框：步行模式才显示
+        // 动态碰撞体线框：步行模式且 READY 才显示
         for (const entry of this.dynamicColliders) {
-            if (dbg && !isVehicle) { if (!this.scene.children.includes(entry.mesh)) this.scene.add(entry.mesh); }
-            else this.scene.remove(entry.mesh);
+            if (dbg && !isVehicle && this.isDynamicColliderUsable(entry)) {
+                if (!this.scene.children.includes(entry.mesh)) this.scene.add(entry.mesh);
+            } else this.scene.remove(entry.mesh);
         }
 
         // Rapier 物理调试：车辆模式才开启
@@ -1180,9 +1271,14 @@ export class playerController {
     setEnableZoom(enable: boolean) { this.cam.zoomEnabled = enable; this.controls.enableZoom = enable; }
 
     // --- 调试 ---
-    /** 切换调试显示。 */
-    setDebug(debug: boolean) {
+    /** 切换碰撞体调试显示。 */
+    setColliderDebug(debug: boolean) {
         this.displayCollider = debug;
+        this.syncDebugVisibility();
+    }
+    /** 切换玩家胶囊线框调试显示。 */
+    setPlayerCapsuleDebug(debug: boolean) {
+        this.displayPlayerCapsule = debug;
         this.syncDebugVisibility();
     }
     /** 临时跳过玩家胶囊碰撞检测。 */
@@ -1249,12 +1345,15 @@ export class playerController {
 
         // 清除碰撞体和相机
         this.cam.resetControls();
+        this.staticColliderBuildId += 1;
+        this.staticColliderReady = false;
         if (this.collider) { this.scene.remove(this.collider); this.collider = null; }
         this.mobileControls?.destroy();
         this.mobileControls = null;
 
         // 清除动态碰撞体
         this.clearDynamicColliders();
+        this.bvhWorkerPool.dispose();
 
         // 清除所有车辆
         this.vehicle.destroy();

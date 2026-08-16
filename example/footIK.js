@@ -233,7 +233,7 @@ function createDebugPanel() {
         footIK?.configure(patch);
     };
 
-    player?.setDebug(params.playerDebug);
+    player?.setColliderDebug(params.playerDebug);
     footIK?.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
     footIK?.setSoleSampleDebugEnabled(params.soleSampleDebug);
     sunDebugHelper.visible = params.sunDebug;
@@ -246,7 +246,7 @@ function createDebugPanel() {
 
     const sceneFolder = gui.addFolder("Scene");
     sceneFolder.add(params, "playerDebug").name("Player Collider").onChange(value => {
-        player?.setDebug(value);
+        player?.setColliderDebug(value);
     });
     sceneFolder.add(params, "sunDebug").name("Sun Debug").onChange(value => {
         sunDebugHelper.visible = value;
