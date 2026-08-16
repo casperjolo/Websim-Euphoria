@@ -13,7 +13,6 @@ export default defineConfig({
         "three",
         "three-mesh-bvh",
         "three-mesh-bvh/src/workers/GenerateMeshBVHWorker.js",
-        "@dimforge/rapier3d-compat",
     ],
     target: "es2020",
     minify: false,

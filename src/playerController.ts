@@ -1053,31 +1053,31 @@ export class playerController {
     syncDebugVisibility() {
         if (!this.playerCapsule) return;
         const dbg = this.displayCollider;
-        const isVehicle = this.controllerMode === 1;
 
-        // 静态碰撞体：两种模式下都显示，BVH 未就绪时不挂线框
+        // 静态碰撞体：BVH 未就绪时不挂线框
         if (this.collider) {
             if (dbg && this.isStaticColliderUsable()) {
                 if (!this.scene.children.includes(this.collider)) this.scene.add(this.collider);
             } else this.scene.remove(this.collider);
         }
 
-        // 玩家胶囊线框：步行模式才显示
-        (this.playerCapsule.material as THREE.Material).visible = dbg && !isVehicle && this.displayPlayerCapsule;
+        // 玩家胶囊线框
+        (this.playerCapsule.material as THREE.Material).visible = dbg && this.displayPlayerCapsule;
 
-        // 动态碰撞体线框：步行模式且 READY 才显示
+        // 动态碰撞体线框（含车辆模型 BVH）
         for (const entry of this.dynamicColliders) {
-            if (dbg && !isVehicle && this.isDynamicColliderUsable(entry)) {
+            if (dbg && this.isDynamicColliderUsable(entry)) {
                 if (!this.scene.children.includes(entry.mesh)) this.scene.add(entry.mesh);
             } else this.scene.remove(entry.mesh);
         }
 
-        // Rapier 物理调试：车辆模式才开启
-        this.vehicle.params.debug.showPhysicsBox = dbg && isVehicle;
+        // 车辆底盘物理盒
+        this.vehicle.params.debug.showPhysicsBox = dbg;
         for (const v of this.vehicle.list) {
             if (!v.physicsBoxMesh) continue;
-            if (dbg && isVehicle) { if (!v.vehicleGroup.children.includes(v.physicsBoxMesh)) v.vehicleGroup.add(v.physicsBoxMesh); }
-            else v.vehicleGroup.remove(v.physicsBoxMesh);
+            if (dbg) {
+                if (!v.vehicleGroup.children.includes(v.physicsBoxMesh)) v.vehicleGroup.add(v.physicsBoxMesh);
+            } else v.vehicleGroup.remove(v.physicsBoxMesh);
         }
     }
 

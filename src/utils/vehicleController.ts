@@ -1,5 +1,6 @@
-import type { World } from "@dimforge/rapier3d-compat";
 import * as THREE from "three";
+import { BVHVehicleController } from "./vehiclePhysics/BVHVehicleController";
+import type { VehicleRigidBody } from "./vehiclePhysics/VehicleRigidBody";
 
 export type WheelInfo = {
     axleCs: THREE.Vector3;
@@ -8,16 +9,13 @@ export type WheelInfo = {
     radius: number;
 };
 
-// 创建车辆控制器
+/** 创建 BVH 车辆控制器并同步轮子视觉。 */
 export function createVehicleController(
-    world: World,
-    chassisBody: any,
+    chassisBody: VehicleRigidBody,
     wheels: (THREE.Object3D | null)[],
     wheelsInfo: WheelInfo[],
 ) {
-    if (!world || !chassisBody) return { vehicle: null, updateWheelVisuals: () => {}, destroy: () => {} };
-
-    const vehicle = world.createVehicleController(chassisBody);
+    const vehicle = new BVHVehicleController(chassisBody);
     const suspensionDirection = new THREE.Vector3(0, -1, 0);
 
     // 注册每个轮子的物理参数
@@ -48,26 +46,24 @@ export function createVehicleController(
     function updateWheelVisuals() {
         for (const [index, wheelObj] of wheels.entries()) {
             if (!wheelObj) continue;
-            try {
-                const wheelAxleCs = vehicle.wheelAxleCs(index) ?? new THREE.Vector3(1, 0, 0);
-                const connection = vehicle.wheelChassisConnectionPointCs(index)?.y ?? 0;
-                const suspension = vehicle.wheelSuspensionLength(index) ?? 0;
-                const steering = vehicle.wheelSteering(index) ?? 0;
-                const rotationRad = vehicle.wheelRotation(index) ?? 0;
+            const wheelAxleCs = vehicle.wheelAxleCs(index) ?? new THREE.Vector3(1, 0, 0);
+            const connection = vehicle.wheelChassisConnectionPointCs(index)?.y ?? 0;
+            const suspension = vehicle.wheelSuspensionLength(index) ?? 0;
+            const steering = vehicle.wheelSteering(index) ?? 0;
+            const rotationRad = vehicle.wheelRotation(index) ?? 0;
 
-                // 悬挂压缩偏移
-                wheelObj.position.y = connection - suspension;
-                // 转向 * 自转
-                wheelSteeringQuat.setFromAxisAngle(up, steering);
-                wheelRotationQuat.setFromAxisAngle(wheelAxleCs, rotationRad);
-                wheelObj.quaternion.copy(wheelSteeringQuat).multiply(wheelRotationQuat);
-            } catch (e) {}
+            // 悬挂压缩偏移
+            wheelObj.position.y = connection - suspension;
+            // 转向 * 自转
+            wheelSteeringQuat.setFromAxisAngle(up, steering);
+            wheelRotationQuat.setFromAxisAngle(wheelAxleCs, rotationRad);
+            wheelObj.quaternion.copy(wheelSteeringQuat).multiply(wheelRotationQuat);
         }
     }
 
     // 销毁车辆控制器
     function destroy() {
-        try { world.removeVehicleController(vehicle); } catch { }
+        vehicle.wheels.length = 0;
     }
 
     return { vehicle, updateWheelVisuals, destroy };

@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import type { World } from "@dimforge/rapier3d-compat";
 import type { playerController } from "../playerController";
 import { loadVehicleModel as loadVehicleModelUtil } from "../utils/vehicleLoader";
 import { applyCapsuleCollision, createCollisionTemps } from "../utils/capsuleCollision";
@@ -11,15 +10,22 @@ export class VehicleSystem {
     list: VehicleInstance[] = []; // 车辆实例列表
     active: VehicleInstance | null = null; // 当前乘坐车辆
     vehicleLength = 6; // 车辆模型归一化后的最大边长度
-    RAPIER: any = null; // 物理引擎模块
-    world: World | null = null; // 物理世界实例
     params = {
         debug: { showPhysicsBox: false }, // 调试显示
         chassis: { mass: 1500, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
         power: { acceleration: 8, deceleration: 8, maxSpeed: 300 }, // 动力参数
-        steering: { maxSteerAngle: Math.PI / 4, steerTime: 1, steerReturnTimeSlow: 0.24, steerReturnTimeFast: 0.12 }, // 转向参数：打满/低速回正/高速回正（秒）
-        grip: { maxG: 1.2, sideFrictionIdle: 2, sideFrictionFrontMin: 1.1, sideFrictionRearMin: 0.9, handbrakeRearFriction: 0.4, handbrakeReleaseTime: 0.15, wheelbaseRatio: 0.55 }, // 抓地预算
+        steering: { maxSteerAngle: Math.PI / 4, steerTime: 1, steerReturnTimeSlow: 1, steerReturnTimeFast: 1 }, // 转向参数：打满/低速回正/高速回正（秒）
+        grip: {
+            maxG: 1.2,
+            sideFrictionIdle: 2,
+            sideFrictionFrontMin: 1.1,
+            sideFrictionRearMin: 0.9,
+            handbrakeRearFriction: 0.35,
+            handbrakeRearDriveScale: 0.65,
+            handbrakeReleaseTime: 0.15,
+            wheelbaseRatio: 0.55,
+        }, // 抓地预算
         followVehicleDirection: true, // 相机跟随方向
     };
 
@@ -63,54 +69,12 @@ export class VehicleSystem {
         return this.boardingDistance(v, position) <= this.boardingRadius(v);
     }
 
-    // 初始化物理引擎
-    async initRapier() {
-        if (this.RAPIER) return;
-        this.RAPIER = await import("@dimforge/rapier3d-compat");
-        await this.RAPIER.init();
-
-        this.world = new this.RAPIER.World(new this.RAPIER.Vector3(0, -9.81, 0)) as World;
-        (this.world as any).maxCcdSubsteps = 2;
-
-        // 构建三角网格碰撞体
-        const addTrimesh = (RAPIER: any, world: any, geom: THREE.BufferGeometry) => {
-            let g = geom.index ? geom.clone().toNonIndexed() : geom.clone();
-            const pos = g.attributes.position;
-            const count = pos.count;
-            const verts = new Float32Array(count * 3);
-            const tmp = new THREE.Vector3();
-            for (let i = 0; i < count; i++) {
-                tmp.fromBufferAttribute(pos, i);
-                verts[i * 3] = tmp.x; verts[i * 3 + 1] = tmp.y; verts[i * 3 + 2] = tmp.z;
-            }
-            const indices = count > 65535 ? new Uint32Array(count) : new Uint16Array(count);
-            for (let i = 0; i < count; i++) indices[i] = i;
-
-            const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-            world.createCollider(
-                RAPIER.ColliderDesc.trimesh(verts, indices).setRestitution(0).setFriction(0.8),
-                body,
-            );
-        };
-
-        for (const g of this.ctrl.collected) addTrimesh(this.RAPIER, this.world, g);
-
-        // 添加地面刚体
-        const groundBody = this.world.createRigidBody(this.RAPIER.RigidBodyDesc.fixed());
-        groundBody.userData = { outOfBounds: true };
-    }
-
     // 加载车辆模型
     async load(opts: VehicleOptions): Promise<VehicleInstance | undefined> {
         try {
-            await this.initRapier();
-            if (!this.world) return;
-
             const instance = await loadVehicleModelUtil(opts, {
                 loader: this.ctrl.loader,
                 scene: this.ctrl.scene,
-                world: this.world,
-                RAPIER: this.RAPIER,
                 vehicleParams: this.params,
                 vehicleLength: this.vehicleLength,
             });
@@ -180,32 +144,27 @@ export class VehicleSystem {
 
     // 物理步进前更新车辆控制器
     preparePhysics(delta: number) {
-        if (!this.RAPIER) return;
         if (this.ctrl.controllerMode === 1 && this.active) this.applyDriving(delta, this.active);
     }
 
     // 物理步进后同步车辆视觉
     finishPhysics(delta: number) {
-        if (!this.world) return;
-        this.world.timestep = delta;
-        this.world.step();
-
         for (const v of this.list) {
             const parked = this.ctrl.controllerMode !== 1 || this.active !== v;
             if (parked) this.applyParkingBrake(v, delta);
-            v.vehicleController.updateVehicle(delta);
+            v.vehicleController.updateVehicle(delta, this.ctrl.collider);
             const vel = v.chassisBody.linvel();
             const speed = Math.hypot(vel.x, vel.z);
             const max = v.maxSpeed / 3.6;
             if (speed > max) {
                 const s = max / speed;
-                v.chassisBody.setLinvel(new this.RAPIER.Vector3(vel.x * s, vel.y, vel.z * s), true);
+                v.chassisBody.setLinvel({ x: vel.x * s, y: vel.y, z: vel.z * s }, true);
             } else if (parked && speed > 0 && speed <= this.parkingCreepThreshold) {
                 let hasWheelContact = false;
                 for (let i = 0; i < v.vehicleController.numWheels(); i++) {
                     if (v.vehicleController.wheelIsInContact(i)) { hasWheelContact = true; break; }
                 }
-                if (hasWheelContact) v.chassisBody.setLinvel(new this.RAPIER.Vector3(0, vel.y, 0), true);
+                if (hasWheelContact) v.chassisBody.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
             }
             this.syncVehicleVisual(v);
         }
@@ -245,7 +204,7 @@ export class VehicleSystem {
         vehicleController.setWheelSteering(1, steering);
 
         // 抓地预算：侧向占用 latG 后削减纵向驱动力
-        const { maxG, sideFrictionIdle, sideFrictionFrontMin, sideFrictionRearMin, handbrakeRearFriction, handbrakeReleaseTime, wheelbaseRatio } = this.params.grip;
+        const { maxG, sideFrictionIdle, sideFrictionFrontMin, sideFrictionRearMin, handbrakeRearFriction, handbrakeRearDriveScale, handbrakeReleaseTime, wheelbaseRatio } = this.params.grip;
         const vFwd = linv.x * forward.x + linv.y * forward.y + linv.z * forward.z;
         const wheelbase = Math.max(0.01, v.size.l * wheelbaseRatio);
         const latA = vFwd * vFwd * Math.tan(Math.min(1.5, Math.abs(steering))) / wheelbase;
@@ -255,20 +214,19 @@ export class VehicleSystem {
         const maxDrive = mass * longG * gEff / wheelCount;
         const engineForce = throttle === 0 ? 0 : Math.sign(wantedDrive) * Math.min(Math.abs(wantedDrive), maxDrive);
 
-        // Shift 手刹：不要求转向；按下立刻松后轮并制动后轴，松开后摩擦短插值恢复
+        // Shift 漂移：降后轮侧向摩擦甩尾，保留部分后驱维持车速，不额外后轮制动
         if (c.input.shift) this.handbrakeBlend = 1;
         else if (this.handbrakeBlend > 0) {
             this.handbrakeBlend = Math.max(0, this.handbrakeBlend - delta / Math.max(1e-4, handbrakeReleaseTime));
         }
-        const rearDriveScale = 1 - this.handbrakeBlend;
+        const rearDriveScale = 1 - this.handbrakeBlend * (1 - handbrakeRearDriveScale);
         for (let i = 0; i < wheelCount; i++) {
             vehicleController.setWheelEngineForce(i, i >= 2 ? engineForce * rearDriveScale : engineForce);
         }
 
         const spaceBrake = Number(c.input.space) * mass * v.deceleration / wheelCount * delta;
-        const handbrakeBrake = this.handbrakeBlend * mass * v.deceleration * 1.5 / 2 * delta;
         for (let i = 0; i < wheelCount; i++) {
-            vehicleController.setWheelBrake(i, i >= 2 ? Math.max(spaceBrake, handbrakeBrake) : spaceBrake);
+            vehicleController.setWheelBrake(i, spaceBrake);
         }
 
         const gripUsed = latG / maxG;
@@ -284,13 +242,13 @@ export class VehicleSystem {
     // 翻车复位
     resetUpright() {
         const v = this.active;
-        if (!v || this.ctrl.controllerMode !== 1 || !this.RAPIER) return;
+        if (!v || this.ctrl.controllerMode !== 1) return;
         const { chassisBody } = v;
         const t = chassisBody.translation();
-        chassisBody.setTranslation(new this.RAPIER.Vector3(t.x, t.y + v.size.h, t.z), true);
-        chassisBody.setRotation(new this.RAPIER.Quaternion(0, 0, 0, 1), true);
-        chassisBody.setLinvel(new this.RAPIER.Vector3(0, 0, 0), true);
-        chassisBody.setAngvel(new this.RAPIER.Vector3(0, 0, 0), true);
+        chassisBody.setTranslation({ x: t.x, y: t.y + v.size.h, z: t.z }, true);
+        chassisBody.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+        chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
         this.handbrakeBlend = 0;
     }
 
@@ -393,7 +351,6 @@ export class VehicleSystem {
         for (const v of this.list) {
             this.ctrl.scene.remove(v.vehicleGroup);
             v.destroyVehicleController?.();
-            this.world?.removeRigidBody(v.chassisBody);
         }
         this.list = [];
         this.active = null;
@@ -439,18 +396,15 @@ export class VehicleSystem {
 
     // 清除车辆速度
     private clearVelocity(v: VehicleInstance) {
-        if (!v || !this.world || !this.RAPIER) return;
+        if (!v) return;
         const { chassisBody, vehicleController } = v;
-        const ZERO = new this.RAPIER.Vector3(0, 0, 0);
-        chassisBody.setLinvel(ZERO, true);
-        chassisBody.setAngvel(ZERO, true);
+        chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
         const n = vehicleController.numWheels();
         for (let i = 0; i < n; i++) { vehicleController.setWheelEngineForce(i, 0); vehicleController.setWheelBrake(i, 1e6); }
-        vehicleController.updateVehicle(1 / 60);
-        this.world.timestep = 1 / 60;
-        this.world.step();
-        chassisBody.setLinvel(ZERO, true);
-        chassisBody.setAngvel(ZERO, true);
+        vehicleController.updateVehicle(1 / 60, this.ctrl.collider);
+        chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
         for (let i = 0; i < n; i++) vehicleController.setWheelBrake(i, 0);
     }
 

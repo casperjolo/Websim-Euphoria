@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import type { RigidBody } from "@dimforge/rapier3d-compat";
+import type { BVHVehicleController } from "../utils/vehiclePhysics/BVHVehicleController";
+import type { VehicleRigidBody } from "../utils/vehiclePhysics/VehicleRigidBody";
 
 // ==================== 玩家配置 ====================
 
@@ -233,9 +234,9 @@ export type VehicleInstance = {
     /** 车辆模型组。 */
     vehicleGroup: THREE.Group;
     /** 底盘刚体。 */
-    chassisBody: RigidBody;
-    /** Rapier 车辆控制器。 */
-    vehicleController: any;
+    chassisBody: VehicleRigidBody;
+    /** BVH 车辆控制器。 */
+    vehicleController: BVHVehicleController;
     /** 同步车轮视觉的回调。 */
     updateWheelVisuals: () => void;
     /** 销毁车辆控制器的回调。 */
@@ -260,7 +261,7 @@ export type VehicleInstance = {
         w: number;
         h: number;
     };
-    /** 底盘碰撞盒半边长（Rapier 局部坐标）。 */
+    /** 底盘碰撞盒半边长（底盘局部坐标）。 */
     halfExtents: THREE.Vector3;
     /** 车辆质量（kg）。 */
     mass: number;

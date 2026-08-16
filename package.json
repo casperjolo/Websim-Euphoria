@@ -30,14 +30,8 @@
         "build:example": "vite build"
     },
     "peerDependencies": {
-        "@dimforge/rapier3d-compat": ">=0.12.0",
         "three": ">=0.159.0",
         "three-mesh-bvh": ">=0.7.8"
-    },
-    "peerDependenciesMeta": {
-        "@dimforge/rapier3d-compat": {
-            "optional": true
-        }
     },
     "devDependencies": {
         "@sparkjsdev/spark": "^2.1.0",

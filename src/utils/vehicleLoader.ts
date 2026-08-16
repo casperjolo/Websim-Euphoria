@@ -1,14 +1,13 @@
 import * as THREE from "three";
 import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createVehicleController } from "./vehicleController";
+import { VehicleRigidBody } from "./vehiclePhysics/VehicleRigidBody";
 import { getBbox } from "./bbox";
 import type { VehicleOptions, VehicleInstance } from "../types";
 
 export type VehicleLoaderContext = {
     loader: GLTFLoader;
     scene: THREE.Scene;
-    world: any;
-    RAPIER: any;
     vehicleParams: {
         debug: { showPhysicsBox: boolean };
         chassis: { mass: number; linearDamping: number; angularDamping: number };
@@ -27,7 +26,7 @@ export async function loadVehicleModel(
     opts: VehicleOptions,
     ctx: VehicleLoaderContext,
 ): Promise<VehicleInstance> {
-    const { loader, scene, world, RAPIER, vehicleParams, vehicleLength } = ctx;
+    const { loader, scene, vehicleParams, vehicleLength } = ctx;
 
     const scale = opts.scale ?? 1;
     const chassisRatio = opts.chassisRatio ?? 0.2;
@@ -142,18 +141,14 @@ export async function loadVehicleModel(
     halfExtents.x *= 0.95;
     halfExtents.z *= 0.95;
 
-    const chassisBody = world.createRigidBody(
-        RAPIER.RigidBodyDesc.dynamic()
-            .setTranslation(opts.position.x, opts.position.y, opts.position.z)
-            .setLinearDamping(vehicleParams.chassis.linearDamping)
-            .setAngularDamping(vehicleParams.chassis.angularDamping)
-            .setCanSleep(true),
-    );
-    chassisBody.setGravityScale(scale, true);
-    world.createCollider(
-        RAPIER.ColliderDesc.cuboid(halfExtents.x, halfExtents.y, halfExtents.z).setMass(mass),
-        chassisBody,
-    );
+    const chassisBody = new VehicleRigidBody({
+        position: opts.position,
+        mass,
+        halfExtents,
+        linearDamping: vehicleParams.chassis.linearDamping,
+        angularDamping: vehicleParams.chassis.angularDamping,
+        gravityScale: scale,
+    });
 
     // 物理调试盒
     const physicsBoxMesh = new THREE.Mesh(
@@ -165,7 +160,7 @@ export async function loadVehicleModel(
     vehicleGroup.position.copy(opts.position);
     vehicleGroup.updateMatrixWorld(true);
 
-    const { vehicle, updateWheelVisuals, destroy } = createVehicleController(world, chassisBody, wheelWrappers, wheelsInfo);
+    const { vehicle, updateWheelVisuals, destroy } = createVehicleController(chassisBody, wheelWrappers, wheelsInfo);
 
     return {
         vehicleGroup,

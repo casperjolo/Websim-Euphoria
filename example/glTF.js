@@ -158,7 +158,7 @@ const VEHICLE_CONFIG = {
     chassisRatio: 0.35,
     suspensionRestLengthRatio: 0.2,
     mass: 1500,
-    maxSpeed: 300,
+    maxSpeed: 200,
     acceleration: 8,
     deceleration: 30,
     driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
@@ -649,7 +649,11 @@ async function onPreviewDblClick() {
         scene,
         camera,
         controls,
-        playerModelConfig: await loadPlayerModelConfig(spawnKey),
+        playerModelConfig: {
+            ...(await loadPlayerModelConfig(spawnKey)),
+            speed: guiParams?.playerSpeed ?? 300,
+            runSpeed: guiParams?.playerRunSpeed ?? 600,
+        },
         initPos,
         minCamDistance: 50,
         maxCamDistance: 220,
@@ -744,6 +748,7 @@ function initGUI() {
         gravity: -2400,
         jumpHeight: 600,
         playerSpeed: 300,
+        playerRunSpeed: 600,
         flySpeed: 2100,
         playerAcceleration: 30,
         playerDeceleration: 30,
@@ -848,7 +853,8 @@ function initGUI() {
     gui.add(params, "mouseSensitivity", 1, 20, 0.1).onChange((v) => player.setMouseSensitivity(v));
     gui.add(params, "gravity", -6000, 0, 50).onChange((v) => player.setGravity(v));
     gui.add(params, "jumpHeight", 0, 2000, 10).onChange((v) => player.setJumpHeight(v));
-    gui.add(params, "playerSpeed", 0, 10000, 10).onChange((v) => player.setPlayerSpeed(v));
+    gui.add(params, "playerSpeed", 0, 10000, 10).name("Walk Speed").onChange((v) => player.setPlayerSpeed(v));
+    gui.add(params, "playerRunSpeed", 0, 10000, 10).name("Run Speed").onChange((v) => player.setPlayerRunSpeed(v));
     gui.add(params, "flySpeed", 0, 5000, 10).onChange((v) => player.setPlayerFlySpeed(v));
     gui.add(params, "playerAcceleration", 1, 100, 1).name("Acceleration").onChange((v) => player.playerAcceleration = v);
     gui.add(params, "playerDeceleration", 1, 100, 1).name("Deceleration").onChange((v) => player.playerDeceleration = v);
@@ -879,6 +885,7 @@ function initGUI() {
                 player.setGravity(defaults.gravity);
                 player.setJumpHeight(defaults.jumpHeight);
                 player.setPlayerSpeed(defaults.playerSpeed);
+                player.setPlayerRunSpeed(defaults.playerRunSpeed);
                 player.setPlayerFlySpeed(defaults.flySpeed);
                 player.timeScale = defaults.timeScale;
                 player.setMinCamDistance(defaults.minCamDistance);
