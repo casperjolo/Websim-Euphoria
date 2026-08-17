@@ -72,6 +72,8 @@ export class FootIK {
     private maxMeshStepDrop = 36;
     private maxMeshStepRaise = 36;
     private meshStepCoplanarThreshold = 8;
+    /** mesh 上抬仅在近水平支撑面生效，避免连续斜坡把「上坡采样点」误当成台阶。 */
+    private meshStepRaiseMinNormalY = 0.95;
     private footPhaseGroundThreshold = 5;
     private pelvisMaxRaise = 7;
     private fakeToeExtend = 24;
@@ -389,7 +391,7 @@ export class FootIK {
 
         // 不在地面或飞行时不做腿部贴地
         if (
-            !this.player?.queryPlayerMeshes().length
+            !this.player?.getColliderMeshes().length
             || !this.player.playerCapsule
             || !this.player.playerIsOnGround
             || this.player.isFlying
@@ -687,6 +689,7 @@ export class FootIK {
         }
 
         const capsuleGroundY = capsuleHit.point.y;
+        const capsuleNormalY = this.getWorldHitNormal(capsuleHit, this.tmpV3).y;
         const supportY = Math.min(leftGroundY, rightGroundY);
         const planeDelta = Math.abs(leftGroundY - rightGroundY);
         const heightDelta = supportY - capsuleGroundY;
@@ -695,6 +698,8 @@ export class FootIK {
         if (
             planeDelta <= this.meshStepCoplanarThreshold
             && heightDelta > this.meshStepEpsilon
+            // 连续斜坡法线倾斜：禁止上抬。只在近水平台阶/平台上抬 mesh。
+            && capsuleNormalY >= this.meshStepRaiseMinNormalY
         ) {
             // 双脚近似同平面且明显高于胶囊地面：抬 mesh 对齐支撑面，站直。
             wantedOffset = MathUtils.clamp(heightDelta, 0, this.maxMeshStepRaise);
@@ -768,7 +773,7 @@ export class FootIK {
 
     // 从指定世界坐标向下射线检测可踩踏地面。
     private castGroundFrom(x: number, y: number, z: number): Intersection<Object3D> | null {
-        const meshes = this.player?.queryPlayerMeshes() ?? [];
+        const meshes = this.player?.getColliderMeshes() ?? [];
         if (!meshes.length) return null;
         this.raycaster.ray.origin.set(x, y, z);
         const hits = this.raycaster.intersectObjects(meshes, false);
