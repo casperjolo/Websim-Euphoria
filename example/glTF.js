@@ -3,6 +3,7 @@ import {
     AmbientLight,
     CircleGeometry,
     DoubleSide,
+    Float32BufferAttribute,
     Timer,
     EquirectangularReflectionMapping,
     Mesh,
@@ -233,6 +234,33 @@ async function loadVehicleConfig(extra = {}) {
         animations: gltf.animations,
         ...extra,
     };
+}
+
+/** 动态球视觉 */
+function createDemoSphereMesh(color = 0x88c0d0) {
+    const geo = new SphereGeometry(1, 24, 16);
+    const pos = geo.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    const r = ((color >> 16) & 255) / 255;
+    const g = ((color >> 8) & 255) / 255;
+    const b = (color & 255) / 255;
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        const band = Math.sin(x * 8 + y * 2) > 0;
+        const dark = band ? 0.35 : 1;
+        colors[i * 3] = r * dark;
+        colors[i * 3 + 1] = g * dark;
+        colors[i * 3 + 2] = b * dark;
+    }
+    geo.setAttribute("color", new Float32BufferAttribute(colors, 3));
+    const mesh = new Mesh(
+        geo,
+        new MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 }),
+    );
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
 }
 
 // 创建动态平台
@@ -838,9 +866,13 @@ function initGUI() {
                 camera.getWorldDirection(spawnSphereDir);
                 origin.addScaledVector(spawnSphereDir, 50 * s);
                 origin.y += 30 * s;
+                // 动态球
+                const mesh = createDemoSphereMesh(0x88c0d0);
+                scene.add(mesh);
                 player.addCollider({
                     motion: "dynamic",
-                    shape: { kind: "sphere", radius: 18 * s, position: origin }
+                    shape: { kind: "sphere", radius: 18 * s, position: origin },
+                    mesh,
                 });
             },
         },
@@ -850,7 +882,18 @@ function initGUI() {
         spawnSphereController.domElement.addEventListener(type, (e) => e.stopPropagation());
     });
     const clearSphereController = gui.add(
-        { clearSpheres: () => player.clearDynamicBodies() },
+        {
+            clearSpheres: () => {
+                for (const body of [...player.getDynamicBodies()]) {
+                    scene.remove(body.mesh);
+                    body.mesh.geometry.dispose();
+                    const mat = body.mesh.material;
+                    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+                    else mat?.dispose?.();
+                }
+                player.clearDynamicBodies();
+            },
+        },
         "clearSpheres",
     ).name("Clear Spheres");
     ["pointerdown", "mousedown", "click"].forEach((type) => {

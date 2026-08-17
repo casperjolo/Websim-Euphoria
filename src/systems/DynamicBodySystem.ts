@@ -14,9 +14,8 @@ import {
     resolveSphereSphere,
     DynamicSphereBody,
     isSphereBody,
-    type AddDynamicSphereOptions,
 } from "../collision/DynamicSphere";
-import { DYNAMIC_BODY_DEFAULTS } from "../collision/ColliderDesc";
+import { DYNAMIC_BODY_DEFAULTS, type DynamicColliderDesc } from "../collision/ColliderDesc";
 import type { VehicleInstance } from "../types";
 import { capsuleSphereOverlap, createCollisionTemps } from "../utils/capsuleCollision";
 
@@ -29,30 +28,6 @@ const POS_CORRECT = 0.4; // 求解后残留穿透的位置修正比例
 const ROLL_BLEND = 0.45; // 支撑面上向无滑滚动收敛的插值比例
 const SUPPORT_Y = 0.5; // 视为支撑面的法线 y 下限
 const DYNAMIC_MASK = CollisionGroup.DEFAULT | CollisionGroup.VEHICLE | CollisionGroup.DEBRIS;
-
-/** 默认球视觉：顶点色条纹，旋转时肉眼可见（纯色球看不出滚动）。 */
-function createRollVisibleSphere(color: number): THREE.Mesh {
-    const geo = new THREE.SphereGeometry(1, 24, 16);
-    const pos = geo.attributes.position;
-    const colors = new Float32Array(pos.count * 3);
-    const r = ((color >> 16) & 255) / 255;
-    const g = ((color >> 8) & 255) / 255;
-    const b = (color & 255) / 255;
-    for (let i = 0; i < pos.count; i++) {
-        const x = pos.getX(i);
-        const y = pos.getY(i);
-        const band = Math.sin(x * 8 + y * 2) > 0;
-        const dark = band ? 0.35 : 1;
-        colors[i * 3] = r * dark;
-        colors[i * 3 + 1] = g * dark;
-        colors[i * 3 + 2] = b * dark;
-    }
-    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    return new THREE.Mesh(
-        geo,
-        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 }),
-    );
-}
 
 /**
  * 动态刚体推进：按 kind 分派形状窄相（当前实现为球）。
@@ -81,27 +56,26 @@ export class DynamicBodySystem {
         this.contactSolver.velocityIterations = 12;
     }
 
-    /** 添加一颗动态球并登记到 CollisionWorld；缺省材质见 DYNAMIC_BODY_DEFAULTS。 */
-    addSphere(options: AddDynamicSphereOptions = {}): DynamicSphereBody {
-        const radius = Math.max(1e-4, options.radius ?? this.ctrl.playerCapsule?.capsuleInfo?.radius ?? 20);
-        const position = (options.position ?? new THREE.Vector3()).clone();
-        const velocity = (options.velocity ?? new THREE.Vector3()).clone();
-        const density = options.density ?? DYNAMIC_BODY_DEFAULTS.density;
-        const restitution = options.restitution ?? DYNAMIC_BODY_DEFAULTS.restitution;
-        const friction = options.friction ?? DYNAMIC_BODY_DEFAULTS.friction;
-        const linearDamping = options.linearDamping ?? DYNAMIC_BODY_DEFAULTS.linearDamping;
-        const angularDamping = options.angularDamping ?? DYNAMIC_BODY_DEFAULTS.angularDamping;
-        const gravity = options.gravity ?? this.ctrl.gravity;
-
-        let mesh = options.mesh;
-        let ownsMesh = false;
-        if (!mesh) {
-            mesh = createRollVisibleSphere(options.color ?? 0x88c0d0);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            ownsMesh = true;
-            this.ctrl.scene.add(mesh);
+    /** 添加动态球。 */
+    addSphere(desc: DynamicColliderDesc): DynamicSphereBody {
+        if (desc.shape.kind !== "sphere") {
+            throw new Error("[DynamicBodySystem] addSphere 需要 shape.kind === \"sphere\"");
         }
+        const mesh = desc.mesh;
+        if (!mesh) {
+            throw new Error("[DynamicBodySystem] addSphere 需要 mesh");
+        }
+
+        const radius = Math.max(1e-4, desc.shape.radius);
+        const position = (desc.shape.position ?? new THREE.Vector3()).clone();
+        const velocity = (desc.velocity ?? new THREE.Vector3()).clone();
+        const density = desc.density ?? DYNAMIC_BODY_DEFAULTS.density;
+        const restitution = desc.restitution ?? DYNAMIC_BODY_DEFAULTS.restitution;
+        const friction = desc.friction ?? DYNAMIC_BODY_DEFAULTS.friction;
+        const linearDamping = desc.linearDamping ?? DYNAMIC_BODY_DEFAULTS.linearDamping;
+        const angularDamping = desc.angularDamping ?? DYNAMIC_BODY_DEFAULTS.angularDamping;
+        const gravity = desc.gravity ?? this.ctrl.gravity;
+
         mesh.scale.setScalar(radius);
         mesh.position.copy(position);
 
@@ -119,12 +93,11 @@ export class DynamicBodySystem {
             gravity,
             position,
             velocity,
-            angularVelocity: options.angularVelocity,
+            angularVelocity: desc.angularVelocity,
             linearDamping,
             angularDamping,
             friction,
             mesh,
-            ownsMesh,
             debugMesh,
         });
         const col = this.ctrl.collisionWorld.add({
@@ -140,7 +113,7 @@ export class DynamicBodySystem {
         return body;
     }
 
-    /** 移除并释放一个动态刚体（CollisionWorld、视觉与线框）。 */
+    /** 移除动态刚体。 */
     remove(body: DynamicBody): void {
         const idx = this.list.indexOf(body);
         if (idx === -1) return;
@@ -150,11 +123,6 @@ export class DynamicBodySystem {
         this.ctrl.scene.remove(body.debugMesh);
         body.debugMesh.geometry.dispose();
         (body.debugMesh.material as THREE.Material).dispose();
-        if (body.ownsMesh) {
-            this.ctrl.scene.remove(body.mesh);
-            body.mesh.geometry.dispose();
-            (body.mesh.material as THREE.Material).dispose();
-        }
     }
 
     /** 按 CollisionWorld id 查找动态刚体。 */

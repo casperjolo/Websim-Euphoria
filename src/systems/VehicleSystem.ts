@@ -18,7 +18,7 @@ export class VehicleSystem {
         chassis: { mass: 1500, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
         power: { acceleration: 8, deceleration: 8, maxSpeed: 300 }, // 动力参数
-        steering: { maxSteerAngle: Math.PI / 4, steerTime: 1, steerReturnTimeSlow: 1, steerReturnTimeFast: 1 }, // 转向参数：打满/低速回正/高速回正（秒）
+        steering: { maxSteerAngle: Math.PI / 4, steerTime: 1, steerReturnTimeSlow: 0.8, steerReturnTimeFast: 0.6 }, // 转向参数：打满/低速回正/高速回正（秒）
         grip: {
             maxG: 1.2,
             sideFrictionIdle: 2,
@@ -241,16 +241,13 @@ export class VehicleSystem {
         vehicleController.setWheelSteering(0, steering);
         vehicleController.setWheelSteering(1, steering);
 
-        // 抓地预算：侧向占用 latG 后削减纵向驱动力
+        // 抓地预算
         const { maxG, sideFrictionIdle, sideFrictionFrontMin, sideFrictionRearMin, handbrakeRearFriction, handbrakeRearDriveScale, handbrakeReleaseTime, wheelbaseRatio } = this.params.grip;
         const vFwd = linv.x * forward.x + linv.y * forward.y + linv.z * forward.z;
         const wheelbase = Math.max(0.01, v.size.l * wheelbaseRatio);
         const latA = vFwd * vFwd * Math.tan(Math.min(1.5, Math.abs(steering))) / wheelbase;
         const latG = Math.min(maxG, latA / gEff);
-        const longG = Math.sqrt(Math.max(0, maxG * maxG - latG * latG));
-        const wantedDrive = throttle * mass * (v.acceleration + extraAccel) / wheelCount;
-        const maxDrive = mass * longG * gEff / wheelCount;
-        const engineForce = throttle === 0 ? 0 : Math.sign(wantedDrive) * Math.min(Math.abs(wantedDrive), maxDrive);
+        const engineForce = throttle * mass * (v.acceleration + extraAccel) / wheelCount;
 
         // Shift 漂移：降后轮侧向摩擦甩尾，保留部分后驱维持车速，不额外后轮制动
         if (c.input.shift) this.handbrakeBlend = 1;

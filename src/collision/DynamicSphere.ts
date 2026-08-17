@@ -1,17 +1,6 @@
 import * as THREE from "three";
 import { CONTACT_SKIN, type RawContact } from "./contacts/ContactPoint";
-import {
-    DynamicBody,
-    type DynamicBodyMaterialOptions,
-} from "./DynamicBody";
-
-/** 注册动态球时的可选参数（材质字段见 DynamicBodyMaterialOptions）。 */
-export type AddDynamicSphereOptions = DynamicBodyMaterialOptions & {
-    /** 世界坐标，默认原点。 */
-    position?: THREE.Vector3;
-    /** 半径，默认 20。 */
-    radius?: number;
-};
+import { DynamicBody } from "./DynamicBody";
 
 /**
  * 动态球刚体。
@@ -34,7 +23,6 @@ export class DynamicSphereBody extends DynamicBody {
         angularDamping: number;
         friction: number;
         mesh: THREE.Mesh;
-        ownsMesh: boolean;
         debugMesh: THREE.Mesh;
     }) {
         const volume = (4 / 3) * Math.PI * opts.radius * opts.radius * opts.radius;
@@ -50,7 +38,6 @@ export class DynamicSphereBody extends DynamicBody {
             angularDamping: opts.angularDamping,
             friction: opts.friction,
             mesh: opts.mesh,
-            ownsMesh: opts.ownsMesh,
             debugMesh: opts.debugMesh,
         });
         this.radius = opts.radius;

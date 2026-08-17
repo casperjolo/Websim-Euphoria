@@ -389,12 +389,13 @@ export class FootIK {
         if (!this.enabled || this.disposed) return;
         this.updateFootPhaseRuntime();
 
-        // 不在地面或飞行时不做腿部贴地
+        // 不在地面、飞行或载具模式时不做腿部贴地
         if (
             !this.player?.getColliderMeshes().length
             || !this.player.playerCapsule
             || !this.player.playerIsOnGround
             || this.player.isFlying
+            || this.player.getControllerMode?.() === 1
         ) {
             this.resetMeshStepOffset(delta);
             this.setDebugVisible(false);

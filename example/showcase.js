@@ -3,19 +3,18 @@ import {
     AmbientLight,
     BoxGeometry,
     BufferGeometry,
+    Clock,
     CylinderGeometry,
     DirectionalLight,
-    ExtrudeGeometry,
     Float32BufferAttribute,
     Group,
     Mesh,
     MeshStandardMaterial,
-    Path,
     PerspectiveCamera,
     RepeatWrapping,
+    SphereGeometry,
     SRGBColorSpace,
     Scene,
-    Shape,
     TextureLoader,
     VSMShadowMap,
     Vector3,
@@ -29,21 +28,71 @@ import Stats from "three/examples/jsm/libs/stats.module.js";
 import { playerController } from "../src/playerController";
 import { FootIK } from "../src/foot-ik";
 
-const PLAZA_SIZE = 24;
 const TILE_SIZE = 1;
 const SLOPE_ANGLES = [20, 30, 40];
 const L1_TOP = 1.2;
-const LIFT_RADIUS = 0.9;
-const LIFT_THICKNESS = 0.12;
-const LIFT_HOLE_GAP = 0.05;
-const L2_SIZE = 40;
-const L2_THICKNESS = 0.4;
-const L2_HOLE_RADIUS = LIFT_RADIUS + LIFT_HOLE_GAP;
-const L2_TOP = 15;
-const LIFT_SPEED = 1 / 6;
-const LIFT_RETURN_DELAY = 1.5;
+
+// 矩形主平台
+const PLATFORM = { x: -18, z: 0, sizeX: 52, sizeZ: 36 };
+const WALL_H = 2.0;
+const WALL_T = 0.35;
+const DECK_Y = -0.06;
+const DECK_THICK = 0.12;
+
+// 车辆停放
+const VEHICLE_SPAWNS = [
+    new Vector3(-1, 0.4, -11),
+    new Vector3(-1, 0.4, 11),
+];
+
+// 半埋障碍带
+const OBSTACLE_X0 = -9;
+const OBSTACLE_COUNT = 6;
+const OBSTACLE_SPACING = 1.8;
+
+// 远端左：动态区；右：运动学平台区
+const ZONE_PROP = { x: -34, z: -9, size: 12, drop: 0.25 };
+const ZONE_KINE = { x: -34, z: 9 };
+const PROP_SPHERE_R = 0.2;
+const ACCENT_GRAY = 0xc8c8c8;
+const KINE_ACCENT_COLOR = 0x7ec8e3;
+const KINE_ACCENT_EMISSIVE = 0x123040;
+
+// 染色材质
+function tintMaterial(baseMat, hex) {
+    const mat = baseMat.clone();
+    mat.color?.setHex?.(hex);
+    return mat;
+}
+
+// 运动学平台强调材质
+function createKineAccentMaterial(baseMat) {
+    const mat = baseMat.clone();
+    mat.color?.setHex?.(KINE_ACCENT_COLOR);
+    mat.emissive?.setHex?.(KINE_ACCENT_EMISSIVE);
+    mat.emissiveIntensity = 0.15;
+    return mat;
+}
+const KINE_LIFT_POS = new Vector3(ZONE_KINE.x + 2, 0.2, ZONE_KINE.z);
+const KINE_SHUTTLE_A = new Vector3(ZONE_KINE.x - 2, 0.2, ZONE_KINE.z - 4);
+const KINE_SHUTTLE_B = new Vector3(ZONE_KINE.x - 2, 0.2, ZONE_KINE.z + 4);
+const KINE_SHUTTLE_HI_A = new Vector3(ZONE_KINE.x - 2, 0.8, ZONE_KINE.z - 4);
+const KINE_SHUTTLE_HI_B = new Vector3(ZONE_KINE.x - 2, 0.8, ZONE_KINE.z + 4);
+
+// 六棱柱顶圆形载人平台
+const HEX_RIDE_RADIUS = 1.15;
+const HEX_RIDE_THICKNESS = 0.1;
+const HEX_RIDE_Y = L1_TOP + HEX_RIDE_THICKNESS * 0.5;
+const HEX_RIDE_FROM = new Vector3(0, HEX_RIDE_Y, 0);
+const HEX_RIDE_TO = new Vector3(
+    PLATFORM.x - PLATFORM.sizeX * 0.5 + HEX_RIDE_RADIUS + 0.5,
+    HEX_RIDE_Y,
+    0,
+);
+const HEX_RIDE_SPEED = 2;
 
 const scene = new Scene();
+const animClock = new Clock();
 
 let camera;
 let renderer;
@@ -53,10 +102,11 @@ let footIK;
 let gui;
 let stats;
 let prototypeMat;
-let liftPlatform;
+let kinematicPlatforms = [];
 
 init();
 
+// 初始化
 async function init() {
     const container = document.querySelector("#container");
 
@@ -85,29 +135,29 @@ async function init() {
 
     // 相机
     camera = new PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.01, 500);
-    camera.position.set(8, 10, 14);
+    camera.position.set(16, 12, 8);
 
     // 控制器
     controls = new MapControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.maxDistance = 120;
+    controls.maxDistance = 160;
     controls.maxPolarAngle = Math.PI / 2.05;
-    controls.target.set(0, 1, 0);
+    controls.target.set(-12, 1, 0);
 
     // 环境光
     scene.add(new AmbientLight(0xffffff, 1.5));
 
     // 平行光
     const sun = new DirectionalLight(0xffffff, 2);
-    sun.position.set(6, 10, 7);
+    sun.position.set(16, 36, 24);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = 90;
-    sun.shadow.camera.left = -36;
-    sun.shadow.camera.right = 36;
-    sun.shadow.camera.top = 36;
-    sun.shadow.camera.bottom = -36;
+    sun.shadow.camera.far = 140;
+    sun.shadow.camera.left = -50;
+    sun.shadow.camera.right = 30;
+    sun.shadow.camera.top = 40;
+    sun.shadow.camera.bottom = -40;
     sun.shadow.bias = -0.0005;
     scene.add(sun);
 
@@ -123,17 +173,15 @@ async function init() {
 
     // 测试场景
     prototypeMat = await loadTiledMaterial("./textures/showcase/prototype.png");
-    const liftMat = await loadTiledMaterial("./textures/showcase/lift.png");
     const world = buildShowcaseWorld(prototypeMat);
     scene.add(world);
 
-    liftPlatform = createLiftPlatform(liftMat);
-    scene.add(liftPlatform.mesh);
+    // 加载玩家模型
 
-    // 人物控制器
     const gltfLoader = new GLTFLoader();
     const playerGltf = await gltfLoader.loadAsync("./glb/ual.glb");
 
+    // 初始化玩家控制器
     player = new playerController();
     await player.init({
         scene,
@@ -142,7 +190,7 @@ async function init() {
         colliders: [
             { motion: "static", shape: { kind: "mesh", source: world } },
         ],
-        initPos: new Vector3(0, 0.4, 10),
+        initPos: new Vector3(6.5, 0.4, 0.5),
         minCamDistance: 8,
         maxCamDistance: 300,
         camLookAtHeightRatio: 0.5,
@@ -163,21 +211,17 @@ async function init() {
             flyHoverRightAnim: "flyHoverRight",
             flyHoverUpAnim: "flyHoverUp",
             flyHoverDownAnim: "flyHoverDown",
+            drivingAnim: "Driving_Loop",
             headBoneName: "Head",
             firstPersonCameraOffset: [0, 0.15, 0.12],
-            rotateY: Math.PI / 2,
+            rotateY: -Math.PI / 2,
             speed: 100,
             runSpeed: 600,
         },
     });
-    player.addCollider({
-        motion: "kinematic",
-        shape: { kind: "mesh", source: liftPlatform.mesh },
-        follow: liftPlatform.mesh,
-    });
     enableModelShadows(player.playerModel);
 
-    // Foot IK
+    // 初始化脚部 IK
     footIK = new FootIK({
         enabled: true,
         soleSkinThickness: 1.6,
@@ -201,9 +245,18 @@ async function init() {
     });
     player.use(footIK);
 
+    createKinematicZone(prototypeMat);
+    createHexRidePlatform(prototypeMat);
+    spawnPropBodies();
+    await spawnShowcaseVehicles(gltfLoader);
+
     createDebugPanel();
 
     window.addEventListener("resize", onResize);
+    window.addEventListener("keydown", (e) => {
+        if (e.code !== "KeyR" || e.repeat) return;
+        player?.resetVehicle();
+    });
     window.hideLoader?.();
 }
 
@@ -280,66 +333,181 @@ function buildShowcaseWorld(baseMat) {
     const root = new Group();
     root.name = "ShowcaseWorld";
 
-    addBox(root, new Vector3(0, -0.06, 0), new Vector3(PLAZA_SIZE, 0.12, PLAZA_SIZE), baseMat);
+    // 矩形主平台 + 围墙
+    addBox(
+        root,
+        new Vector3(PLATFORM.x, DECK_Y, PLATFORM.z),
+        new Vector3(PLATFORM.sizeX, DECK_THICK, PLATFORM.sizeZ),
+        baseMat,
+    );
+    createPlatformWalls(root, baseMat);
     createClimbGroups(root, baseMat);
-    createLevel2Deck(root, baseMat);
+
+    // 半埋横向圆柱 + 半埋长方体
+    createHalfBuriedObstacles(root, baseMat);
+
+    // 远端左：装饰地板 + 静态方块
+    createPropPit(root, baseMat);
 
     return root;
 }
 
-// 二层带圆孔大平台
-function createLevel2Deck(root, baseMat) {
-    const half = L2_SIZE * 0.5;
-    const shape = new Shape();
-    shape.moveTo(-half, -half);
-    shape.lineTo(half, -half);
-    shape.lineTo(half, half);
-    shape.lineTo(-half, half);
-    shape.closePath();
+// 平台围墙
+function createPlatformWalls(root, baseMat) {
+    const { x, z, sizeX, sizeZ } = PLATFORM;
+    const halfX = sizeX * 0.5;
+    const halfZ = sizeZ * 0.5;
+    const y = WALL_H * 0.5;
 
-    const hole = new Path();
-    hole.absarc(0, 0, L2_HOLE_RADIUS, 0, Math.PI * 2, true);
-    shape.holes.push(hole);
-
-    const geo = new ExtrudeGeometry(shape, { depth: L2_THICKNESS, bevelEnabled: false });
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(0, -L2_THICKNESS * 0.5, 0);
-
-    const deckPos = new Vector3(0, L2_TOP - L2_THICKNESS * 0.5, 0);
-    const deck = new Mesh(applyWorldTileUV(geo, deckPos), baseMat);
-    deck.position.copy(deckPos);
-    deck.castShadow = true;
-    deck.receiveShadow = true;
-    deck.name = "Level2Deck";
-    root.add(deck);
-    return deck;
+    // 北 / 南 / 西 / 东
+    addBox(root, new Vector3(x, y, z + halfZ + WALL_T * 0.5), new Vector3(sizeX + WALL_T * 2, WALL_H, WALL_T), baseMat);
+    addBox(root, new Vector3(x, y, z - halfZ - WALL_T * 0.5), new Vector3(sizeX + WALL_T * 2, WALL_H, WALL_T), baseMat);
+    addBox(root, new Vector3(x - halfX - WALL_T * 0.5, y, z), new Vector3(WALL_T, WALL_H, sizeZ), baseMat);
+    addBox(root, new Vector3(x + halfX + WALL_T * 0.5, y, z), new Vector3(WALL_T, WALL_H, sizeZ), baseMat);
 }
 
-// 圆形升降台（kinematic，不进静态 world）
-function createLiftPlatform(baseMat) {
-    const baseY = L1_TOP + LIFT_THICKNESS * 0.5;
-    const topY = L2_TOP - LIFT_THICKNESS * 0.5;
-    const pos = new Vector3(0, baseY, 0);
+// 半埋圆柱 + 半埋长方体
+function createHalfBuriedObstacles(root, baseMat) {
+    const accentMat = tintMaterial(baseMat, ACCENT_GRAY);
+    const cylR = 0.15;
+    const cylLen = 2.5;
+    const boxSize = new Vector3(0.25, 0.275, 2.5);
+    // 主平台顶面
+    const deckTop = DECK_Y + DECK_THICK * 0.5;
+
+    for (let i = 0; i < OBSTACLE_COUNT; i++) {
+        const x = OBSTACLE_X0 - i * OBSTACLE_SPACING;
+
+        // 横向半埋圆柱
+        const cylPos = new Vector3(x, deckTop, -3.2);
+        const cylGeo = applyWorldTileUV(
+            new CylinderGeometry(cylR, cylR, cylLen, 24),
+            cylPos,
+        );
+        cylGeo.rotateX(Math.PI / 2);
+        const cyl = new Mesh(cylGeo, accentMat);
+        cyl.position.copy(cylPos);
+        cyl.castShadow = true;
+        cyl.receiveShadow = true;
+        root.add(cyl);
+
+        // 半埋长方体
+        addBox(root, new Vector3(x, deckTop, 3.2), boxSize, accentMat);
+    }
+}
+
+// 远端左：略低装饰地板 + 静态方块
+function createPropPit(root, baseMat) {
+    const { x, z, size, drop } = ZONE_PROP;
+    const accentMat = createKineAccentMaterial(baseMat);
+    const floorY = DECK_Y - drop;
+    addBox(root, new Vector3(x, floorY, z), new Vector3(size, DECK_THICK, size), baseMat);
+
+    const deckTop = DECK_Y + DECK_THICK * 0.5;
+    const boxH = 0.35;
+    const inset = size * 0.5 - 1.2;
+    const boxSpots = [
+        new Vector3(x - inset, deckTop + boxH * 0.5, z),
+        new Vector3(x + inset, deckTop + boxH * 0.5, z),
+        new Vector3(x, deckTop + boxH * 0.5, z + inset * 0.2),
+        new Vector3(x - inset * 0.4, deckTop + boxH * 0.5, z - inset * 0.7),
+        new Vector3(x + inset * 0.4, deckTop + boxH * 0.5, z + inset * 0.6),
+    ];
+    for (const pos of boxSpots) {
+        addBox(root, pos, new Vector3(0.425, boxH, 0.425), accentMat);
+    }
+}
+
+// 远端右：升降 + 平移运动学平台
+function createKinematicZone(baseMat) {
+    const platformMat = createKineAccentMaterial(baseMat);
+
+    const liftSize = new Vector3(2.7, 0.1, 2.7);
+    const liftPos = KINE_LIFT_POS.clone();
+    const liftMesh = addBox(scene, liftPos, liftSize, platformMat);
+    liftMesh.name = "KineLift";
+    player.addCollider({
+        motion: "kinematic",
+        shape: { kind: "mesh", source: liftMesh },
+        follow: liftMesh,
+    });
+    kinematicPlatforms.push({
+        mesh: liftMesh,
+        kind: "lift",
+        baseY: liftPos.y,
+        distance: 3.2,
+        speed: 0.55,
+    });
+
+    const shuttleSize = new Vector3(2.2, 0.1, 2.2);
+    const shuttleMesh = addBox(scene, KINE_SHUTTLE_A.clone(), shuttleSize, platformMat);
+    shuttleMesh.name = "KineShuttle";
+    player.addCollider({
+        motion: "kinematic",
+        shape: { kind: "mesh", source: shuttleMesh },
+        follow: shuttleMesh,
+    });
+    kinematicPlatforms.push({
+        mesh: shuttleMesh,
+        kind: "shuttle",
+        from: KINE_SHUTTLE_A.clone(),
+        to: KINE_SHUTTLE_B.clone(),
+        speed: 0.35,
+        invert: false,
+    });
+
+    // y=0.8 反向平移平台
+    const shuttleHiMesh = addBox(scene, KINE_SHUTTLE_HI_B.clone(), shuttleSize, platformMat);
+    shuttleHiMesh.name = "KineShuttleHi";
+    player.addCollider({
+        motion: "kinematic",
+        shape: { kind: "mesh", source: shuttleHiMesh },
+        follow: shuttleHiMesh,
+    });
+    kinematicPlatforms.push({
+        mesh: shuttleHiMesh,
+        kind: "shuttle",
+        from: KINE_SHUTTLE_HI_A.clone(),
+        to: KINE_SHUTTLE_HI_B.clone(),
+        speed: 0.35,
+        invert: true,
+        spinSpeed: 0.8,
+    });
+}
+
+// 六棱柱顶圆形载人平台
+function createHexRidePlatform(baseMat) {
+    const platformMat = createKineAccentMaterial(baseMat);
+    const pos = HEX_RIDE_FROM.clone();
     const geo = applyWorldTileUV(
-        new CylinderGeometry(LIFT_RADIUS, LIFT_RADIUS, LIFT_THICKNESS, 48),
+        new CylinderGeometry(HEX_RIDE_RADIUS, HEX_RIDE_RADIUS, HEX_RIDE_THICKNESS, 32),
         pos,
     );
-    const mesh = new Mesh(geo, baseMat);
+    const mesh = new Mesh(geo, platformMat);
     mesh.position.copy(pos);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.name = "LiftPlatform";
+    mesh.name = "HexRidePlatform";
+    scene.add(mesh);
+    player.addCollider({
+        motion: "kinematic",
+        shape: { kind: "mesh", source: mesh },
+        follow: mesh,
+    });
 
-    return {
+    const travelDist = HEX_RIDE_FROM.distanceTo(HEX_RIDE_TO);
+    kinematicPlatforms.push({
         mesh,
-        baseY,
-        topY,
+        kind: "ride",
+        from: HEX_RIDE_FROM.clone(),
+        to: HEX_RIDE_TO.clone(),
         progress: 0,
-        state: "idle",
-        emptyTimer: 0,
-    };
+        dir: 1,
+        progressSpeed: travelDist > 1e-4 ? HEX_RIDE_SPEED / travelDist : 0,
+    });
 }
 
+// 两端缓入缓出
 function easeEndsLinearMiddle(progress, easeRatio = 0.18) {
     const ease = Math.min(Math.max(easeRatio, 0.001), 0.49);
     const maxSpeed = 1 / (1 - ease);
@@ -348,66 +516,110 @@ function easeEndsLinearMiddle(progress, easeRatio = 0.18) {
     return maxSpeed * (progress - ease / 2);
 }
 
-function applyLiftProgress(lift) {
-    const t = easeEndsLinearMiddle(Math.min(Math.max(lift.progress, 0), 1));
-    lift.mesh.position.y = lift.baseY + (lift.topY - lift.baseY) * t;
-}
-
-function isPlayerOnLift(lift) {
+// 是否站在指定运动学平台上
+function isPlayerRidingPlatform(mesh) {
     return (
-        player?.getActiveKinematicCollider()?.source === lift.mesh
+        player?.getActiveKinematicCollider()?.source === mesh
         && player.getIsOnGround()
     );
 }
 
-function resetLiftPlatform(lift = liftPlatform) {
-    if (!lift) return;
-    lift.progress = 0;
-    lift.state = "idle";
-    lift.emptyTimer = 0;
-    applyLiftProgress(lift);
+// 更新运动学平台
+function updateKinematicZone(t) {
+    const dt = player?.getCurrentDelta?.() || 1 / 60;
+
+    for (const entry of kinematicPlatforms) {
+        if (entry.kind === "lift") {
+            const amount = Math.sin(t * entry.speed) * entry.distance;
+            entry.mesh.position.y = entry.baseY + amount + entry.distance;
+        } else if (entry.kind === "shuttle") {
+            const phase = (t * entry.speed / Math.PI) % 2;
+            const raw = phase <= 1 ? phase : 2 - phase;
+            let p = easeEndsLinearMiddle(raw);
+            if (entry.invert) p = 1 - p;
+            entry.mesh.position.lerpVectors(entry.from, entry.to, p);
+            if (entry.spinSpeed) entry.mesh.rotation.y = t * entry.spinSpeed;
+        } else if (entry.kind === "ride") {
+            // 站上才移动，离开则停
+            if (isPlayerRidingPlatform(entry.mesh) && entry.progressSpeed > 0) {
+                entry.progress += entry.dir * entry.progressSpeed * dt;
+                if (entry.progress >= 1) {
+                    entry.progress = 1;
+                    entry.dir = -1;
+                } else if (entry.progress <= 0) {
+                    entry.progress = 0;
+                    entry.dir = 1;
+                }
+            }
+            entry.mesh.position.lerpVectors(entry.from, entry.to, entry.progress);
+        }
+    }
 }
 
-// 更新升降台
-function updateLiftPlatform(lift) {
-    if (!lift || !player) return;
+// 左侧动态球
+function spawnPropBodies() {
+    const { x, z, size } = ZONE_PROP;
+    const deckTop = DECK_Y + DECK_THICK * 0.5;
+    const inset = size * 0.5 - 1.2;
+    const sphereY = deckTop + PROP_SPHERE_R + 0.05;
+    const sphereSpots = [
+        new Vector3(x - inset, sphereY, z - inset),
+        new Vector3(x, sphereY, z - inset * 0.5),
+        new Vector3(x + inset, sphereY, z - inset),
+        new Vector3(x - inset * 0.5, sphereY, z + inset * 0.3),
+        new Vector3(x + inset * 0.5, sphereY, z + inset),
+    ];
+    const sphereMat = createKineAccentMaterial(prototypeMat);
 
-    const dt = player.getCurrentDelta() || 1 / 60;
-    const occupied = isPlayerOnLift(lift);
+    for (const pos of sphereSpots) {
+        const mesh = new Mesh(new SphereGeometry(1, 24, 16), sphereMat.clone());
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+        player.addCollider({
+            motion: "dynamic",
+            shape: { kind: "sphere", radius: PROP_SPHERE_R, position: pos.clone() },
+            mesh,
+            restitution: 0.35,
+            friction: 0.55,
+        });
+    }
+}
 
-    if (lift.state === "idle") {
-        if (occupied) lift.state = "rising";
-    } else if (lift.state === "rising") {
-        lift.progress = Math.min(1, lift.progress + dt * LIFT_SPEED);
-        applyLiftProgress(lift);
-        if (lift.progress >= 1) {
-            lift.progress = 1;
-            lift.state = "arrived";
-            lift.emptyTimer = 0;
-        }
-    } else if (lift.state === "arrived") {
-        applyLiftProgress(lift);
-        if (occupied) {
-            lift.emptyTimer = 0;
-        } else {
-            lift.emptyTimer += dt;
-            if (lift.emptyTimer >= LIFT_RETURN_DELAY) {
-                lift.state = "descending";
-                lift.emptyTimer = 0;
+// 加载展示车辆
+async function spawnShowcaseVehicles(gltfLoader) {
+    const gltf = await gltfLoader.loadAsync("./glb/sedan.glb");
+    for (const spawnPos of VEHICLE_SPAWNS) {
+        // 每辆车需要独立模型实例
+        const model = gltf.scene.clone(true);
+        await player.loadVehicleModel({
+            model,
+            animations: gltf.animations,
+            scale: 0.5,
+            position: spawnPos.clone(),
+            wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
+            chassisRatio: 0.5,
+            suspensionRestLengthRatio: 0.2,
+            mass: 1500,
+            maxSpeed: 100,
+            acceleration: 8,
+            deceleration: 30,
+            driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
+            driverSeatRotation: -Math.PI / 2,
+        });
+
+        const vehicle = player.getAllVehicles().at(-1);
+        vehicle?.vehicleGroup?.traverse((child) => {
+            if (!child.isMesh) return;
+            child.castShadow = true;
+            child.receiveShadow = true;
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            for (const mat of mats) {
+                if (!mat) continue;
+                mat.metalness = 0.8;
+                mat.roughness = 0.0;
             }
-        }
-    } else if (lift.state === "descending") {
-        if (occupied) {
-            lift.state = "rising";
-            lift.emptyTimer = 0;
-        } else {
-            lift.progress = Math.max(0, lift.progress - dt * LIFT_SPEED);
-            applyLiftProgress(lift);
-            if (lift.progress <= 0) {
-                lift.progress = 0;
-                lift.state = "idle";
-            }
-        }
+        });
     }
 }
 
@@ -584,6 +796,7 @@ function createRampGeometry(length, height, width, origin = { x: 0, y: 0, z: 0 }
     return flat;
 }
 
+// 添加盒子
 function addBox(root, position, size, material) {
     const geo = applyWorldTileUV(new BoxGeometry(size.x, size.y, size.z), position);
     const mesh = new Mesh(geo, material);
@@ -610,8 +823,11 @@ function createDebugPanel() {
         colliderDebug: false,
         playerCapsuleDebug: false,
         footIKEnabled: true,
-        resetLift() {
-            resetLiftPlatform();
+        resetVehicle() {
+            player?.resetVehicle();
+        },
+        clearSpheres() {
+            player?.clearDynamicBodies();
         },
     };
 
@@ -631,7 +847,8 @@ function createDebugPanel() {
     sceneFolder.add(params, "footIKEnabled").name("Foot IK").onChange((value) => {
         footIK?.setEnabled(value);
     });
-    sceneFolder.add(params, "resetLift").name("Reset Lift");
+    sceneFolder.add(params, "resetVehicle").name("Reset Vehicle");
+    sceneFolder.add(params, "clearSpheres").name("Clear Spheres");
     sceneFolder.open();
 }
 
@@ -646,8 +863,9 @@ function onResize() {
 
 // 每帧调用
 function animate() {
+    const t = animClock.getElapsedTime();
     if (player) {
-        updateLiftPlatform(liftPlatform);
+        updateKinematicZone(t);
         player.update();
     } else {
         controls?.update();

@@ -21,7 +21,6 @@ export { DYNAMIC_BODY_DEFAULTS } from "./ColliderDesc";
 export { DynamicBody } from "./DynamicBody";
 export type { DynamicBodyKind, DynamicBodyMaterialOptions } from "./DynamicBody";
 export { DynamicSphereBody, isSphereBody } from "./DynamicSphere";
-export type { AddDynamicSphereOptions } from "./DynamicSphere";
 export {
     buildStaticMergedMesh,
     buildKinematicMergedMesh,

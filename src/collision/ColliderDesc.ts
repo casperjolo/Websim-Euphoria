@@ -55,10 +55,7 @@ export type KinematicColliderDesc = ColliderDescBase & {
     follow?: THREE.Object3D;
 };
 
-export type DynamicColliderDesc = ColliderDescBase & {
-    motion: "dynamic";
-    shape: ColliderShape;
-    follow?: never;
+type DynamicColliderMaterialFields = {
     /** 密度，质量 = 体积 × 密度；默认见 DYNAMIC_BODY_DEFAULTS。 */
     density?: number;
     /** 弹性，0 不反弹，1 完全弹；默认见 DYNAMIC_BODY_DEFAULTS。 */
@@ -70,14 +67,20 @@ export type DynamicColliderDesc = ColliderDescBase & {
     /** 角阻尼，越大旋转越快停；默认见 DYNAMIC_BODY_DEFAULTS。 */
     angularDamping?: number;
     gravity?: number;
-    /** 动态球可选视觉网格。 */
-    mesh?: THREE.Mesh;
-    color?: number;
     velocity?: THREE.Vector3;
     angularVelocity?: THREE.Vector3;
 };
 
-/** 动态刚体材质默认值（球 / 盒等共用）。 */
+/** 动态碰撞体描述。 */
+export type DynamicColliderDesc = ColliderDescBase & DynamicColliderMaterialFields & {
+    motion: "dynamic";
+    shape: ColliderShape;
+    follow?: never;
+    /** 可选视觉网格。 */
+    mesh?: THREE.Mesh;
+};
+
+/** 动态刚体材质默认值。 */
 export const DYNAMIC_BODY_DEFAULTS = {
     density: 1,
     restitution: 0.2,
@@ -86,7 +89,7 @@ export const DYNAMIC_BODY_DEFAULTS = {
     angularDamping: 0.6,
 };
 
-/** 统一创建描述。dynamic+mesh 允许但不推荐（见文档）。 */
+/** 碰撞体创建描述。 */
 export type ColliderDesc = StaticColliderDesc | KinematicColliderDesc | DynamicColliderDesc;
 
 /** addCollider 返回的句柄。 */

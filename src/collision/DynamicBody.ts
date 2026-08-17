@@ -22,9 +22,7 @@ export type DynamicBodyMaterialOptions = {
     velocity?: THREE.Vector3;
     /** 初角速度。 */
     angularVelocity?: THREE.Vector3;
-    /** 视觉网格颜色。 */
-    color?: number;
-    /** 外部视觉网格；不传则由系统创建。 */
+    /** 视觉网格。 */
     mesh?: THREE.Mesh;
 };
 
@@ -41,7 +39,6 @@ export type DynamicBodyBaseInit = {
     angularDamping: number; // 角阻尼
     friction: number; // 摩擦
     mesh: THREE.Mesh; // 视觉网格
-    ownsMesh: boolean; // 是否由系统创建并负责销毁
     debugMesh: THREE.Mesh; // 碰撞线框
 };
 
@@ -68,7 +65,6 @@ export abstract class DynamicBody {
     angularDamping: number; // 角阻尼
     friction: number; // 碰撞摩擦
     mesh: THREE.Mesh; // 视觉网格
-    ownsMesh: boolean; // 是否由系统创建并负责销毁
     /** 碰撞形状线框，由 setColliderDebug 显隐。 */
     debugMesh: THREE.Mesh;
     contactMesh: THREE.Mesh | null = null; // 本帧接触的网格（平台携带用）
@@ -93,7 +89,6 @@ export abstract class DynamicBody {
         this.angularDamping = opts.angularDamping;
         this.friction = opts.friction;
         this.mesh = opts.mesh;
-        this.ownsMesh = opts.ownsMesh;
         this.debugMesh = opts.debugMesh;
         this.invMass = 1 / this.mass;
     }

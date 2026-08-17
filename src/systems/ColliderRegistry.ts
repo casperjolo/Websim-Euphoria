@@ -8,9 +8,8 @@ import {
     buildStaticMergedMesh,
 } from "../collision/ColliderBuild";
 import type { KinematicColliderEntry } from "../types";
-import type { AddDynamicSphereOptions } from "../collision/DynamicSphere";
 
-let warnedDynamicMesh = false; // dynamic+mesh 警告只打一次
+let warnedDynamicMesh = false; 
 
 /**
  * 统一碰撞体注册：按 ColliderDesc 创建 / 移除，并维护运动学跟随。
@@ -370,26 +369,10 @@ export class ColliderRegistry {
      */
     private addSphere(desc: ColliderDesc): ColliderHandle {
         if (desc.motion === "dynamic") {
-            const d = desc as DynamicColliderDesc;
-            const shape = d.shape as Extract<ColliderDesc["shape"], { kind: "sphere" }>;
-            const opts: AddDynamicSphereOptions = {
-                radius: shape.radius,
-                position: shape.position?.clone() ?? new THREE.Vector3(),
-                velocity: d.velocity?.clone(),
-                angularVelocity: d.angularVelocity?.clone(),
-                density: d.density,
-                restitution: d.restitution,
-                friction: d.friction,
-                linearDamping: d.linearDamping,
-                angularDamping: d.angularDamping,
-                gravity: d.gravity,
-                mesh: d.mesh,
-                color: d.color,
-            };
-            const body = this.ctrl.dynamics.addSphere(opts);
-            if (d.groups != null) this.ctrl.collisionWorld.setGroups(body.colliderId, d.groups);
-            if (d.mask != null) this.ctrl.collisionWorld.setMask(body.colliderId, d.mask);
-            if (d.userData != null) this.ctrl.collisionWorld.setUserData(body.colliderId, d.userData);
+            const body = this.ctrl.dynamics.addSphere(desc as DynamicColliderDesc);
+            if (desc.groups != null) this.ctrl.collisionWorld.setGroups(body.colliderId, desc.groups);
+            if (desc.mask != null) this.ctrl.collisionWorld.setMask(body.colliderId, desc.mask);
+            if (desc.userData != null) this.ctrl.collisionWorld.setUserData(body.colliderId, desc.userData);
             return this.makeHandle(body.colliderId, "dynamic", null, null, null);
         }
 

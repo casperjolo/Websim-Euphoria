@@ -42,6 +42,8 @@ export type FootIKPlayer = {
         clips: AnimationClip[];
         state?: AnimationAction;
     };
+    /** 0 步行 / 1 载具；载具模式时跳过贴地 IK。 */
+    getControllerMode?: () => number;
 };
 
 /** 单条腿参与 IK 的骨骼配置。 */

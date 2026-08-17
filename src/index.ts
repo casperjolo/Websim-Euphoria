@@ -33,7 +33,6 @@ export type {
     SphereShape,
 } from "./collision/ColliderDesc";
 export { DYNAMIC_BODY_DEFAULTS } from "./collision/ColliderDesc";
-export type { AddDynamicSphereOptions } from "./collision/DynamicSphere";
 export { DynamicSphereBody, isSphereBody } from "./collision/DynamicSphere";
 export { DynamicBody } from "./collision/DynamicBody";
 export type { DynamicBodyKind, DynamicBodyMaterialOptions } from "./collision/DynamicBody";
