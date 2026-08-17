@@ -78,6 +78,12 @@ export type DynamicColliderDesc = ColliderDescBase & DynamicColliderMaterialFiel
     follow?: never;
     /** 可选视觉网格。 */
     mesh?: THREE.Mesh;
+    /**
+     * 是否由 DynamicBodySystem 创建并推进刚体。
+     * - 默认 true（省略时）：球 / 可推箱子等会创建 DynamicBody
+     * - false：只登记 CollisionWorld，不创建 DynamicBody（车辆底盘由 VehicleRigidBody 推进）
+     */
+    simulate?: boolean;
 };
 
 /** 动态刚体材质默认值。 */

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { integrateQuaternion } from "../utils/vehiclePhysics/VehicleMath";
 
 /** 动态刚体形状判别。 */
-export type DynamicBodyKind = "sphere";
+export type DynamicBodyKind = "sphere" | "box";
 
 /** 动态刚体材质 / 初态可选字段（各形状 options 共用）。 */
 export type DynamicBodyMaterialOptions = {

@@ -99,6 +99,7 @@ export class VehicleSystem {
                 groups: CollisionGroup.VEHICLE,
                 mask: CollisionGroup.DEFAULT | CollisionGroup.VEHICLE | CollisionGroup.DEBRIS,
                 userData: instance,
+                simulate: false, // 默认会建 DynamicBoxBody；底盘改由 VehicleRigidBody 推进，此处只登记
             });
             instance.chassisColliderId = chassis.id;
             this.setTransition();

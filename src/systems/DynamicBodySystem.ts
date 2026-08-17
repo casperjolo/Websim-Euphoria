@@ -15,23 +15,34 @@ import {
     DynamicSphereBody,
     isSphereBody,
 } from "../collision/DynamicSphere";
+import {
+    capsuleObbOverlap,
+    DynamicBoxBody,
+    isBoxBody,
+} from "../collision/DynamicBox";
 import { DYNAMIC_BODY_DEFAULTS, type DynamicColliderDesc } from "../collision/ColliderDesc";
 import type { VehicleInstance } from "../types";
 import { capsuleSphereOverlap, createCollisionTemps } from "../utils/capsuleCollision";
+import { VehicleCollision } from "../utils/vehiclePhysics/VehicleCollision";
+import { createObbObbTemps, resolveObbObb } from "../collision/ObbObb";
 
 const SUBSTEPS = 5; // 每帧物理子步
 const MAX_PUSH_RATIO = 2; // 单次位置修正不超过特征尺寸的倍数
 const MAX_SPEED_GRAVITY = 2; // 速度上限相对 |gravity| 的倍数
-const PLAYER_MASS_RATIO = 8; // 人物相对单体的质量倍数
+/** 推动态体时用的人物质量。 */
+const CHARACTER_PUSH_MASS = 10;
 const MAX_RAW = 64; // 单体单帧原始接触上限
 const POS_CORRECT = 0.4; // 求解后残留穿透的位置修正比例
 const ROLL_BLEND = 0.45; // 支撑面上向无滑滚动收敛的插值比例
 const SUPPORT_Y = 0.5; // 视为支撑面的法线 y 下限
 const DYNAMIC_MASK = CollisionGroup.DEFAULT | CollisionGroup.VEHICLE | CollisionGroup.DEBRIS;
+const KIN_CAPSULE_BAUMGARTE = 0.8; // 动态体撞运动学胶囊时的位置修正比例
+/** 人物单次相对动态体的最大位置修正（相对胶囊半径）。 */
+const CHAR_SEP_MAX_RADIUS = 1.25;
 
 /**
- * 动态刚体推进：按 kind 分派形状窄相（当前实现为球）。
- * 网格接触走 ContactImpulseSolver；球–球 / 球–人 / 球–车仍用简化冲量。
+ * 动态刚体推进：按 kind 分派形状窄相（球 / 盒）。
+ * 网格接触走 ContactImpulseSolver；球–球 / 盒–盒 / 与人 / 与车用简化或 OBB 冲量。
  */
 export class DynamicBodySystem {
     private ctrl: playerController;
@@ -50,6 +61,9 @@ export class DynamicBodySystem {
     private manifolds: ContactManifold[] = [];
     private bodyVel = new THREE.Vector3();
     private rollTarget = new THREE.Vector3();
+    private boxMeshCollision = new VehicleCollision();
+    private obbTemps = createObbObbTemps();
+    private contactPoint = new THREE.Vector3();
 
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
@@ -113,6 +127,69 @@ export class DynamicBodySystem {
         return body;
     }
 
+    /** 添加动态盒。 */
+    addBox(desc: DynamicColliderDesc): DynamicBoxBody {
+        if (desc.shape.kind !== "box") {
+            throw new Error("[DynamicBodySystem] addBox 需要 shape.kind === \"box\"");
+        }
+        const mesh = desc.mesh;
+        if (!mesh) {
+            throw new Error("[DynamicBodySystem] addBox 需要 mesh");
+        }
+
+        const half = desc.shape.halfExtents.clone();
+        half.x = Math.max(1e-4, half.x);
+        half.y = Math.max(1e-4, half.y);
+        half.z = Math.max(1e-4, half.z);
+        const position = (desc.shape.position ?? new THREE.Vector3()).clone();
+        const velocity = (desc.velocity ?? new THREE.Vector3()).clone();
+        const density = desc.density ?? DYNAMIC_BODY_DEFAULTS.density;
+        const restitution = desc.restitution ?? DYNAMIC_BODY_DEFAULTS.restitution;
+        const friction = desc.friction ?? DYNAMIC_BODY_DEFAULTS.friction;
+        const linearDamping = desc.linearDamping ?? DYNAMIC_BODY_DEFAULTS.linearDamping;
+        const angularDamping = desc.angularDamping ?? DYNAMIC_BODY_DEFAULTS.angularDamping;
+        const gravity = desc.gravity ?? this.ctrl.gravity;
+
+        mesh.scale.set(half.x * 2, half.y * 2, half.z * 2);
+        mesh.position.copy(position);
+        if (desc.shape.quaternion) mesh.quaternion.copy(desc.shape.quaternion);
+
+        const debugMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.35 }),
+        );
+        debugMesh.scale.copy(mesh.scale);
+        debugMesh.position.copy(position);
+        if (desc.shape.quaternion) debugMesh.quaternion.copy(desc.shape.quaternion);
+
+        const body = new DynamicBoxBody({
+            halfExtents: half,
+            density,
+            restitution,
+            gravity,
+            position,
+            quaternion: desc.shape.quaternion,
+            velocity,
+            angularVelocity: desc.angularVelocity,
+            linearDamping,
+            angularDamping,
+            friction,
+            mesh,
+            debugMesh,
+        });
+        const col = this.ctrl.collisionWorld.add({
+            motion: "dynamic",
+            shape: { kind: "box", halfExtents: half.clone() },
+            mask: DYNAMIC_MASK,
+            userData: body,
+        });
+        body.colliderId = col.id;
+        this.list.push(body);
+        this.contactCaches.set(body, new ContactCache());
+        if (this.ctrl.getDisplayCollider()) this.ctrl.scene.add(debugMesh);
+        return body;
+    }
+
     /** 移除动态刚体。 */
     remove(body: DynamicBody): void {
         const idx = this.list.indexOf(body);
@@ -151,7 +228,13 @@ export class DynamicBodySystem {
             body.debugMesh.position.copy(body.position);
             body.debugMesh.quaternion.copy(body.quaternion);
             if (isSphereBody(body)) body.debugMesh.scale.setScalar(body.radius);
-            else body.debugMesh.scale.setScalar(body.characteristicExtent());
+            else if (isBoxBody(body)) {
+                body.debugMesh.scale.set(
+                    body.halfExtents.x * 2,
+                    body.halfExtents.y * 2,
+                    body.halfExtents.z * 2,
+                );
+            }
         }
     }
 
@@ -167,13 +250,18 @@ export class DynamicBodySystem {
 
             if (isSphereBody(body)) {
                 this.collideSphereMeshes(body, dt);
-                this.collideSphereVehicleBoxes(body);
-                this.collideSphereCapsule(body, false); // 胶囊当运动学障碍，不推人
+                this.collideSphereBoxes(body);
+                this.resolveBodyVsKinematicCapsule(body); // 胶囊=运动学：只推刚体
+            } else if (isBoxBody(body)) {
+                this.collideBoxMeshes(body, dt);
+                this.collideBoxVehicleBoxes(body);
+                this.resolveBodyVsKinematicCapsule(body);
             }
             body.applyDamping(dt);
             this.clampSpeed(body);
         }
         this.collideSpherePairs();
+        this.collideBoxPairs();
         for (const body of this.list) this.clampSpeed(body);
     }
 
@@ -225,6 +313,74 @@ export class DynamicBodySystem {
             return;
         }
 
+        this.solveMeshManifolds(body, rawCount, dt);
+        this.applySphereSupportRolling(body);
+    }
+
+    /** 盒 vs 静态/平台网格：复用 VehicleCollision 收集接触后冲量求解。 */
+    private collideBoxMeshes(body: DynamicBoxBody, dt: number): void {
+        const worldCol = this.ctrl.collisionWorld.get(body.colliderId);
+        if (!worldCol) return;
+        const meshes = this.ctrl.collisionWorld.queryMeshes(worldCol, { skipIds: this.skipVehicleMeshes });
+        if (!meshes.length) return;
+
+        this.manifolds.length = 0;
+        let deepest = 0;
+        let deepestMesh: THREE.Mesh | null = null;
+        for (const mesh of meshes) {
+            const found = this.boxMeshCollision.detect(body, mesh);
+            if (!found.length) continue;
+            let meshDeep = 0;
+            for (const m of found) {
+                this.manifolds.push(m);
+                for (const p of m.contacts) {
+                    if (p.penetration > meshDeep) meshDeep = p.penetration;
+                }
+            }
+            if (meshDeep > deepest) {
+                deepest = meshDeep;
+                deepestMesh = mesh;
+            }
+        }
+        if (!this.manifolds.length) return;
+        body.contactMesh = deepestMesh;
+
+        const maxPush = body.characteristicExtent() * MAX_PUSH_RATIO;
+        if (deepest > maxPush) {
+            let nx = 0, ny = 0, nz = 0, w = 0;
+            for (const m of this.manifolds) {
+                for (const p of m.contacts) {
+                    const pen = Math.max(p.penetration, 0);
+                    nx += m.normal.x * pen;
+                    ny += m.normal.y * pen;
+                    nz += m.normal.z * pen;
+                    w += pen;
+                }
+            }
+            if (w > 1e-8) {
+                this.temps.normal.set(nx / w, ny / w, nz / w);
+                if (this.temps.normal.lengthSq() > 1e-8) {
+                    this.temps.normal.normalize();
+                    body.position.addScaledVector(this.temps.normal, Math.min(deepest, maxPush));
+                }
+            }
+            return;
+        }
+
+        const cache = this.contactCaches.get(body);
+        cache?.match(this.manifolds);
+        this.contactSolver.solveVelocity(body, this.manifolds, dt);
+        cache?.save(this.manifolds);
+        for (const manifold of this.manifolds) {
+            for (const point of manifold.contacts) {
+                const corr = (point.penetration - CONTACT_SKIN) * POS_CORRECT;
+                if (corr > 0) body.position.addScaledVector(manifold.normal, corr);
+            }
+        }
+    }
+
+    /** 球网格接触：归约 → 冲量 → 位置修正。 */
+    private solveMeshManifolds(body: DynamicBody, rawCount: number, dt: number): void {
         this.manifolds.length = 0;
         reduceContacts(this.raw, rawCount, body, this.manifolds);
         const cache = this.contactCaches.get(body);
@@ -232,15 +388,12 @@ export class DynamicBodySystem {
         this.contactSolver.solveVelocity(body, this.manifolds, dt);
         cache?.save(this.manifolds);
 
-        // bias 主要改速度，残留穿透再做一次位置修正
         for (const manifold of this.manifolds) {
             for (const point of manifold.contacts) {
                 const corr = (point.penetration - CONTACT_SKIN) * POS_CORRECT;
                 if (corr > 0) body.position.addScaledVector(manifold.normal, corr);
             }
         }
-
-        this.applySphereSupportRolling(body);
     }
 
     /**
@@ -265,31 +418,63 @@ export class DynamicBodySystem {
         body.angularVelocity.lerp(this.rollTarget, ROLL_BLEND);
     }
 
-    /** 球 vs 车辆底盘 OBB：推出球并双方在接触点施冲量。 */
-    private collideSphereVehicleBoxes(body: DynamicSphereBody): void {
+    /** 球 vs 车辆底盘 / 动态盒 OBB。 */
+    private collideSphereBoxes(body: DynamicSphereBody): void {
         const worldCol = this.ctrl.collisionWorld.get(body.colliderId);
         if (!worldCol) return;
         const boxes = this.ctrl.collisionWorld.query(worldCol, { kinds: ["box"] });
         for (const box of boxes) {
             const vehicle = box.userData as VehicleInstance | undefined;
             const chassis = vehicle?.chassisBody;
-            if (!chassis) continue;
-            if (!collideSphereVsObb(
-                body.position, body.radius,
-                chassis.position, chassis.quaternion, chassis.halfExtents,
-                this.temps,
-            )) continue;
+            if (chassis) {
+                this.resolveSphereVsObbBody(body, chassis);
+                continue;
+            }
+            const other = box.userData;
+            if (isBoxBody(other as DynamicBody) && other !== body) {
+                this.resolveSphereVsObbBody(body, other as DynamicBoxBody);
+            }
+        }
+    }
 
-            body.getVelocityAtPoint(this.temps.contact, this.bodyVel);
-            chassis.getVelocityAtPoint(this.temps.contact, this.temps.boxVel);
-            this.temps.offset.copy(this.bodyVel).sub(this.temps.boxVel);
-            const vn = this.temps.offset.dot(this.temps.normal);
-            if (vn >= 0) continue; // 已分离
-            const deltaVn = -vn * (1 + body.restitution);
-            this.temps.impulse.copy(this.temps.normal).multiplyScalar(deltaVn * body.mass);
-            body.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
-            this.temps.impulse.multiplyScalar(-1);
-            chassis.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
+    /** 球与单个 OBB 刚体：推出球并双方在接触点施冲量。 */
+    private resolveSphereVsObbBody(
+        body: DynamicSphereBody,
+        other: {
+            position: THREE.Vector3; quaternion: THREE.Quaternion; halfExtents: THREE.Vector3;
+            getVelocityAtPoint(p: THREE.Vector3, o: THREE.Vector3): THREE.Vector3;
+            applyImpulseAtPoint(i: THREE.Vector3, p: THREE.Vector3): void
+        },
+    ): void {
+        if (!collideSphereVsObb(
+            body.position, body.radius,
+            other.position, other.quaternion, other.halfExtents,
+            this.temps,
+        )) return;
+
+        body.getVelocityAtPoint(this.temps.contact, this.bodyVel);
+        other.getVelocityAtPoint(this.temps.contact, this.temps.boxVel);
+        this.temps.offset.copy(this.bodyVel).sub(this.temps.boxVel);
+        const vn = this.temps.offset.dot(this.temps.normal);
+        if (vn >= 0) return;
+        const deltaVn = -vn * (1 + body.restitution);
+        this.temps.impulse.copy(this.temps.normal).multiplyScalar(deltaVn * body.mass);
+        body.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
+        this.temps.impulse.multiplyScalar(-1);
+        other.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
+    }
+
+    /** 动态盒 vs 车辆底盘 OBB。 */
+    private collideBoxVehicleBoxes(body: DynamicBoxBody): void {
+        const worldCol = this.ctrl.collisionWorld.get(body.colliderId);
+        if (!worldCol) return;
+        const boxes = this.ctrl.collisionWorld.query(worldCol, { kinds: ["box"] });
+        for (const box of boxes) {
+            if (box.id === body.colliderId) continue;
+            const vehicle = box.userData as VehicleInstance | undefined;
+            const chassis = vehicle?.chassisBody;
+            if (!chassis) continue;
+            resolveObbObb(body, chassis, this.obbTemps);
         }
     }
 
@@ -306,43 +491,138 @@ export class DynamicBodySystem {
         }
     }
 
-    /** 人物分步移动时与动态刚体接触（当前仅球；可推开胶囊）。 */
-    collideWithCapsule(): void {
-        if (this.ctrl.controllerMode === 1 || this.ctrl.skipCapsuleCollision) return;
-        for (const body of this.list) {
-            if (isSphereBody(body)) this.collideSphereCapsule(body, true);
+    /** 盒与盒两两 OBB 求解。 */
+    private collideBoxPairs(): void {
+        for (let i = 0; i < this.list.length; i++) {
+            const a = this.list[i];
+            if (!isBoxBody(a)) continue;
+            for (let j = i + 1; j < this.list.length; j++) {
+                const b = this.list[j];
+                if (!isBoxBody(b)) continue;
+                resolveObbObb(a, b, this.obbTemps);
+            }
         }
     }
 
     /**
-     * 球 vs 人物胶囊：法向分离 + 线速度冲量。
-     * moveCapsule 为 false 时人物视为无限质量（只推球）。
+     * 人物分步移动时与动态体接触。
+     * 胶囊只做位置推出；对刚体施水平单向冲量（不回推人物速度）。
      */
-    private collideSphereCapsule(body: DynamicSphereBody, moveCapsule: boolean): void {
+    collideWithCapsule(): void {
+        if (this.ctrl.controllerMode === 1 || this.ctrl.skipCapsuleCollision) return;
+        const cap = this.ctrl.playerCapsule;
+        const info = cap?.capsuleInfo;
+        if (!cap || !info) return;
+
+        const maxSep = info.radius * CHAR_SEP_MAX_RADIUS;
+        const playerVel = this.ctrl.playerVelocity;
+        const charMass = CHARACTER_PUSH_MASS;
+
+        for (const body of this.list) {
+            const hit = this.queryCapsuleBodyOverlap(cap, info, body);
+            if (!hit || hit.depth <= 0) continue;
+
+            // 步行法线压到水平，避免竖直分量把人弹飞
+            this.temps.normal.copy(hit.normal);
+            if (!this.ctrl.isFlying) {
+                this.temps.normal.y = 0;
+                if (this.temps.normal.lengthSq() < 1e-8) {
+                    this.temps.normal.set(
+                        body.position.x - cap.position.x,
+                        0,
+                        body.position.z - cap.position.z,
+                    );
+                    if (this.temps.normal.lengthSq() < 1e-8) this.temps.normal.set(1, 0, 0);
+                }
+                this.temps.normal.normalize();
+            }
+
+            const sep = Math.min(hit.depth, maxSep);
+            cap.position.addScaledVector(this.temps.normal, -sep);
+            cap.updateMatrixWorld();
+
+            body.getVelocityAtPoint(hit.contact, this.bodyVel);
+            this.temps.offset.set(playerVel.x - this.bodyVel.x, 0, playerVel.z - this.bodyVel.z);
+            const deltaVel = this.temps.offset.dot(this.temps.normal);
+            if (deltaVel <= 0) continue;
+
+            const massRatio = (body.mass * charMass) / (body.mass + charMass);
+            this.temps.impulse.copy(this.temps.normal).multiplyScalar(deltaVel * massRatio);
+            this.temps.impulse.y = 0;
+            body.applyImpulseAtPoint(this.temps.impulse, hit.contact);
+        }
+    }
+
+    /** 查询胶囊与单个动态体的重叠；normal 由胶囊指向刚体。 */
+    private queryCapsuleBodyOverlap(
+        cap: THREE.Object3D,
+        info: { segment: THREE.Line3; radius: number; dynamicsSegment?: THREE.Line3 },
+        body: DynamicBody,
+    ): { depth: number; normal: THREE.Vector3; contact: THREE.Vector3 } | null {
+        if (isSphereBody(body)) {
+            const depth = capsuleSphereOverlap(cap, info, body.position, body.radius, this.capsuleTemps);
+            if (depth <= 0) return null;
+            this.contactPoint.copy(this.capsuleTemps.closestSeg).addScaledVector(
+                this.capsuleTemps.closestTri, info.radius,
+            );
+            return {
+                depth,
+                normal: this.capsuleTemps.closestTri,
+                contact: this.contactPoint,
+            };
+        }
+        if (isBoxBody(body)) {
+            const depth = capsuleObbOverlap(
+                cap, info, body.position, body.quaternion, body.halfExtents, this.capsuleTemps,
+            );
+            if (depth <= 0) return null;
+            this.contactPoint.copy(this.capsuleTemps.closestSeg).addScaledVector(
+                this.capsuleTemps.closestTri, info.radius,
+            );
+            return {
+                depth,
+                normal: this.capsuleTemps.closestTri,
+                contact: this.contactPoint,
+            };
+        }
+        return null;
+    }
+
+    /**
+     * 物理子步：胶囊视为运动学障碍（无限质量），只推出刚体并去掉侵入法向速度。
+     */
+    private resolveBodyVsKinematicCapsule(body: DynamicBody): void {
         const cap = this.ctrl.playerCapsule;
         const info = cap?.capsuleInfo;
         if (!cap || !info || this.ctrl.controllerMode === 1) return;
 
-        const depth = capsuleSphereOverlap(cap, info, body.position, body.radius, this.capsuleTemps);
-        if (depth <= 0) return;
+        const hit = this.queryCapsuleBodyOverlap(cap, info, body);
+        if (!hit || hit.depth <= 0) return;
 
-        const n = this.capsuleTemps.closestTri;
-        const playerMass = Math.max(body.mass * PLAYER_MASS_RATIO, 1e-6);
-        const invPlayer = moveCapsule ? 1 / playerMass : 0;
-        const invBody = body.invMass;
-        const invSum = invPlayer + invBody;
-        if (moveCapsule) cap.position.addScaledVector(n, -depth * (invPlayer / invSum));
-        body.position.addScaledVector(n, depth * (invBody / invSum));
-        cap.updateMatrixWorld();
+        // 法线：胶囊→刚体；推出刚体。步行压低竖直分量，避免箱子被顶飞。
+        this.temps.normal.copy(hit.normal);
+        if (!this.ctrl.isFlying && Math.abs(this.temps.normal.y) > 0.35) {
+            this.temps.normal.y *= 0.15;
+            if (this.temps.normal.lengthSq() > 1e-8) this.temps.normal.normalize();
+            else {
+                this.temps.normal.set(
+                    body.position.x - cap.position.x,
+                    0,
+                    body.position.z - cap.position.z,
+                );
+                if (this.temps.normal.lengthSq() < 1e-8) return;
+                this.temps.normal.normalize();
+            }
+        }
 
-        const playerVel = this.ctrl.playerVelocity;
-        const rel = body.velocity.dot(n) - playerVel.dot(n);
-        if (rel >= 0) return;
-        const impulseMag = -(1 + body.restitution) * rel / invSum;
-        body.velocity.addScaledVector(n, impulseMag * invBody);
-        if (moveCapsule) {
-            playerVel.x += n.x * (-impulseMag * invPlayer);
-            playerVel.z += n.z * (-impulseMag * invPlayer);
+        const sep = Math.min(hit.depth, info.radius * CHAR_SEP_MAX_RADIUS);
+        body.position.addScaledVector(this.temps.normal, sep * KIN_CAPSULE_BAUMGARTE);
+
+        body.getVelocityAtPoint(hit.contact, this.bodyVel);
+        const vn = this.bodyVel.dot(this.temps.normal);
+        if (vn < 0) {
+            this.temps.impulse.copy(this.temps.normal).multiplyScalar(-vn * body.mass);
+            body.applyImpulseAtPoint(this.temps.impulse, hit.contact);
         }
     }
 

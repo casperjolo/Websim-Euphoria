@@ -34,6 +34,7 @@ export type {
 } from "./collision/ColliderDesc";
 export { DYNAMIC_BODY_DEFAULTS } from "./collision/ColliderDesc";
 export { DynamicSphereBody, isSphereBody } from "./collision/DynamicSphere";
+export { DynamicBoxBody, isBoxBody } from "./collision/DynamicBox";
 export { DynamicBody } from "./collision/DynamicBody";
 export type { DynamicBodyKind, DynamicBodyMaterialOptions } from "./collision/DynamicBody";
 

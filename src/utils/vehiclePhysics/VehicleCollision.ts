@@ -3,10 +3,16 @@ import type { ContactManifold } from "../../collision/contacts/ContactManifold";
 import { CONTACT_SKIN, type RawContact } from "../../collision/contacts/ContactPoint";
 import { reduceContacts } from "../../collision/contacts/ContactReducer";
 import { closestPointOnTriangle } from "./VehicleMath";
+import type { ImpulseBody } from "../../collision/solver/ImpulseBody";
 import type { VehicleRigidBody } from "./VehicleRigidBody";
 
 const MAX_RAW = 96; // 单帧原始接触上限
 const CCD_SIZE_RATIO = 0.12; // 位移超过最小边长该比例时启用扫掠
+
+/** detect 所需的 OBB 刚体（车辆底盘 / 动态盒共用）。 */
+export type ObbMeshBody = ImpulseBody & {
+    halfExtents: THREE.Vector3;
+};
 
 /** 车身 OBB 与 BVH 三角网格：只收集接触，高速时做扫掠。 */
 export class VehicleCollision {
@@ -59,9 +65,9 @@ export class VehicleCollision {
         (this.raycaster as any).firstHitOnly = true;
     }
 
-    /** 收集车身与一组网格的接触流形。 */
+    /** 收集 OBB 与一组网格的接触流形。 */
     detect(
-        body: VehicleRigidBody,
+        body: ObbMeshBody,
         colliders: THREE.Mesh[] | THREE.Mesh | null | undefined,
     ): ContactManifold[] {
         this.rawCount = 0;
@@ -164,9 +170,9 @@ export class VehicleCollision {
         return Array.isArray(colliders) ? colliders : [colliders];
     }
 
-    /** 用 BVH shapecast 收集与车身 OBB 相交的三角。 */
+    /** 用 BVH shapecast 收集与 OBB 相交的三角。 */
     private collectRawContacts(
-        body: VehicleRigidBody,
+        body: ObbMeshBody,
         collider: THREE.Mesh,
         tree: { shapecast: (opts: any) => void },
     ): void {
@@ -195,7 +201,7 @@ export class VehicleCollision {
 
     /** SAT 分离则丢弃；否则用支撑点投影出接触。 */
     private testTriangle(
-        body: VehicleRigidBody,
+        body: ObbMeshBody,
         a: THREE.Vector3,
         b: THREE.Vector3,
         c: THREE.Vector3,
@@ -291,7 +297,7 @@ export class VehicleCollision {
         localPoint: THREE.Vector3,
         localNormal: THREE.Vector3,
         depth: number,
-        body: VehicleRigidBody,
+        body: ObbMeshBody,
     ): void {
         let slot = this.rawCount;
         if (slot === MAX_RAW) {
@@ -308,12 +314,12 @@ export class VehicleCollision {
         contact.point.copy(localPoint).applyMatrix4(this.worldMat);
         contact.normal.copy(localNormal).applyMatrix3(this.normalMat).normalize();
         this.toward.subVectors(body.position, contact.point);
-        if (contact.normal.dot(this.toward) < 0) contact.normal.negate(); // 法线指向车身
+        if (contact.normal.dot(this.toward) < 0) contact.normal.negate(); // 法线指向盒子
         contact.penetration = depth;
     }
 
-    /** 从车身朝向取出世界轴，并缓存半边长。 */
-    private setWorldAxes(body: VehicleRigidBody): void {
+    /** 从朝向取出世界轴，并缓存半边长。 */
+    private setWorldAxes(body: ObbMeshBody): void {
         this.setAxes(body.quaternion, this.axisX, this.axisY, this.axisZ);
         this.bodyHalf.copy(body.halfExtents);
     }

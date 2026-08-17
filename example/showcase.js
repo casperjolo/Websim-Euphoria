@@ -396,26 +396,11 @@ function createHalfBuriedObstacles(root, baseMat) {
     }
 }
 
-// 远端左：略低装饰地板 + 静态方块
+// 远端左：略低装饰地板
 function createPropPit(root, baseMat) {
     const { x, z, size, drop } = ZONE_PROP;
-    const accentMat = createKineAccentMaterial(baseMat);
     const floorY = DECK_Y - drop;
     addBox(root, new Vector3(x, floorY, z), new Vector3(size, DECK_THICK, size), baseMat);
-
-    const deckTop = DECK_Y + DECK_THICK * 0.5;
-    const boxH = 0.35;
-    const inset = size * 0.5 - 1.2;
-    const boxSpots = [
-        new Vector3(x - inset, deckTop + boxH * 0.5, z),
-        new Vector3(x + inset, deckTop + boxH * 0.5, z),
-        new Vector3(x, deckTop + boxH * 0.5, z + inset * 0.2),
-        new Vector3(x - inset * 0.4, deckTop + boxH * 0.5, z - inset * 0.7),
-        new Vector3(x + inset * 0.4, deckTop + boxH * 0.5, z + inset * 0.6),
-    ];
-    for (const pos of boxSpots) {
-        addBox(root, pos, new Vector3(0.425, boxH, 0.425), accentMat);
-    }
 }
 
 // 远端右：升降 + 平移运动学平台
@@ -556,7 +541,7 @@ function updateKinematicZone(t) {
     }
 }
 
-// 左侧动态球
+// 左侧动态球 / 盒
 function spawnPropBodies() {
     const { x, z, size } = ZONE_PROP;
     const deckTop = DECK_Y + DECK_THICK * 0.5;
@@ -569,10 +554,10 @@ function spawnPropBodies() {
         new Vector3(x - inset * 0.5, sphereY, z + inset * 0.3),
         new Vector3(x + inset * 0.5, sphereY, z + inset),
     ];
-    const sphereMat = createKineAccentMaterial(prototypeMat);
+    const propMat = createKineAccentMaterial(prototypeMat);
 
     for (const pos of sphereSpots) {
-        const mesh = new Mesh(new SphereGeometry(1, 24, 16), sphereMat.clone());
+        const mesh = new Mesh(new SphereGeometry(1, 24, 16), propMat.clone());
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         scene.add(mesh);
@@ -582,6 +567,38 @@ function spawnPropBodies() {
             mesh,
             restitution: 0.35,
             friction: 0.55,
+        });
+    }
+
+    const boxH = 0.35;
+    const boxHalf = new Vector3(0.2125, boxH * 0.5, 0.2125);
+    const boxY = deckTop + boxHalf.y + 0.05;
+    const boxSpots = [
+        new Vector3(x - inset, boxY, z),
+        new Vector3(x + inset, boxY, z),
+        new Vector3(x, boxY, z + inset * 0.2),
+        new Vector3(x - inset * 0.4, boxY, z - inset * 0.7),
+        new Vector3(x + inset * 0.4, boxY, z + inset * 0.6),
+        new Vector3(x - inset * 0.4, boxY, z - inset * 0.2),
+        new Vector3(x + inset * 0.35, boxY, z + inset * 0.15),
+        new Vector3(x, boxY + boxHalf.y * 2.2, z),
+    ];
+    for (const pos of boxSpots) {
+        const mesh = new Mesh(new BoxGeometry(1, 1, 1), propMat.clone());
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+        player.addCollider({
+            motion: "dynamic",
+            shape: {
+                kind: "box",
+                halfExtents: boxHalf.clone(),
+                position: pos.clone(),
+            },
+            mesh,
+            restitution: 0.2,
+            friction: 0.65,
+            density: 1.2,
         });
     }
 }

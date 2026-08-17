@@ -13,7 +13,7 @@ let warnedDynamicMesh = false;
 
 /**
  * 统一碰撞体注册：按 ColliderDesc 创建 / 移除，并维护运动学跟随。
- * 静态 / 运动学 mesh 走合并 + BVH；动态球交给 DynamicBodySystem。
+ * 静态 / 运动学 mesh 走合并 + BVH；动态球 / 盒交给 DynamicBodySystem。
  */
 export class ColliderRegistry {
     private ctrl: playerController;
@@ -349,8 +349,21 @@ export class ColliderRegistry {
         return handle;
     }
 
-    /** box：仅登记 CollisionWorld（车辆底盘等）；尚无通用动态盒刚体。 */
+    /**
+     * box：
+     * - dynamic 且 simulate 默认 true → 创建 DynamicBoxBody
+     * - dynamic 且 simulate: false → 仅登记（车辆底盘）
+     * - static / kinematic → 仅登记
+     */
     private addBox(desc: ColliderDesc): ColliderHandle {
+        if (desc.motion === "dynamic" && (desc as DynamicColliderDesc).simulate !== false) {
+            const body = this.ctrl.dynamics.addBox(desc as DynamicColliderDesc);
+            if (desc.groups != null) this.ctrl.collisionWorld.setGroups(body.colliderId, desc.groups);
+            if (desc.mask != null) this.ctrl.collisionWorld.setMask(body.colliderId, desc.mask);
+            if (desc.userData != null) this.ctrl.collisionWorld.setUserData(body.colliderId, desc.userData);
+            return this.makeHandle(body.colliderId, "dynamic", null, null, null);
+        }
+
         const shape = desc.shape as Extract<ColliderDesc["shape"], { kind: "box" }>;
         const half = shape.halfExtents.clone();
         const entry = this.ctrl.collisionWorld.add({
