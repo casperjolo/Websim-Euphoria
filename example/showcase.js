@@ -5,14 +5,17 @@ import {
     BufferGeometry,
     CylinderGeometry,
     DirectionalLight,
+    ExtrudeGeometry,
     Float32BufferAttribute,
     Group,
     Mesh,
     MeshStandardMaterial,
+    Path,
     PerspectiveCamera,
     RepeatWrapping,
     SRGBColorSpace,
     Scene,
+    Shape,
     TextureLoader,
     VSMShadowMap,
     Vector3,
@@ -29,6 +32,16 @@ import { FootIK } from "../src/foot-ik";
 const PLAZA_SIZE = 24;
 const TILE_SIZE = 1;
 const SLOPE_ANGLES = [20, 30, 40];
+const L1_TOP = 1.2;
+const LIFT_RADIUS = 0.9;
+const LIFT_THICKNESS = 0.12;
+const LIFT_HOLE_GAP = 0.05;
+const L2_SIZE = 40;
+const L2_THICKNESS = 0.4;
+const L2_HOLE_RADIUS = LIFT_RADIUS + LIFT_HOLE_GAP;
+const L2_TOP = 15;
+const LIFT_SPEED = 1 / 6;
+const LIFT_RETURN_DELAY = 1.5;
 
 const scene = new Scene();
 
@@ -40,6 +53,7 @@ let footIK;
 let gui;
 let stats;
 let prototypeMat;
+let liftPlatform;
 
 init();
 
@@ -89,11 +103,11 @@ async function init() {
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = 60;
-    sun.shadow.camera.left = -28;
-    sun.shadow.camera.right = 28;
-    sun.shadow.camera.top = 28;
-    sun.shadow.camera.bottom = -28;
+    sun.shadow.camera.far = 90;
+    sun.shadow.camera.left = -36;
+    sun.shadow.camera.right = 36;
+    sun.shadow.camera.top = 36;
+    sun.shadow.camera.bottom = -36;
     sun.shadow.bias = -0.0005;
     scene.add(sun);
 
@@ -108,9 +122,13 @@ async function init() {
     skyUniforms["sunPosition"].value.copy(sun.position.clone().normalize());
 
     // 测试场景
-    prototypeMat = await loadPrototypeMaterial();
+    prototypeMat = await loadTiledMaterial("./textures/showcase/prototype.png");
+    const liftMat = await loadTiledMaterial("./textures/showcase/lift.png");
     const world = buildShowcaseWorld(prototypeMat);
     scene.add(world);
+
+    liftPlatform = createLiftPlatform(liftMat);
+    scene.add(liftPlatform.mesh);
 
     // 人物控制器
     const gltfLoader = new GLTFLoader();
@@ -152,6 +170,11 @@ async function init() {
             runSpeed: 600,
         },
     });
+    player.addCollider({
+        motion: "kinematic",
+        shape: { kind: "mesh", source: liftPlatform.mesh },
+        follow: liftPlatform.mesh,
+    });
     enableModelShadows(player.playerModel);
 
     // Foot IK
@@ -184,9 +207,9 @@ async function init() {
     window.hideLoader?.();
 }
 
-// 加载 prototype 纹理材质
-async function loadPrototypeMaterial() {
-    const texture = await new TextureLoader().loadAsync("./textures/showcase/prototype.png");
+// 加载 tiling 纹理材质
+async function loadTiledMaterial(url) {
+    const texture = await new TextureLoader().loadAsync(url);
     texture.colorSpace = SRGBColorSpace;
     texture.wrapS = RepeatWrapping;
     texture.wrapT = RepeatWrapping;
@@ -259,13 +282,138 @@ function buildShowcaseWorld(baseMat) {
 
     addBox(root, new Vector3(0, -0.06, 0), new Vector3(PLAZA_SIZE, 0.12, PLAZA_SIZE), baseMat);
     createClimbGroups(root, baseMat);
+    createLevel2Deck(root, baseMat);
 
     return root;
 }
 
+// 二层带圆孔大平台
+function createLevel2Deck(root, baseMat) {
+    const half = L2_SIZE * 0.5;
+    const shape = new Shape();
+    shape.moveTo(-half, -half);
+    shape.lineTo(half, -half);
+    shape.lineTo(half, half);
+    shape.lineTo(-half, half);
+    shape.closePath();
+
+    const hole = new Path();
+    hole.absarc(0, 0, L2_HOLE_RADIUS, 0, Math.PI * 2, true);
+    shape.holes.push(hole);
+
+    const geo = new ExtrudeGeometry(shape, { depth: L2_THICKNESS, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, -L2_THICKNESS * 0.5, 0);
+
+    const deckPos = new Vector3(0, L2_TOP - L2_THICKNESS * 0.5, 0);
+    const deck = new Mesh(applyWorldTileUV(geo, deckPos), baseMat);
+    deck.position.copy(deckPos);
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    deck.name = "Level2Deck";
+    root.add(deck);
+    return deck;
+}
+
+// 圆形升降台（kinematic，不进静态 world）
+function createLiftPlatform(baseMat) {
+    const baseY = L1_TOP + LIFT_THICKNESS * 0.5;
+    const topY = L2_TOP - LIFT_THICKNESS * 0.5;
+    const pos = new Vector3(0, baseY, 0);
+    const geo = applyWorldTileUV(
+        new CylinderGeometry(LIFT_RADIUS, LIFT_RADIUS, LIFT_THICKNESS, 48),
+        pos,
+    );
+    const mesh = new Mesh(geo, baseMat);
+    mesh.position.copy(pos);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.name = "LiftPlatform";
+
+    return {
+        mesh,
+        baseY,
+        topY,
+        progress: 0,
+        state: "idle",
+        emptyTimer: 0,
+    };
+}
+
+function easeEndsLinearMiddle(progress, easeRatio = 0.18) {
+    const ease = Math.min(Math.max(easeRatio, 0.001), 0.49);
+    const maxSpeed = 1 / (1 - ease);
+    if (progress < ease) return (maxSpeed * progress * progress) / (2 * ease);
+    if (progress > 1 - ease) return 1 - (maxSpeed * (1 - progress) * (1 - progress)) / (2 * ease);
+    return maxSpeed * (progress - ease / 2);
+}
+
+function applyLiftProgress(lift) {
+    const t = easeEndsLinearMiddle(Math.min(Math.max(lift.progress, 0), 1));
+    lift.mesh.position.y = lift.baseY + (lift.topY - lift.baseY) * t;
+}
+
+function isPlayerOnLift(lift) {
+    return (
+        player?.getActiveKinematicCollider()?.source === lift.mesh
+        && player.getIsOnGround()
+    );
+}
+
+function resetLiftPlatform(lift = liftPlatform) {
+    if (!lift) return;
+    lift.progress = 0;
+    lift.state = "idle";
+    lift.emptyTimer = 0;
+    applyLiftProgress(lift);
+}
+
+// 更新升降台
+function updateLiftPlatform(lift) {
+    if (!lift || !player) return;
+
+    const dt = player.getCurrentDelta() || 1 / 60;
+    const occupied = isPlayerOnLift(lift);
+
+    if (lift.state === "idle") {
+        if (occupied) lift.state = "rising";
+    } else if (lift.state === "rising") {
+        lift.progress = Math.min(1, lift.progress + dt * LIFT_SPEED);
+        applyLiftProgress(lift);
+        if (lift.progress >= 1) {
+            lift.progress = 1;
+            lift.state = "arrived";
+            lift.emptyTimer = 0;
+        }
+    } else if (lift.state === "arrived") {
+        applyLiftProgress(lift);
+        if (occupied) {
+            lift.emptyTimer = 0;
+        } else {
+            lift.emptyTimer += dt;
+            if (lift.emptyTimer >= LIFT_RETURN_DELAY) {
+                lift.state = "descending";
+                lift.emptyTimer = 0;
+            }
+        }
+    } else if (lift.state === "descending") {
+        if (occupied) {
+            lift.state = "rising";
+            lift.emptyTimer = 0;
+        } else {
+            lift.progress = Math.max(0, lift.progress - dt * LIFT_SPEED);
+            applyLiftProgress(lift);
+            if (lift.progress <= 0) {
+                lift.progress = 0;
+                lift.state = "idle";
+            }
+        }
+    }
+}
+
 // 创建攀爬组与中心平台
 function createClimbGroups(root, baseMat) {
-    const topHeight = 1.2;
+    const topHeight = L1_TOP;
     const stepCount = 7;
     const stepHeight = topHeight / stepCount;
     const stairWidth = 1;
@@ -462,6 +610,9 @@ function createDebugPanel() {
         colliderDebug: false,
         playerCapsuleDebug: false,
         footIKEnabled: true,
+        resetLift() {
+            resetLiftPlatform();
+        },
     };
 
     gui = new GUI({ title: "Debug", width: 260 });
@@ -480,6 +631,7 @@ function createDebugPanel() {
     sceneFolder.add(params, "footIKEnabled").name("Foot IK").onChange((value) => {
         footIK?.setEnabled(value);
     });
+    sceneFolder.add(params, "resetLift").name("Reset Lift");
     sceneFolder.open();
 }
 
@@ -494,8 +646,12 @@ function onResize() {
 
 // 每帧调用
 function animate() {
-    if (player) player.update();
-    else controls?.update();
+    if (player) {
+        updateLiftPlatform(liftPlatform);
+        player.update();
+    } else {
+        controls?.update();
+    }
     renderer.render(scene, camera);
     stats?.update();
 }
