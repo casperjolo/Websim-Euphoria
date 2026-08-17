@@ -575,7 +575,7 @@ export class playerController {
     }
 
     /** 人物胶囊 / 相机查询用的静态与运动学网格。 */
-    queryPlayerMeshes(options?: { skipIds?: number[] }): THREE.Mesh[] {
+    getColliderMeshes(options?: { skipIds?: number[] }): THREE.Mesh[] {
         return this.collisionWorld.queryMeshes({ mask: CHARACTER_QUERY_MASK }, options);
     }
 
@@ -660,7 +660,7 @@ export class playerController {
         (this.playerCapsule.material as THREE.Material).visible = dbg && this.displayPlayerCapsule;
 
         // 全部已登记的查询用 mesh 线框（static / kinematic）
-        for (const mesh of this.queryPlayerMeshes()) {
+        for (const mesh of this.getColliderMeshes()) {
             if (dbg && (mesh.geometry as any).boundsTree) {
                 if (!this.scene.children.includes(mesh)) this.scene.add(mesh);
             } else this.scene.remove(mesh);
@@ -836,8 +836,6 @@ export class playerController {
     getActiveVehicle() { return this.vehicle.active; }
     /** 获取所有载具。 */
     getAllVehicles() { return this.vehicle.list; }
-    /** 人物 / 相机查询用的全部碰撞网格（CollisionWorld）。 */
-    getColliderMeshes() { return this.queryPlayerMeshes(); }
     /** 获取当前站立的运动学碰撞体。 */
     getActiveKinematicCollider() { return this.activeKinematicCollider; }
 

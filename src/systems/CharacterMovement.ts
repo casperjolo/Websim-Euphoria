@@ -115,7 +115,7 @@ export class CharacterMovement {
 
             if (!c.skipCapsuleCollision) {
                 const kinMeshes = c.getKinematicColliderEntries();
-                for (const mesh of c.queryPlayerMeshes()) {
+                for (const mesh of c.getColliderMeshes()) {
                     c.playerCapsule.updateMatrixWorld();
                     const isKin = kinMeshes.some(e => e.mesh === mesh);
                     // 飞行用接到脚底的段；步行用悬空段便于上台阶

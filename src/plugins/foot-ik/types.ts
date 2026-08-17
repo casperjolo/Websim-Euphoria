@@ -20,7 +20,7 @@ export type FootIKSide = "left" | "right";
 /** FootIK 使用的控制器字段；实际传入对象仍是 playerController。 */
 export type FootIKPlayer = {
     scene: Scene;
-    queryPlayerMeshes: (options?: { skipIds?: number[] }) => Mesh[];
+    getColliderMeshes: () => Mesh[];
     playerCapsule: Mesh & {
         capsuleInfo?: {
             radius: number;

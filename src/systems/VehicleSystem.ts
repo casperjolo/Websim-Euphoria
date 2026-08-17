@@ -315,7 +315,7 @@ export class VehicleSystem {
             out.copy(this.scratchLocal);
             this.raycaster.set(out, this.scratchDown);
             let bestHit: THREE.Intersection | undefined;
-            for (const mesh of this.ctrl.queryPlayerMeshes()) {
+            for (const mesh of this.ctrl.getColliderMeshes()) {
                 const hits = this.raycaster.intersectObject(mesh, false);
                 if (hits.length && (!bestHit || hits[0].distance < bestHit.distance)) {
                     bestHit = hits[0];
@@ -338,7 +338,7 @@ export class VehicleSystem {
     private isCharacterPositionFree(position: THREE.Vector3, v: VehicleInstance): boolean {
         const cap = this.ctrl.playerCapsule;
         const info = cap.capsuleInfo;
-        if (!info || !this.ctrl.queryPlayerMeshes().length) return true;
+        if (!info || !this.ctrl.getColliderMeshes().length) return true;
 
         const origParent = cap.parent;
         const origPos = cap.position.clone();
@@ -348,7 +348,7 @@ export class VehicleSystem {
         cap.position.copy(position);
         cap.updateMatrixWorld(true);
         const before = position.clone();
-        for (const mesh of this.ctrl.queryPlayerMeshes()) {
+        for (const mesh of this.ctrl.getColliderMeshes()) {
             if (mesh === skipMesh) continue;
             cap.updateMatrixWorld(true);
             applyCapsuleCollision(cap, info, mesh, this.exitCheckTemps);

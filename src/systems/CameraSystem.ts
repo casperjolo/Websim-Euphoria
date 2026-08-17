@@ -265,7 +265,7 @@ export class CameraSystem {
             ? [this.ctrl.vehicle.active.meshColliderId]
             : undefined;
         const hits: THREE.Intersection[] = [];
-        for (const mesh of this.ctrl.queryPlayerMeshes({ skipIds })) {
+        for (const mesh of this.ctrl.getColliderMeshes({ skipIds })) {
             const meshHits = this.raycaster.intersectObject(mesh, false);
             if (meshHits[0] && (!hits[0] || meshHits[0].distance < hits[0].distance)) {
                 hits[0] = meshHits[0];
@@ -302,7 +302,7 @@ export class CameraSystem {
         this.centerRay.layers.set(1);
         this.centerRay.layers.enable(2);
 
-        const meshes = this.ctrl.queryPlayerMeshes();
+        const meshes = this.ctrl.getColliderMeshes();
         const checkTargets = meshes.length
             ? [...meshes, ...this.ctrl.scene.children]
             : this.ctrl.scene.children;
