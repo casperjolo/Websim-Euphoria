@@ -664,7 +664,11 @@ export class FootIK {
             return;
         }
 
-        // 左右脚各自向下射线，得到各自支撑高度。
+        const capsuleGroundY = capsuleHit.point.y;
+        const capsuleNormalY = this.getWorldHitNormal(capsuleHit, this.tmpV3).y;
+        // 近水平用 max（认台面、忽略边缘垂下野点）；斜坡用平均（同一平面上 max 会虚高）。
+        const useSlopeAverage = capsuleNormalY < this.meshStepRaiseMinNormalY;
+
         let leftGroundY = NaN;
         let rightGroundY = NaN;
         for (const side of ["left", "right"] as const) {
@@ -672,15 +676,12 @@ export class FootIK {
             if (!isReadyLeg(leg)) continue;
 
             const footWorld = leg.foot.getWorldPosition(this.tmpV1);
-            const footHit = this.castBestFootGround(
-                leg,
-                footWorld,
-                this.meshStepProbeSamples,
-                null,
-            );
-            if (!footHit) continue;
-            if (side === "left") leftGroundY = footHit.point.y;
-            else rightGroundY = footHit.point.y;
+            const groundY = useSlopeAverage
+                ? this.getFootGroundAverageY(leg, footWorld, this.meshStepProbeSamples)
+                : this.getFootGroundMaxY(leg, footWorld, this.meshStepProbeSamples);
+            if (!Number.isFinite(groundY)) continue;
+            if (side === "left") leftGroundY = groundY;
+            else rightGroundY = groundY;
         }
 
         if (!Number.isFinite(leftGroundY) || !Number.isFinite(rightGroundY)) {
@@ -688,8 +689,6 @@ export class FootIK {
             return;
         }
 
-        const capsuleGroundY = capsuleHit.point.y;
-        const capsuleNormalY = this.getWorldHitNormal(capsuleHit, this.tmpV3).y;
         const supportY = Math.min(leftGroundY, rightGroundY);
         const planeDelta = Math.abs(leftGroundY - rightGroundY);
         const heightDelta = supportY - capsuleGroundY;
@@ -699,7 +698,7 @@ export class FootIK {
             planeDelta <= this.meshStepCoplanarThreshold
             && heightDelta > this.meshStepEpsilon
             // 连续斜坡法线倾斜：禁止上抬。只在近水平台阶/平台上抬 mesh。
-            && capsuleNormalY >= this.meshStepRaiseMinNormalY
+            && !useSlopeAverage
         ) {
             // 双脚近似同平面且明显高于胶囊地面：抬 mesh 对齐支撑面，站直。
             wantedOffset = MathUtils.clamp(heightDelta, 0, this.maxMeshStepRaise);
@@ -709,6 +708,39 @@ export class FootIK {
         }
 
         this.setMeshStepOffset(wantedOffset, delta);
+    }
+
+    // 近水平台阶：取脚底最高命中，认当前台面。
+    private getFootGroundMaxY(
+        leg: ReadyFootIKLeg,
+        footWorld: Vector3,
+        samples: FootIKProbeSample[] = leg.soleSamples,
+    ): number {
+        const hit = this.castBestFootGround(leg, footWorld, samples, null);
+        return hit ? hit.point.y : NaN;
+    }
+
+    // 斜坡：脚底命中取平均，避免面向上坡时脚尖 max(Y) 虚高。
+    private getFootGroundAverageY(
+        leg: ReadyFootIKLeg,
+        footWorld: Vector3,
+        samples: FootIKProbeSample[] = leg.soleSamples,
+    ): number {
+        this.updateSoleSamples(leg, footWorld, samples, null);
+
+        let sumY = 0;
+        let count = 0;
+        for (const sample of samples) {
+            sample.hasHit = false;
+            const hit = this.castGroundAtSample(sample.point);
+            if (!hit) continue;
+            sample.hasHit = true;
+            sample.hitPoint.copy(hit.point);
+            sumY += hit.point.y;
+            count++;
+        }
+
+        return count > 0 ? sumY / count : NaN;
     }
 
     // 平滑设置人物 mesh 相对胶囊的台阶视觉偏移。
