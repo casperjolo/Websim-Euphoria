@@ -21,7 +21,8 @@ export function createCollisionTemps(): CollisionTemps {
 }
 
 /**
- * 将胶囊与单个网格做 BVH 碰撞检测
+ * 将胶囊与单个网格做 BVH 碰撞检测。
+ * `useDynamicsSegment` 时用接到脚底的段（飞行），否则用悬空段（步行上台阶）。
  * @param capsule       胶囊所在的 Object3D（位置会被直接修改）
  * @param capsuleInfo   胶囊描述：局部空间线段 + 半径
  * @param collider      目标碰撞网格
@@ -30,15 +31,19 @@ export function createCollisionTemps(): CollisionTemps {
  */
 export function applyCapsuleCollision(
     capsule: THREE.Object3D,
-    capsuleInfo: { segment: THREE.Line3; radius: number },
+    capsuleInfo: { segment: THREE.Line3; radius: number; dynamicsSegment?: THREE.Line3 },
     collider: THREE.Mesh,
     temps: CollisionTemps,
     skipTri?: (tri: any, dir: THREE.Vector3) => boolean,
+    useDynamicsSegment = false,
 ): void {
+    const segment = useDynamicsSegment
+        ? (capsuleInfo.dynamicsSegment ?? capsuleInfo.segment)
+        : capsuleInfo.segment;
     // 胶囊段变换到碰撞体本地空间
     temps.invMat.copy(collider.matrixWorld).invert();
-    temps.localSeg.start.copy(capsuleInfo.segment.start).applyMatrix4(capsule.matrixWorld).applyMatrix4(temps.invMat);
-    temps.localSeg.end.copy(capsuleInfo.segment.end).applyMatrix4(capsule.matrixWorld).applyMatrix4(temps.invMat);
+    temps.localSeg.start.copy(segment.start).applyMatrix4(capsule.matrixWorld).applyMatrix4(temps.invMat);
+    temps.localSeg.end.copy(segment.end).applyMatrix4(capsule.matrixWorld).applyMatrix4(temps.invMat);
 
     // 构建本地包围盒
     temps.localBox.makeEmpty();
@@ -68,4 +73,28 @@ export function applyCapsuleCollision(
     const delta = temps.closestTri.subVectors(newPos, capsule.position);
     const offset = Math.max(0, delta.length() - 1e-5);
     capsule.position.add(delta.normalize().multiplyScalar(offset));
+}
+
+/**
+ * 胶囊段与球的重叠。
+ * 命中时 temps.closestSeg 为段上最近点，temps.closestTri 为胶囊指向球的单位法线，返回穿透深度。
+ */
+export function capsuleSphereOverlap(
+    capsule: THREE.Object3D,
+    capsuleInfo: { segment: THREE.Line3; radius: number; dynamicsSegment?: THREE.Line3 },
+    spherePos: THREE.Vector3,
+    sphereRadius: number,
+    temps: CollisionTemps,
+): number {
+    const segment = capsuleInfo.dynamicsSegment ?? capsuleInfo.segment;
+    temps.localSeg.start.copy(segment.start).applyMatrix4(capsule.matrixWorld);
+    temps.localSeg.end.copy(segment.end).applyMatrix4(capsule.matrixWorld);
+    temps.localSeg.closestPointToPoint(spherePos, true, temps.closestSeg);
+    temps.closestTri.subVectors(spherePos, temps.closestSeg);
+    const dist = temps.closestTri.length();
+    const minDist = capsuleInfo.radius + sphereRadius;
+    if (dist >= minDist) return 0;
+    if (dist > 1e-8) temps.closestTri.multiplyScalar(1 / dist);
+    else temps.closestTri.set(0, 1, 0);
+    return minDist - dist;
 }

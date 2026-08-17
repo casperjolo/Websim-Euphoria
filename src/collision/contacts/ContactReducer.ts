@@ -1,12 +1,12 @@
 import * as THREE from "three";
-import type { VehicleRigidBody } from "../VehicleRigidBody";
+import type { ImpulseBody } from "../solver/ImpulseBody";
 import { ContactManifold } from "./ContactManifold";
 import { ContactPoint, CONTACT_SKIN, type RawContact } from "./ContactPoint";
 
-const NORMAL_MERGE = 0.98; // 法线点积超过此值则并入同一流形
-const MAX_POINTS = 4; // 每个流形最多保留的支撑点
-const SUPPORT_Y = 0.7; // 视为台面支撑的法线 y 下限
-const WALL_Y = 0.35; // 视为立面的法线 y 上限
+const NORMAL_MERGE = 0.98; // 法线点积高于此值并入同一流形
+const MAX_POINTS = 4; // 单流形最多保留的接触点
+const SUPPORT_Y = 0.7; // ny 以上视为支撑面（地面）
+const WALL_Y = 0.35; // ny 以下视为墙面
 
 const _invQuat = new THREE.Quaternion();
 const _ab = new THREE.Vector3();
@@ -14,17 +14,20 @@ const _ac = new THREE.Vector3();
 const _ap = new THREE.Vector3();
 const _n = new THREE.Vector3();
 
-/** 将原始接触按法线聚类，并裁成至多 4 个支撑点。 */
+/**
+ * 将原始接触按法线聚类，并裁成至多 4 个支撑点。
+ * 返回写入后的 out（长度收束为有效流形数）。
+ */
 export function reduceContacts(
     raw: RawContact[],
     count: number,
-    body: VehicleRigidBody,
+    body: ImpulseBody,
     out: ContactManifold[],
 ): ContactManifold[] {
     for (const m of out) m.clear();
     let manifoldCount = 0;
 
-    // 按法线点积把接触并入同一流形
+    // 按法线合并进流形，并累计 normalSum
     for (let r = 0; r < count; r++) {
         const contact = raw[r];
         if (contact.penetration < -CONTACT_SKIN || contact.normal.lengthSq() < 1e-8) continue;
@@ -51,11 +54,11 @@ export function reduceContacts(
         out[cluster].contacts.push(makePoint(contact, body));
     }
 
+    // 定稿法线、裁点、建切向基
     for (let i = 0; i < manifoldCount; i++) {
         const manifold = out[i];
         if (manifold.normalSum.lengthSq() < 1e-8) manifold.normal.set(0, 1, 0);
         else manifold.normal.copy(manifold.normalSum).normalize();
-        // 每簇最多留 4 个支撑点
         if (manifold.contacts.length > MAX_POINTS) {
             manifold.contacts = pickSupportPoints(manifold.contacts);
         }
@@ -69,14 +72,17 @@ export function reduceContacts(
     return out;
 }
 
-/** 按法线 y 分量区分台面、立面和斜面。 */
+/** 按法线竖直分量分类：支撑面 / 墙 / 斜面。 */
 export function normalClass(normal: THREE.Vector3): "support" | "wall" | "slant" {
     if (normal.y >= SUPPORT_Y) return "support";
     if (normal.y <= WALL_Y) return "wall";
     return "slant";
 }
 
-/** 台面与立面共存时丢掉斜面；没有台面时把斜面抬成支撑。 */
+/**
+ * 边角同时碰到地面与墙时丢掉斜面流形，避免错误推力。
+ * 若没有支撑面，则把斜面法线抬到至少 SUPPORT_Y，减轻卡边抖动。
+ */
 function stabilizeEdgeManifolds(manifolds: ContactManifold[]): void {
     let hasSupport = false;
     let hasWall = false;
@@ -86,7 +92,6 @@ function stabilizeEdgeManifolds(manifolds: ContactManifold[]): void {
         else if (cls === "wall") hasWall = true;
     }
 
-    // 同时有台面和立面时丢掉斜面，避免棱边把车抬飞
     if (hasSupport && hasWall) {
         let write = 0;
         for (let i = 0; i < manifolds.length; i++) {
@@ -98,7 +103,6 @@ function stabilizeEdgeManifolds(manifolds: ContactManifold[]): void {
         return;
     }
 
-    // 没有台面时把斜面抬成支撑，避免贴边滑落
     if (!hasSupport) {
         for (const m of manifolds) {
             if (normalClass(m.normal) !== "slant") continue;
@@ -112,8 +116,8 @@ function stabilizeEdgeManifolds(manifolds: ContactManifold[]): void {
     }
 }
 
-/** 由原始接触生成约束点，并写出底盘局部坐标。 */
-function makePoint(raw: RawContact, body: VehicleRigidBody): ContactPoint {
+/** 由原始接触生成 ContactPoint，并写入刚体局部坐标（供帧间匹配）。 */
+function makePoint(raw: RawContact, body: ImpulseBody): ContactPoint {
     const point = new ContactPoint();
     point.worldPoint.copy(raw.point);
     point.penetration = raw.penetration;
@@ -122,17 +126,21 @@ function makePoint(raw: RawContact, body: VehicleRigidBody): ContactPoint {
     return point;
 }
 
-/** 从过密接触里挑最多 4 个支撑点。 */
+/**
+ * 从过多接触点中挑最多 4 个：最深穿透 → 最远点 → 最大面积第三点 → 离平面最远第四点。
+ * 用于稳定盒/车身 resting 接触。
+ */
 function pickSupportPoints(points: ContactPoint[]): ContactPoint[] {
     if (points.length <= MAX_POINTS) return points;
 
-    // 最深点 + 最远点 + 最大面积点 + 离平面最远点
+    // p0：穿透最深
     let i0 = 0;
     for (let i = 1; i < points.length; i++) {
         if (points[i].penetration > points[i0].penetration) i0 = i;
     }
     const p0 = points[i0];
 
+    // p1：离 p0 最远
     let i1 = i0;
     let best = -1;
     for (let i = 0; i < points.length; i++) {
@@ -144,6 +152,7 @@ function pickSupportPoints(points: ContactPoint[]): ContactPoint[] {
     }
     const p1 = points[i1];
 
+    // p2：与 p0p1 构成面积最大
     let i2 = i0;
     best = -1;
     _ab.subVectors(p1.worldPoint, p0.worldPoint);
@@ -157,6 +166,7 @@ function pickSupportPoints(points: ContactPoint[]): ContactPoint[] {
     }
     const p2 = points[i2];
 
+    // p3：离 p0p1p2 平面最远（略加权穿透）
     let i3 = i0;
     best = -1;
     _ab.subVectors(p1.worldPoint, p0.worldPoint);
@@ -180,10 +190,10 @@ function pickSupportPoints(points: ContactPoint[]): ContactPoint[] {
     return picked;
 }
 
-/** 由法线构造一对正交切向。 */
+/** 由流形法线构造正交切向基（摩擦两轴）。 */
 function buildTangents(normal: THREE.Vector3, point: ContactPoint): void {
     if (Math.abs(normal.y) < 0.99) point.tangent1.set(0, 1, 0).cross(normal);
-    else point.tangent1.set(1, 0, 0).cross(normal);
+    else point.tangent1.set(1, 0, 0).cross(normal); // 法线近竖直时换参考轴
     if (point.tangent1.lengthSq() < 1e-8) point.tangent1.set(0, 0, 1).cross(normal);
     point.tangent1.normalize();
     point.tangent2.copy(normal).cross(point.tangent1).normalize();

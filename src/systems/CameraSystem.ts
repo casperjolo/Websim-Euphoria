@@ -259,16 +259,16 @@ export class CameraSystem {
         }
     }
 
-    // 收集相机射线碰撞
+    // 收集相机射线碰撞。开车时跳过当前车辆网格。
     private collectCameraHits() {
-        const hits: THREE.Intersection[] = this.ctrl.isStaticColliderUsable() && this.ctrl.collider
-            ? this.raycaster.intersectObject(this.ctrl.collider, false)
-            : [];
-        for (const entry of this.ctrl.getKinematicColliderEntries()) {
-            if (!this.ctrl.isKinematicColliderUsable(entry)) continue;
-            const kinHits = this.raycaster.intersectObject(entry.mesh, false);
-            if (kinHits[0] && (!hits[0] || kinHits[0].distance < hits[0].distance)) {
-                hits[0] = kinHits[0];
+        const skipIds = this.ctrl.controllerMode === 1 && this.ctrl.vehicle.active?.meshColliderId != null
+            ? [this.ctrl.vehicle.active.meshColliderId]
+            : undefined;
+        const hits: THREE.Intersection[] = [];
+        for (const mesh of this.ctrl.queryPlayerMeshes({ skipIds })) {
+            const meshHits = this.raycaster.intersectObject(mesh, false);
+            if (meshHits[0] && (!hits[0] || meshHits[0].distance < hits[0].distance)) {
+                hits[0] = meshHits[0];
             }
         }
         return hits;
@@ -302,8 +302,9 @@ export class CameraSystem {
         this.centerRay.layers.set(1);
         this.centerRay.layers.enable(2);
 
-        const checkTargets = this.ctrl.isStaticColliderUsable() && this.ctrl.collider
-            ? [this.ctrl.collider, ...this.ctrl.scene.children]
+        const meshes = this.ctrl.queryPlayerMeshes();
+        const checkTargets = meshes.length
+            ? [...meshes, ...this.ctrl.scene.children]
             : this.ctrl.scene.children;
         const hits = this.centerRay.intersectObjects(checkTargets, true);
         hits.sort((a, b) => a.distance - b.distance);

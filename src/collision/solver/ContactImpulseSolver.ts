@@ -1,5 +1,5 @@
 import type { ContactManifold } from "../contacts/ContactManifold";
-import type { VehicleRigidBody } from "../VehicleRigidBody";
+import type { ImpulseBody } from "./ImpulseBody";
 import { solveFrictionConstraint, warmStartFriction } from "./FrictionConstraint";
 import {
     prepareNormalConstraint,
@@ -7,27 +7,33 @@ import {
     warmStartNormal,
 } from "./NormalConstraint";
 
-/** 车身接触的速度约束求解器。 */
-export class VehicleContactSolver {
+/**
+ * 共享接触冲量求解器：法向 + 摩擦锥，可选热启动。
+ * 人物胶囊不走此核（位置推出）；轮悬架 / 轮胎仍在车辆模块。
+ */
+export class ContactImpulseSolver {
     velocityIterations = 8; // 速度迭代次数
-    warmStart = true; // 是否沿用上一帧冲量
+    warmStart = true; // 是否复用上一帧冲量做热启动
 
-    /** 解法向与摩擦速度约束。 */
+    /**
+     * 对单个刚体与一组流形做速度级求解。
+     * 顺序：准备 bias → 热启动 → 交替解法向 / 摩擦。
+     */
     solveVelocity(
-        body: VehicleRigidBody,
+        body: ImpulseBody,
         manifolds: ContactManifold[],
         dt: number,
     ): void {
         if (!manifolds.length) return;
 
-        // 先准备台面穿透偏置
+        // 写入弹性与穿透修正用的 biasVelocity
         for (const manifold of manifolds) {
             for (const point of manifold.contacts) {
-                prepareNormalConstraint(manifold, point, dt);
+                prepareNormalConstraint(body, manifold, point, dt);
             }
         }
 
-        // 热启动：先施加上一帧冲量
+        // 先施加缓存冲量，减少 resting 抖动
         if (this.warmStart) {
             for (const manifold of manifolds) {
                 for (const point of manifold.contacts) {
@@ -37,7 +43,7 @@ export class VehicleContactSolver {
             }
         }
 
-        // 顺序迭代法向和摩擦
+        // PGS：每轮先法向后摩擦
         for (let i = 0; i < this.velocityIterations; i++) {
             for (const manifold of manifolds) {
                 for (const point of manifold.contacts) {

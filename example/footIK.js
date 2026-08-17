@@ -128,7 +128,9 @@ async function init() {
         scene,
         camera,
         controls,
-        staticCollider,
+        colliders: [
+            { motion: "static", shape: { kind: "mesh", source: staticCollider } },
+        ],
         initPos: new Vector3(-7.5, 0.25, -3.5),
         minCamDistance: 10,
         maxCamDistance: 300,

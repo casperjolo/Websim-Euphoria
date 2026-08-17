@@ -1041,6 +1041,9 @@ async function initPlayer() {
         maxCamDistance: 160,
         springCameraTime: true,
         camLookAtHeightRatio: 0.7,
+        colliders: [
+            { motion: "static", shape: { kind: "mesh", source: scene } },
+        ],
     });
 
     // 动画减速一半

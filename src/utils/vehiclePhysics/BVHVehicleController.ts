@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { VehicleCollision } from "./VehicleCollision";
-import { ContactCache } from "./contacts/ContactCache";
-import { VehicleContactSolver } from "./solver/VehicleContactSolver";
+import { ContactCache } from "../../collision/contacts/ContactCache";
+import { ContactImpulseSolver } from "../../collision/solver/ContactImpulseSolver";
 import { effectiveMass } from "./VehicleMath";
 import type { VehicleRigidBody } from "./VehicleRigidBody";
 import { VehicleWheel } from "./VehicleWheel";
@@ -15,9 +15,9 @@ export class BVHVehicleController {
     readonly chassis: VehicleRigidBody; // 车身刚体
     readonly wheels: VehicleWheel[] = []; // 车轮列表
 
-    private collider: THREE.Mesh | null = null; // 场景碰撞网格
+    private collider: THREE.Mesh[] = []; // 场景碰撞网格
     private collision = new VehicleCollision();
-    private contactSolver = new VehicleContactSolver();
+    private contactSolver = new ContactImpulseSolver();
     private contactCache = new ContactCache();
     private raycaster = new THREE.Raycaster();
     private prevPosition = new THREE.Vector3();
@@ -36,15 +36,15 @@ export class BVHVehicleController {
     private sidePoint = new THREE.Vector3();
 
     /** 绑定车身刚体，可选传入场景碰撞网格。 */
-    constructor(chassis: VehicleRigidBody, collider?: THREE.Mesh | null) {
+    constructor(chassis: VehicleRigidBody, collider?: THREE.Mesh | THREE.Mesh[] | null) {
         this.chassis = chassis;
-        this.collider = collider ?? null;
+        this.collider = this.toColliderList(collider);
         (this.raycaster as any).firstHitOnly = true;
     }
 
     /** 设置场景碰撞网格。 */
-    setCollider(collider: THREE.Mesh | null | undefined): void {
-        this.collider = collider ?? null;
+    setCollider(collider: THREE.Mesh | THREE.Mesh[] | null | undefined): void {
+        this.collider = this.toColliderList(collider);
     }
 
     /** 返回车轮数量。 */
@@ -191,11 +191,16 @@ export class BVHVehicleController {
         return this.wheelAt(i)?.rotation ?? null;
     }
 
+    /** 读取接地网格。 */
+    wheelContactMesh(i: number): THREE.Mesh | null {
+        return this.wheelAt(i)?.contactMesh ?? null;
+    }
+
     // ==================== 仿真步进 ====================
 
     /** 推进一帧：悬挂与轮胎力 → 车身接触 → 积分 → CCD。 */
-    updateVehicle(dt: number, collider?: THREE.Mesh | null): void {
-        if (collider !== undefined) this.collider = collider;
+    updateVehicle(dt: number, collider?: THREE.Mesh | THREE.Mesh[] | null): void {
+        if (collider !== undefined) this.collider = this.toColliderList(collider);
         const clampedDt = Math.max(0, dt);
         if (clampedDt === 0) return;
 
@@ -233,6 +238,12 @@ export class BVHVehicleController {
         this.updateWheelRotation(clampedDt);
     }
 
+    /** 把单个网格或列表收成可遍历数组。 */
+    private toColliderList(collider?: THREE.Mesh | THREE.Mesh[] | null): THREE.Mesh[] {
+        if (!collider) return [];
+        return Array.isArray(collider) ? collider : [collider];
+    }
+
     /** 按索引取车轮，越界返回 undefined。 */
     private wheelAt(i: number): VehicleWheel | undefined {
         return this.wheels[i];
@@ -254,11 +265,12 @@ export class BVHVehicleController {
 
     // 沿悬挂方向射线检测接地
     private raycastWheels(): void {
-        const collider = this.collider;
+        const colliders = this.collider;
         for (const wheel of this.wheels) {
             wheel.isInContact = false;
+            wheel.contactMesh = null;
             const rayLen = wheel.restLength + wheel.radius;
-            if (!collider || rayLen <= 1e-6) {
+            if (!colliders.length || rayLen <= 1e-6) {
                 this.setWheelAirborne(wheel);
                 continue;
             }
@@ -272,7 +284,7 @@ export class BVHVehicleController {
             this.raycaster.set(wheel.hardPointWS, this.impulse);
             this.raycaster.near = 0;
             this.raycaster.far = rayLen;
-            const hits = this.raycaster.intersectObject(collider, false);
+            const hits = this.raycaster.intersectObjects(colliders, false);
             const hit = hits[0];
             if (!hit) {
                 this.setWheelAirborne(wheel);
@@ -280,6 +292,7 @@ export class BVHVehicleController {
             }
 
             wheel.isInContact = true;
+            wheel.contactMesh = (hit.object as THREE.Mesh).isMesh ? hit.object as THREE.Mesh : null;
             wheel.contactPoint.copy(hit.point);
             if (hit.face) {
                 this.normalMat.getNormalMatrix(hit.object.matrixWorld);
@@ -313,6 +326,7 @@ export class BVHVehicleController {
     // 离地时回到静止长度
     private setWheelAirborne(wheel: VehicleWheel): void {
         wheel.isInContact = false;
+        wheel.contactMesh = null;
         wheel.suspensionLength = wheel.restLength;
         wheel.suspensionRelativeVelocity = 0;
         wheel.contactNormal.copy(wheel.directionWS).negate().normalize();

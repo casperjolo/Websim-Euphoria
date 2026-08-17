@@ -2,13 +2,16 @@ import * as THREE from "three";
 import type { playerController } from "../playerController";
 import { loadVehicleModel as loadVehicleModelUtil } from "../utils/vehicleLoader";
 import { applyCapsuleCollision, createCollisionTemps } from "../utils/capsuleCollision";
-import type { VehicleInstance, VehicleOptions } from "../types";
+import type { VehicleInstance, VehicleOptions, KinematicColliderEntry } from "../types";
+import { CollisionGroup } from "../collision/groups";
+import { createObbObbTemps, resolveObbObb } from "../collision/ObbObb";
 
 export class VehicleSystem {
     private ctrl: playerController; // 主控制器引用
 
     list: VehicleInstance[] = []; // 车辆实例列表
     active: VehicleInstance | null = null; // 当前乘坐车辆
+    meshSkipIds: number[] = []; // 全部车辆外观 collider id，网格查询时跳过
     vehicleLength = 6; // 车辆模型归一化后的最大边长度
     params = {
         debug: { showPhysicsBox: false }, // 调试显示
@@ -39,8 +42,12 @@ export class VehicleSystem {
     private scratchUp = new THREE.Vector3();
     private scratchQuat = new THREE.Quaternion();
     private scratchDown = new THREE.Vector3(0, -1, 0);
+    private carryPrevInv = new THREE.Matrix4();
+    private carryYaw = new THREE.Quaternion();
+    private carryUp = new THREE.Vector3(0, 1, 0);
     private raycaster = new THREE.Raycaster();
     private exitCheckTemps = createCollisionTemps();
+    private obbTemps = createObbObbTemps();
 
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
@@ -80,7 +87,20 @@ export class VehicleSystem {
             });
 
             this.list.push(instance);
-            this.ctrl.addKinematicCollider(instance.vehicleGroup);
+            const kin = this.ctrl.addCollider({
+                motion: "kinematic",
+                shape: { kind: "mesh", source: instance.vehicleGroup },
+                follow: instance.vehicleGroup,
+            });
+            instance.meshColliderId = kin.id;
+            const chassis = this.ctrl.addCollider({
+                motion: "dynamic",
+                shape: { kind: "box", halfExtents: instance.halfExtents.clone() },
+                groups: CollisionGroup.VEHICLE,
+                mask: CollisionGroup.DEFAULT | CollisionGroup.VEHICLE | CollisionGroup.DEBRIS,
+                userData: instance,
+            });
+            instance.chassisColliderId = chassis.id;
             this.setTransition();
             return instance;
         } catch (e) {
@@ -152,23 +172,41 @@ export class VehicleSystem {
         for (const v of this.list) {
             const parked = this.ctrl.controllerMode !== 1 || this.active !== v;
             if (parked) this.applyParkingBrake(v, delta);
-            v.vehicleController.updateVehicle(delta, this.ctrl.collider);
+            v.vehicleController.updateVehicle(delta, this.ctrl.getVehicleGroundMeshes(v));
+            this.applyKinematicCarry(v);
+        }
+        this.resolveVehiclePairs();
+        for (const v of this.list) {
+            const parked = this.ctrl.controllerMode !== 1 || this.active !== v;
             const vel = v.chassisBody.linvel();
             const speed = Math.hypot(vel.x, vel.z);
             const max = v.maxSpeed / 3.6;
             if (speed > max) {
                 const s = max / speed;
-                v.chassisBody.setLinvel({ x: vel.x * s, y: vel.y, z: vel.z * s }, true);
+                v.chassisBody.setLinvel({ x: vel.x * s, y: vel.y, z: vel.z * s });
             } else if (parked && speed > 0 && speed <= this.parkingCreepThreshold) {
                 let hasWheelContact = false;
                 for (let i = 0; i < v.vehicleController.numWheels(); i++) {
                     if (v.vehicleController.wheelIsInContact(i)) { hasWheelContact = true; break; }
                 }
-                if (hasWheelContact) v.chassisBody.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+                if (hasWheelContact) v.chassisBody.setLinvel({ x: 0, y: vel.y, z: 0 });
             }
             this.syncVehicleVisual(v);
         }
         if (this.ctrl.controllerMode === 1 && this.active) this.ctrl.syncMountedPlayer(this.active);
+    }
+
+    /** 两车底盘盒对盒：跳过自身，驻车中的车仍可被撞开。 */
+    private resolveVehiclePairs() {
+        const n = this.list.length;
+        if (n < 2) return;
+        for (let iter = 0; iter < 2; iter++) {
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    resolveObbObb(this.list[i].chassisBody, this.list[j].chassisBody, this.obbTemps);
+                }
+            }
+        }
     }
 
     // 更新车辆驾驶
@@ -245,10 +283,10 @@ export class VehicleSystem {
         if (!v || this.ctrl.controllerMode !== 1) return;
         const { chassisBody } = v;
         const t = chassisBody.translation();
-        chassisBody.setTranslation({ x: t.x, y: t.y + v.size.h, z: t.z }, true);
-        chassisBody.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
-        chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        chassisBody.setTranslation({ x: t.x, y: t.y + v.size.h, z: t.z });
+        chassisBody.setRotation({ x: 0, y: 0, z: 0, w: 1 });
+        chassisBody.setLinvel({ x: 0, y: 0, z: 0 });
+        chassisBody.setAngvel({ x: 0, y: 0, z: 0 });
         this.handbrakeBlend = 0;
     }
 
@@ -276,9 +314,15 @@ export class VehicleSystem {
             v.vehicleGroup.localToWorld(this.scratchLocal);
             out.copy(this.scratchLocal);
             this.raycaster.set(out, this.scratchDown);
-            const hits = this.ctrl.collider ? this.raycaster.intersectObject(this.ctrl.collider, false) : [];
-            if (!hits.length) continue;
-            out.copy(hits[0].point);
+            let bestHit: THREE.Intersection | undefined;
+            for (const mesh of this.ctrl.queryPlayerMeshes()) {
+                const hits = this.raycaster.intersectObject(mesh, false);
+                if (hits.length && (!bestHit || hits[0].distance < bestHit.distance)) {
+                    bestHit = hits[0];
+                }
+            }
+            if (!bestHit) continue;
+            out.copy(bestHit.point);
             out.y += this.ctrl.getCapsuleGroundHeight();
             groundedFallback ??= out.clone();
             if (this.isCharacterPositionFree(out, v)) return out;
@@ -294,20 +338,20 @@ export class VehicleSystem {
     private isCharacterPositionFree(position: THREE.Vector3, v: VehicleInstance): boolean {
         const cap = this.ctrl.playerCapsule;
         const info = cap.capsuleInfo;
-        if (!info || !this.ctrl.collider) return true;
+        if (!info || !this.ctrl.queryPlayerMeshes().length) return true;
 
         const origParent = cap.parent;
         const origPos = cap.position.clone();
         const origQuat = cap.quaternion.clone();
+        const skipMesh = this.ctrl.getKinematicColliderEntries().find(e => e.source === v.vehicleGroup)?.mesh;
         this.ctrl.scene.attach(cap);
         cap.position.copy(position);
         cap.updateMatrixWorld(true);
         const before = position.clone();
-        applyCapsuleCollision(cap, info, this.ctrl.collider, this.exitCheckTemps);
-        for (const entry of this.ctrl.getKinematicColliderEntries()) {
-            if (entry.source === v.vehicleGroup) continue;
+        for (const mesh of this.ctrl.queryPlayerMeshes()) {
+            if (mesh === skipMesh) continue;
             cap.updateMatrixWorld(true);
-            applyCapsuleCollision(cap, info, entry.mesh, this.exitCheckTemps);
+            applyCapsuleCollision(cap, info, mesh, this.exitCheckTemps);
         }
         const free = cap.position.distanceTo(before) < info.radius * 0.5;
         origParent?.attach(cap);
@@ -315,6 +359,37 @@ export class VehicleSystem {
         cap.quaternion.copy(origQuat);
         cap.updateMatrixWorld(true);
         return free;
+    }
+
+    /** 有轮子打在运动学网格上时，按平台 prev→current 带走车身。 */
+    private applyKinematicCarry(v: VehicleInstance) {
+        const votes = new Map<KinematicColliderEntry, number>();
+        const n = v.vehicleController.numWheels();
+        for (let i = 0; i < n; i++) {
+            const mesh = v.vehicleController.wheelContactMesh(i);
+            if (!mesh) continue;
+            const entry = this.ctrl.getKinematicColliderEntries().find(e => e.mesh === mesh);
+            if (!entry) continue;
+            votes.set(entry, (votes.get(entry) ?? 0) + 1);
+        }
+
+        let best: KinematicColliderEntry | null = null;
+        let bestCount = 0;
+        for (const [entry, count] of votes) {
+            if (count > bestCount) {
+                best = entry;
+                bestCount = count;
+            }
+        }
+        if (!best) return;
+
+        this.carryPrevInv.copy(best.prevWorldMatrix).invert();
+        this.scratchWorld.copy(v.chassisBody.position).applyMatrix4(this.carryPrevInv);
+        v.chassisBody.position.copy(this.scratchWorld).applyMatrix4(best.source.matrixWorld);
+        if (best.deltaRotY !== 0) {
+            this.carryYaw.setFromAxisAngle(this.carryUp, best.deltaRotY);
+            v.chassisBody.quaternion.premultiply(this.carryYaw);
+        }
     }
 
     // 同步单辆车的模型、车轮和调试盒
@@ -349,6 +424,8 @@ export class VehicleSystem {
     // 销毁全部车辆
     destroy() {
         for (const v of this.list) {
+            if (v.meshColliderId != null) this.ctrl.removeCollider(v.meshColliderId);
+            if (v.chassisColliderId != null) this.ctrl.removeCollider(v.chassisColliderId);
             this.ctrl.scene.remove(v.vehicleGroup);
             v.destroyVehicleController?.();
         }
@@ -398,13 +475,13 @@ export class VehicleSystem {
     private clearVelocity(v: VehicleInstance) {
         if (!v) return;
         const { chassisBody, vehicleController } = v;
-        chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        chassisBody.setLinvel({ x: 0, y: 0, z: 0 });
+        chassisBody.setAngvel({ x: 0, y: 0, z: 0 });
         const n = vehicleController.numWheels();
         for (let i = 0; i < n; i++) { vehicleController.setWheelEngineForce(i, 0); vehicleController.setWheelBrake(i, 1e6); }
-        vehicleController.updateVehicle(1 / 60, this.ctrl.collider);
-        chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        vehicleController.updateVehicle(1 / 60, this.ctrl.getVehicleGroundMeshes(v));
+        chassisBody.setLinvel({ x: 0, y: 0, z: 0 });
+        chassisBody.setAngvel({ x: 0, y: 0, z: 0 });
         for (let i = 0; i < n; i++) vehicleController.setWheelBrake(i, 0);
     }
 

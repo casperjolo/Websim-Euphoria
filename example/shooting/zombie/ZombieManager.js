@@ -8,7 +8,7 @@ export class ZombieManager {
 
         // ==================== 丧尸配置 ====================
         this._loader = options.loader ?? null; // GLTF 加载器
-        this._collider = options.collider ?? null; // 静态碰撞体
+        this._colliders = options.colliders ?? []; // 场景碰撞网格
         this._modelUrl = options.modelUrl ?? ""; // 模型路径
         this._scale = options.scale ?? 0.01; // 模型缩放
         this._rotateY = options.rotateY ?? Math.PI; // 模型初始朝向
@@ -28,8 +28,8 @@ export class ZombieManager {
 
     // 按波次配置批量生成丧尸
     async startWave(waveConfig = {}) {
-        if (!this._loader || !this._collider || !this._modelUrl) {
-            console.warn("[ZombieManager] Missing loader, collider or modelUrl");
+        if (!this._loader || !this._colliders.length || !this._modelUrl) {
+            console.warn("[ZombieManager] Missing loader, colliders or modelUrl");
             return;
         }
 
@@ -63,7 +63,7 @@ export class ZombieManager {
         const entity = new ZombieEntity(this._scene, id);
         await entity.load(this._loader, {
             modelUrl: this._modelUrl,
-            collider: this._collider,
+            colliders: this._colliders,
             position: position.clone?.() ?? new Vector3(position.x, position.y, position.z),
             scale: this._scale,
             walkAnim: this._walkAnim,

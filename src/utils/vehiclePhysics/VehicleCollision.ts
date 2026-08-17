@@ -1,11 +1,11 @@
 import * as THREE from "three";
-import type { ContactManifold } from "./contacts/ContactManifold";
-import { CONTACT_SKIN, type RawContact } from "./contacts/ContactPoint";
-import { reduceContacts } from "./contacts/ContactReducer";
+import type { ContactManifold } from "../../collision/contacts/ContactManifold";
+import { CONTACT_SKIN, type RawContact } from "../../collision/contacts/ContactPoint";
+import { reduceContacts } from "../../collision/contacts/ContactReducer";
 import { closestPointOnTriangle } from "./VehicleMath";
 import type { VehicleRigidBody } from "./VehicleRigidBody";
 
-const MAX_RAW = 48; // 单帧原始接触上限
+const MAX_RAW = 96; // 单帧原始接触上限
 const CCD_SIZE_RATIO = 0.12; // 位移超过最小边长该比例时启用扫掠
 
 /** 车身 OBB 与 BVH 三角网格：只收集接触，高速时做扫掠。 */
@@ -59,17 +59,19 @@ export class VehicleCollision {
         (this.raycaster as any).firstHitOnly = true;
     }
 
-    /** 收集车身与网格的接触流形。 */
+    /** 收集车身与一组网格的接触流形。 */
     detect(
         body: VehicleRigidBody,
-        collider: THREE.Mesh | null | undefined,
+        colliders: THREE.Mesh[] | THREE.Mesh | null | undefined,
     ): ContactManifold[] {
         this.rawCount = 0;
         this.manifolds.length = 0;
-        if (!collider?.geometry) return this.manifolds;
-        const tree = (collider.geometry as any).boundsTree;
-        if (!tree) return this.manifolds;
-        this.collectRawContacts(body, collider, tree);
+        for (const collider of this.toList(colliders)) {
+            const tree = (collider.geometry as any)?.boundsTree;
+            if (!tree) continue;
+            this.collectRawContacts(body, collider, tree);
+        }
+        if (this.rawCount === 0) return this.manifolds;
         return reduceContacts(this.raw, this.rawCount, body, this.manifolds);
     }
 
@@ -87,18 +89,19 @@ export class VehicleCollision {
     /** 高速穿模时按 TOI 回退位置和朝向。 */
     solveSwept(
         body: VehicleRigidBody,
-        collider: THREE.Mesh | null | undefined,
+        colliders: THREE.Mesh[] | THREE.Mesh | null | undefined,
         prevPosition: THREE.Vector3,
         prevQuaternion: THREE.Quaternion,
     ): void {
-        if (!collider?.geometry) return;
-        this.solveSweptCollision(body, collider, prevPosition, prevQuaternion);
+        const list = this.toList(colliders);
+        if (!list.length) return;
+        this.solveSweptCollision(body, list, prevPosition, prevQuaternion);
     }
 
-    /** 对 8 个角点和中心做扫掠，按最早 TOI 回退。 */
+    /** 对 8 个角点和中心扫过所有网格，按最早 TOI 回退。 */
     private solveSweptCollision(
         body: VehicleRigidBody,
-        collider: THREE.Mesh,
+        colliders: THREE.Mesh[],
         prevPosition: THREE.Vector3,
         prevQuaternion: THREE.Quaternion,
     ): void {
@@ -127,7 +130,7 @@ export class VehicleCollision {
             this.impulse.multiplyScalar(1 / len);
             this.raycaster.set(this.prevCorner, this.impulse);
             this.raycaster.far = len;
-            const hits = this.raycaster.intersectObject(collider, false);
+            const hits = this.raycaster.intersectObjects(colliders, false);
             if (!hits.length) continue;
             const hit = hits[0];
             const toi = hit.distance / len;
@@ -137,7 +140,8 @@ export class VehicleCollision {
                 this.normalMat.getNormalMatrix(hit.object.matrixWorld);
                 this.bestAxis.copy(hit.face.normal).applyMatrix3(this.normalMat).normalize();
                 if (this.bestAxis.dot(this.impulse) > 0) this.bestAxis.negate();
-                hitNormal = this.bestAxis;
+                this.toward.copy(this.bestAxis);
+                hitNormal = this.toward;
             }
         }
 
@@ -150,6 +154,14 @@ export class VehicleCollision {
         if (!hitNormal) return;
         const vn = body.linearVelocity.dot(hitNormal);
         if (vn < 0) body.linearVelocity.addScaledVector(hitNormal, -vn);
+    }
+
+    /** 把单个网格或列表收成可遍历数组。 */
+    private toList(
+        colliders: THREE.Mesh[] | THREE.Mesh | null | undefined,
+    ): THREE.Mesh[] {
+        if (!colliders) return [];
+        return Array.isArray(colliders) ? colliders : [colliders];
     }
 
     /** 用 BVH shapecast 收集与车身 OBB 相交的三角。 */

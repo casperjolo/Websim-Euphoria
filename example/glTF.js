@@ -251,7 +251,11 @@ function createDynamicPlatform({
     mesh.rotation.x = -Math.PI / 2;
     mesh.material.visible = false;
     scene.add(mesh);
-    player.addDynamicCollider(mesh);
+    player.addCollider({
+        motion: "kinematic",
+        shape: { kind: "mesh", source: mesh },
+        follow: mesh,
+    });
 
     // 体积云
     const cloud = createVolumeCloud({
@@ -287,7 +291,7 @@ function updateDynamicPlatforms() {
                 // 纵向往返
                 mesh.position.y = basePosition.y + amount + motion.distance;
             } else if (motion.axis === "x") {
-                if (player.getActiveDynamicCollider()?.source === mesh && player.getIsOnGround()) {
+                if (player.getActiveKinematicCollider()?.source === mesh && player.getIsOnGround()) {
                     entry.motionElapsed = (entry.motionElapsed ?? 0) + player.getCurrentDelta();
 
                     const phase = (entry.motionElapsed * motion.speed / Math.PI) % 2;
@@ -307,7 +311,7 @@ function updateDynamicPlatforms() {
 function removeDynamicPlatforms() {
     dynamicPlatforms.forEach(({ mesh, cloud }) => {
         // 清理碰撞
-        player?.removeDynamicCollider(mesh);
+        player?.removeKinematicCollider(mesh);
         disposeVolumeCloud(cloud);
         scene.remove(mesh);
     });
@@ -388,7 +392,7 @@ async function init() {
 
     // 加载场景
     initGltfLoader();
-    await initGLBScene(modelUrl);
+    const sceneModel = await initGLBScene(modelUrl);
     renderer.render(scene, camera);
 
     // 人物控制器
@@ -403,6 +407,9 @@ async function init() {
         maxCamDistance: 220,
         enableSpringCamera: true,
         enableOverShoulderView: false,
+        colliders: [
+            { motion: "static", shape: { kind: "mesh", source: sceneModel } },
+        ],
     });
 
     // 骨骼可视化
@@ -476,8 +483,10 @@ async function initGLBScene(url, modelScale = [10, 10, 10]) {
             }
         });
         scene.add(model);
+        return model;
     } catch (e) {
         console.error("GLB 加载失败：", e);
+        return null;
     }
 }
 
@@ -645,6 +654,7 @@ async function onPreviewDblClick() {
     recreateCSM(globalScale);
 
     player = new playerController();
+    const sceneModel = scene.getObjectByName("sceneGLB");
     await player.init({
         scene,
         camera,
@@ -657,11 +667,13 @@ async function onPreviewDblClick() {
         initPos,
         minCamDistance: 50,
         maxCamDistance: 220,
-        colliderMeshUrl: currentBlobUrl,
         enableSpringCamera: guiParams?.enableSpringCamera ?? true,
         enableOverShoulderView: guiParams?.enableOverShoulderView ?? true,
         camOverShoulderOffsetRatio: guiParams?.camOverShoulderOffsetRatio ?? 0.2,
         thirdMouseMode: guiParams?.thirdMouseMode ?? 1,
+        colliders: [
+            { motion: "static", shape: { kind: "mesh", source: sceneModel } },
+        ],
     });
 
     player.getPlayerModel()?.traverse((child) => {
@@ -810,6 +822,39 @@ function initGUI() {
 
     ["pointerdown", "mousedown", "click"].forEach((type) => {
         spawnController.domElement.addEventListener(type, (e) => e.stopPropagation());
+    });
+
+    const spawnSphereDir = new Vector3();
+    const spawnSphereController = gui.add(
+        {
+            spawnSphere: () => {
+                if (player.getDynamicBodies().length >= 20) {
+                    alert("For performance reasons, the demo supports a maximum of 20 spheres.");
+                    return;
+                }
+                const origin = player.getPosition()?.clone();
+                if (!origin) return;
+                const s = player.playerModelConfig.scale;
+                camera.getWorldDirection(spawnSphereDir);
+                origin.addScaledVector(spawnSphereDir, 50 * s);
+                origin.y += 30 * s;
+                player.addCollider({
+                    motion: "dynamic",
+                    shape: { kind: "sphere", radius: 18 * s, position: origin }
+                });
+            },
+        },
+        "spawnSphere",
+    ).name("Spawn Sphere");
+    ["pointerdown", "mousedown", "click"].forEach((type) => {
+        spawnSphereController.domElement.addEventListener(type, (e) => e.stopPropagation());
+    });
+    const clearSphereController = gui.add(
+        { clearSpheres: () => player.clearDynamicBodies() },
+        "clearSpheres",
+    ).name("Clear Spheres");
+    ["pointerdown", "mousedown", "click"].forEach((type) => {
+        clearSphereController.domElement.addEventListener(type, (e) => e.stopPropagation());
     });
 
     gui.add(params, "playerModel", Object.keys(PLAYER_MODELS))

@@ -75,13 +75,13 @@ export class VehicleRigidBody {
         return this.angularVelocity;
     }
 
-    /** 设置线速度（_wake 为 Rapier 兼容参数，忽略）。 */
-    setLinvel(v: { x: number; y: number; z: number }, _wake = true): void {
+    /** 设置线速度。 */
+    setLinvel(v: { x: number; y: number; z: number }): void {
         this.linearVelocity.set(v.x, v.y, v.z);
     }
 
-    /** 设置角速度（_wake 为 Rapier 兼容参数，忽略）。 */
-    setAngvel(v: { x: number; y: number; z: number }, _wake = true): void {
+    /** 设置角速度。 */
+    setAngvel(v: { x: number; y: number; z: number }): void {
         this.angularVelocity.set(v.x, v.y, v.z);
     }
 
@@ -95,13 +95,13 @@ export class VehicleRigidBody {
         return this.quaternion;
     }
 
-    /** 设置世界位置（_wake 为 Rapier 兼容参数，忽略）。 */
-    setTranslation(v: { x: number; y: number; z: number }, _wake = true): void {
+    /** 设置世界位置。 */
+    setTranslation(v: { x: number; y: number; z: number }): void {
         this.position.set(v.x, v.y, v.z);
     }
 
-    /** 设置世界朝向（_wake 为 Rapier 兼容参数，忽略）。 */
-    setRotation(q: { x: number; y: number; z: number; w: number }, _wake = true): void {
+    /** 设置世界朝向。 */
+    setRotation(q: { x: number; y: number; z: number; w: number }): void {
         this.quaternion.set(q.x, q.y, q.z, q.w).normalize();
     }
 

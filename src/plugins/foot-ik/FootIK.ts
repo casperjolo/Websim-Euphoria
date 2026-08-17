@@ -389,7 +389,7 @@ export class FootIK {
 
         // 不在地面或飞行时不做腿部贴地
         if (
-            !this.player?.collider
+            !this.player?.queryPlayerMeshes().length
             || !this.player.playerCapsule
             || !this.player.playerIsOnGround
             || this.player.isFlying
@@ -768,10 +768,10 @@ export class FootIK {
 
     // 从指定世界坐标向下射线检测可踩踏地面。
     private castGroundFrom(x: number, y: number, z: number): Intersection<Object3D> | null {
-        const collider = this.player?.collider;
-        if (!collider) return null;
+        const meshes = this.player?.queryPlayerMeshes() ?? [];
+        if (!meshes.length) return null;
         this.raycaster.ray.origin.set(x, y, z);
-        const hits = this.raycaster.intersectObject(collider, false);
+        const hits = this.raycaster.intersectObjects(meshes, false);
         return hits.find(hit => this.getWorldHitNormal(hit, this.tmpV3).y > 0.18) ?? null;
     }
 

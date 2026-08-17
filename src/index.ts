@@ -1,11 +1,6 @@
+// 主入口
 export * from "./playerController";
-export type { PlayerPlugin } from "./plugins/types";
-export { BVHVehicleController } from "./utils/vehiclePhysics/BVHVehicleController";
-export { VehicleRigidBody } from "./utils/vehiclePhysics/VehicleRigidBody";
 export type {
-    AddKinematicColliderOptions,
-    BuildStaticColliderOptions,
-    KinematicColliderEntry,
     JumpButtonOptions,
     KeyAction,
     KeyMap,
@@ -21,4 +16,34 @@ export type {
     VehicleInstance,
     VehicleModelSource,
     VehicleOptions,
+    KinematicColliderEntry,
 } from "./types";
+export type { PlayerPlugin } from "./plugins/types";
+
+// 碰撞公开 API
+export { CollisionWorld } from "./collision/CollisionWorld";
+export type { CollisionCollider, CollisionShape, MotionType } from "./collision/CollisionWorld";
+export { CHARACTER_QUERY_MASK, ALL_COLLISION_MASK, CollisionGroup } from "./collision/groups";
+export type {
+    ColliderDesc,
+    ColliderHandle,
+    ColliderShape,
+    MeshShape,
+    BoxShape,
+    SphereShape,
+} from "./collision/ColliderDesc";
+export { DYNAMIC_BODY_DEFAULTS } from "./collision/ColliderDesc";
+export type { AddDynamicSphereOptions } from "./collision/DynamicSphere";
+export { DynamicSphereBody, isSphereBody } from "./collision/DynamicSphere";
+export { DynamicBody } from "./collision/DynamicBody";
+export type { DynamicBodyKind, DynamicBodyMaterialOptions } from "./collision/DynamicBody";
+
+// 接触 / 冲量求解
+export { ContactImpulseSolver } from "./collision/solver/ContactImpulseSolver";
+export type { ImpulseBody } from "./collision/solver/ImpulseBody";
+export { ContactManifold } from "./collision/contacts/ContactManifold";
+export { ContactPoint, CONTACT_SKIN } from "./collision/contacts/ContactPoint";
+
+// 载具底层
+export { BVHVehicleController } from "./utils/vehiclePhysics/BVHVehicleController";
+export { VehicleRigidBody } from "./utils/vehiclePhysics/VehicleRigidBody";

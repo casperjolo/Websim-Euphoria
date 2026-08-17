@@ -27,6 +27,7 @@ export class VehicleWheel {
     isInContact = false; // 是否接地
     contactPoint = new THREE.Vector3(); // 接地点
     contactNormal = new THREE.Vector3(0, 1, 0); // 接触法线
+    contactMesh: THREE.Mesh | null = null; // 本帧接地网格
 
     suspensionForce = 0; // 本帧悬挂力
     forwardImpulse = 0; // 纵向冲量

@@ -3,30 +3,37 @@ import { ContactManifold } from "./ContactManifold";
 import { ContactPoint } from "./ContactPoint";
 import { normalClass } from "./ContactReducer";
 
-const MATCH_NORMAL = 0.95; // 热启动匹配的法线点积阈值
-const MATCH_DISTANCE = 0.08; // 热启动匹配的局部点距离阈值
+const MATCH_NORMAL = 0.95; // 法线点积低于此值视为不同流形
+const MATCH_DISTANCE = 0.08; // 局部接触点匹配距离上限
 
+/** findMatch 的命中结果。 */
 type MatchResult = {
-    point: ContactPoint; // 上一帧接触点
-    normal: THREE.Vector3; // 上一帧法线
+    point: ContactPoint; // 上一帧匹配到的接触点
+    normal: THREE.Vector3; // 上一帧流形法线
 };
 
-/** 帧间接触点匹配，用于冲量热启动。 */
+/**
+ * 帧间接触点匹配，用于冲量热启动（warm start）。
+ * 求解前 match 继承冲量；求解后 save 供下一帧使用。
+ */
 export class ContactCache {
-    private prev: ContactManifold[] = []; // 上一帧流形
+    private prev: ContactManifold[] = []; // 上一帧流形快照
 
-    /** 把上一帧冲量拷到匹配的新接触上。 */
+    /**
+     * 将上一帧冲量拷到本帧对应接触点。
+     * 无匹配、或支撑面 ↔ 墙面切换时清零，避免错误热启动。
+     */
     match(manifolds: ContactManifold[]): void {
         for (const manifold of manifolds) {
             for (const point of manifold.contacts) {
                 const prev = this.findMatch(manifold.normal, point);
                 if (!prev) {
-                    point.resetImpulses(); // 新接触从 0 开始
+                    point.resetImpulses();
                     continue;
                 }
+                // 法线类别突变（地面 ↔ 墙）时冲量不可复用
                 const prevClass = normalClass(prev.normal);
                 const nextClass = normalClass(manifold.normal);
-                // 台面与立面互切时不继承冲量，避免把支撑力带到墙上
                 if (
                     (prevClass === "support" && nextClass === "wall") ||
                     (prevClass === "wall" && nextClass === "support")
@@ -34,7 +41,6 @@ export class ContactCache {
                     point.resetImpulses();
                     continue;
                 }
-                // 继承上一帧法向和切向冲量
                 point.normalImpulse = prev.point.normalImpulse;
                 point.tangentImpulse1 = prev.point.tangentImpulse1;
                 point.tangentImpulse2 = prev.point.tangentImpulse2;
@@ -42,7 +48,7 @@ export class ContactCache {
         }
     }
 
-    /** 保存本帧流形，供下一帧匹配。 */
+    /** 深拷贝本帧流形与接触冲量，供下一帧 match。 */
     save(manifolds: ContactManifold[]): void {
         this.prev = manifolds.map((src) => {
             const copy = new ContactManifold();
@@ -57,7 +63,10 @@ export class ContactCache {
         });
     }
 
-    // 法线接近且局部点最近的上一帧接触
+    /**
+     * 在上一帧中找法线接近且局部点最近的接触。
+     * 用刚体局部坐标匹配，避免物体移动后面世界点对不上。
+     */
     private findMatch(normal: THREE.Vector3, point: ContactPoint): MatchResult | null {
         let best: MatchResult | null = null;
         let bestDist = MATCH_DISTANCE * MATCH_DISTANCE;

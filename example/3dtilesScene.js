@@ -171,7 +171,9 @@ async function initPlayer() {
         initPos: new Vector3(105.96, 81.25, 62.92),
         minCamDistance: 50,
         maxCamDistance: 250,
-        staticCollider: colliderGltf.scene,
+        colliders: [
+            { motion: "static", shape: { kind: "mesh", source: colliderGltf.scene } },
+        ],
         thirdMouseMode: 1,
         enableSpringCamera: true,
     });

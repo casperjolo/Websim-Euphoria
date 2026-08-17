@@ -160,12 +160,8 @@ export type PlayerControllerOptions = {
     maxCamDistance?: number;
     /** 相机看向点高度比例（0 为底部，1 为顶部），默认 0.8。 */
     camLookAtHeightRatio?: number;
-    /** 静态碰撞体来源；未传时遍历整个场景。 */
-    staticCollider?: THREE.Object3D | THREE.Object3D[];
-    /** 构建静态碰撞体时的可选配置。 */
-    staticColliderOptions?: BuildStaticColliderOptions;
-    /** 初始化时注册的运动学碰撞体。 */
-    kinematicCollider?: THREE.Object3D | THREE.Object3D[];
+    /** 初始化时批量创建的碰撞体；未传则不自动建碰撞，需事后 `addCollider`。 */
+    colliders?: import("../collision/ColliderDesc").ColliderDesc[];
     /** 移动端是否显示虚拟控制 UI，默认 true。 */
     isShowMobileControls?: boolean;
     /** 移动端按钮显隐配置。 */
@@ -275,24 +271,10 @@ export type VehicleInstance = {
     followVehicleDirection: boolean;
     /** 物理盒体调试网格。 */
     physicsBoxMesh?: THREE.Mesh;
-};
-
-/** 构建静态碰撞体时的可选配置。 */
-export type BuildStaticColliderOptions = {
-    /**
-     * 是否在 Web Worker 中构建 MeshBVH。
-     * 完成前角色不与该静态碰撞体相交。
-     */
-    useWorker?: boolean;
-};
-
-/** 注册运动学碰撞体时的可选配置。 */
-export type AddKinematicColliderOptions = {
-    /**
-     * 是否在 Web Worker 中构建 MeshBVH。
-     * 完成前该碰撞体不参与胶囊、地面射线和相机墙检。
-     */
-    useWorker?: boolean;
+    /** CollisionWorld 中底盘动态碰撞体 id。 */
+    chassisColliderId?: number;
+    /** CollisionWorld 中车模运动学网格 id。 */
+    meshColliderId?: number;
 };
 
 /** 运动学碰撞体的 BVH 与帧间变换数据。 */
@@ -311,4 +293,6 @@ export type KinematicColliderEntry = {
     ready: boolean;
     /** 用于作废过期的异步 BVH 构建结果。 */
     buildId: number;
+    /** CollisionWorld 中的运动学碰撞体 id。 */
+    worldId: number;
 };

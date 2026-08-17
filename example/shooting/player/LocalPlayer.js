@@ -314,7 +314,7 @@ export class LocalPlayer {
     getPosition() { return this._player?.getPosition?.() ?? null; }
     getFirstPersonPitchOffset() { return this._firstPersonPitchOffset; }
     getPlayerModel() { return this._player?.getPlayerModel(); }
-    getCollider() { return this._player?.getCollider?.() ?? null; }
+    getColliderMeshes() { return this._player?.getColliderMeshes?.() ?? []; }
     getCenterScreenRaycastHit() { return this._player?.getCenterScreenRaycastHit() ?? null; }
     playAnimation(name, opts) { return this._player?.playAnimation(name, opts); }
     registerAnimation(key, clipName, opts) { return this._player?.registerAnimation(key, clipName, opts); }

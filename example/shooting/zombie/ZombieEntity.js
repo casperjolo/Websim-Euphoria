@@ -8,7 +8,7 @@ export class ZombieEntity {
         this.id = id; // 唯一标识
 
         // ==================== 场景对象 ====================
-        this._collider = null; // 静态碰撞体
+        this._colliders = []; // 场景碰撞网格（CollisionWorld 查询结果）
         this._model = null; // 模型根节点
         this._capsule = null; // 碰撞胶囊体
         this._capsuleInfo = null; // 胶囊描述（radius + segment）
@@ -59,7 +59,7 @@ export class ZombieEntity {
     // 加载模型、绑定动画、构建胶囊体，挂入场景
     async load(gltfLoader, {
         modelUrl,
-        collider,
+        colliders,
         position,
         scale = 0.001,
         walkAnim,
@@ -70,7 +70,7 @@ export class ZombieEntity {
         rotateY = Math.PI,
         speed = 120,
     }) {
-        this._collider = collider;
+        this._colliders = colliders?.length ? colliders.slice() : [];
         this._modelScale = scale;
         this._gravity = -2400 * scale;
         // 基础移速增加随机扰动 (±15%)，使丧尸步频与步幅产生差异
@@ -207,7 +207,7 @@ export class ZombieEntity {
     // ==================== 主循环 ====================
 
     update(delta, playerPos) {
-        if (!this._capsule || !this._collider) return;
+        if (!this._capsule || !this._colliders.length) return;
 
         delta = Math.min(delta, 1 / 40); // 防止帧间隔过大导致穿透
 
@@ -336,43 +336,46 @@ export class ZombieEntity {
             this._capsule.position.addScaledVector(this._moveDir, stepDist);
             this._capsule.updateMatrixWorld();
 
-            this._tempBox.makeEmpty();
-            this._tempMat.copy(this._collider.matrixWorld).invert();
-            this._tempSeg.copy(ci.segment);
-            this._tempSeg.start
-                .applyMatrix4(this._capsule.matrixWorld)
-                .applyMatrix4(this._tempMat);
-            this._tempSeg.end
-                .applyMatrix4(this._capsule.matrixWorld)
-                .applyMatrix4(this._tempMat);
-            this._tempBox.expandByPoint(this._tempSeg.start).expandByPoint(this._tempSeg.end);
-            this._tempBox.expandByScalar(ci.radius);
+            for (const collider of this._colliders) {
+                this._tempBox.makeEmpty();
+                this._tempMat.copy(collider.matrixWorld).invert();
+                this._tempSeg.copy(ci.segment);
+                this._tempSeg.start
+                    .applyMatrix4(this._capsule.matrixWorld)
+                    .applyMatrix4(this._tempMat);
+                this._tempSeg.end
+                    .applyMatrix4(this._capsule.matrixWorld)
+                    .applyMatrix4(this._tempMat);
+                this._tempBox.expandByPoint(this._tempSeg.start).expandByPoint(this._tempSeg.end);
+                this._tempBox.expandByScalar(ci.radius);
 
-            this._collider.geometry?.boundsTree?.shapecast({
-                intersectsBounds: (box) => box.intersectsBox(this._tempBox),
-                intersectsTriangle: (tri) => {
-                    const dist = tri.closestPointToSegment(
-                        this._tempSeg,
-                        this._tempV1,
-                        this._tempV2,
-                    );
-                    if (dist >= ci.radius) return;
-                    const normal = tri.getNormal(new THREE.Vector3());
-                    if (Math.abs(normal.y) > 0.5) return; // 水平面交给 _applyGrounding 处理
-                    const dir = this._tempV2.sub(this._tempV1).normalize();
-                    const depth = ci.radius - dist;
-                    this._tempSeg.start.addScaledVector(dir, depth);
-                    this._tempSeg.end.addScaledVector(dir, depth);
-                },
-            });
+                collider.geometry?.boundsTree?.shapecast({
+                    intersectsBounds: (box) => box.intersectsBox(this._tempBox),
+                    intersectsTriangle: (tri) => {
+                        const dist = tri.closestPointToSegment(
+                            this._tempSeg,
+                            this._tempV1,
+                            this._tempV2,
+                        );
+                        if (dist >= ci.radius) return;
+                        const normal = tri.getNormal(new THREE.Vector3());
+                        if (Math.abs(normal.y) > 0.5) return; // 水平面交给 _applyGrounding 处理
+                        const dir = this._tempV2.sub(this._tempV1).normalize();
+                        const depth = ci.radius - dist;
+                        this._tempSeg.start.addScaledVector(dir, depth);
+                        this._tempSeg.end.addScaledVector(dir, depth);
+                    },
+                });
 
-            const newPos = this._tempV1
-                .copy(this._tempSeg.start)
-                .applyMatrix4(this._collider.matrixWorld);
-            const deltaVec = this._tempV2.subVectors(newPos, this._capsule.position);
-            const offset = Math.max(0, deltaVec.length() - 1e-5);
-            if (offset > 0) {
-                this._capsule.position.add(deltaVec.normalize().multiplyScalar(offset));
+                const newPos = this._tempV1
+                    .copy(this._tempSeg.start)
+                    .applyMatrix4(collider.matrixWorld);
+                const deltaVec = this._tempV2.subVectors(newPos, this._capsule.position);
+                const offset = Math.max(0, deltaVec.length() - 1e-5);
+                if (offset > 0) {
+                    this._capsule.position.add(deltaVec.normalize().multiplyScalar(offset));
+                    this._capsule.updateMatrixWorld();
+                }
             }
         }
     }
@@ -380,7 +383,7 @@ export class ZombieEntity {
     // 射线向下检测地面，吸附胶囊体到地面高度
     _applyGrounding(delta) {
         this._raycaster.ray.origin.copy(this._capsule.position);
-        const hits = this._raycaster.intersectObject(this._collider, false);
+        const hits = this._raycaster.intersectObjects(this._colliders, false);
 
         if (!hits.length) {
             this._onGround = false;
@@ -432,6 +435,6 @@ export class ZombieEntity {
             this._capsule = null;
         }
         this._model = null;
-        this._collider = null;
+        this._colliders = [];
     }
 }

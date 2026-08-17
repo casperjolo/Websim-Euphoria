@@ -136,7 +136,9 @@ async function init() {
         minCamDistance: 50,
         maxCamDistance: 180,
         camLookAtHeightRatio: 0.8,
-        staticCollider: colliderGltf.scene,
+        colliders: [
+            { motion: "static", shape: { kind: "mesh", source: colliderGltf.scene } },
+        ],
         enableOverShoulderView: true,
     });
 

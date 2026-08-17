@@ -1,21 +1,27 @@
 import * as THREE from "three";
-import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 import { MobileControls } from "./utils/mobileControls";
-import type { PlayerControllerOptions, PlayerModelOptions, VehicleInstance, VehicleOptions, KinematicColliderEntry, KeyMap, AddKinematicColliderOptions, BuildStaticColliderOptions } from "./types";
+import type { PlayerControllerOptions, PlayerModelOptions, VehicleInstance, VehicleOptions, KinematicColliderEntry, KeyMap } from "./types";
 import type { PlayerPlugin } from "./plugins/types";
 import { AnimationSystem } from "./systems/AnimationSystem";
 import { CameraSystem } from "./systems/CameraSystem";
 import { InputSystem } from "./systems/InputSystem";
 import { VehicleSystem } from "./systems/VehicleSystem";
+import { DynamicBodySystem } from "./systems/DynamicBodySystem";
+import { ColliderRegistry } from "./systems/ColliderRegistry";
+import type { DynamicBody } from "./collision/DynamicBody";
+import type { ColliderDesc, ColliderHandle } from "./collision/ColliderDesc";
+import type { MotionType } from "./collision/CollisionWorld";
 import { applyCapsuleCollision, createCollisionTemps, type CollisionTemps } from "./utils/capsuleCollision";
 import { getBbox } from "./utils/bbox";
 import { BvhWorkerPool } from "./utils/bvhWorkerPool";
+import { CollisionWorld } from "./collision/CollisionWorld";
+import { CHARACTER_QUERY_MASK } from "./collision/groups";
+import { CharacterMovement } from "./systems/CharacterMovement";
 
 /** 未传入delta时计算帧间隔。 */
 let _lastUpdateTime = performance.now();
@@ -59,11 +65,11 @@ export class playerController {
     /** 飞行速度。 */
     playerFlySpeed = 2100;
     /** 当前实际速度。 */
-    private curPlayerSpeed = 0;
+    curPlayerSpeed = 0;
     /** 越肩视角开关。 */
     enableOverShoulderView = false;
     /** 显示移动端控件。 */
-    private isShowMobileControls = true;
+    isShowMobileControls = true;
 
     // ==================== 玩家胶囊体 ====================
     /** 胶囊体半径。 */
@@ -104,16 +110,12 @@ export class playerController {
     playerModelHead: THREE.Object3D | null = null;
 
     // ==================== 碰撞体 ====================
-    /** 静态碰撞体。 */
-    collider: THREE.Mesh | null = null;
-    /** 静态碰撞 BVH 是否已就绪。 */
-    private staticColliderReady = false;
-    /** 静态碰撞构建代数，用于丢弃过期的 worker 结果。 */
-    private staticColliderBuildId = 0;
-    /** 静态几何收集。 */
-    collected: THREE.BufferGeometry[] = [];
-    /** 运动学碰撞体列表。 */
-    private kinematicColliders: KinematicColliderEntry[] = [];
+    /** 碰撞体注册表。 */
+    collisionWorld = new CollisionWorld();
+    /** 统一创建 / 运动学跟随。 */
+    private colliders = new ColliderRegistry(this);
+    /** 人物移动（胶囊推出）。 */
+    private character = new CharacterMovement(this);
     /** 当前站立的运动学碰撞体。 */
     activeKinematicCollider: KinematicColliderEntry | null = null;
     /** 异步 BVH 构建队列。 */
@@ -121,12 +123,12 @@ export class playerController {
 
     // ==================== 碰撞阈值 ====================
     /** 悬空胶囊离地高度。 */
-    private readonly rideHeight = 40;
+    readonly rideHeight = 40;
     // 站立 / 落地阈值
     /** 站立时胶囊原点应离地的高度。 */
-    private snapH = 0;
+    snapH = 0;
     /** 离地超过此值判为悬空、施加重力。 */
-    private maxH = 0;
+    maxH = 0;
 
     // ==================== 台阶视觉平滑 ====================
     /** 插值追赶速度，越大追得越快。 */
@@ -134,13 +136,13 @@ export class playerController {
     /** 模型相对胶囊的基准 Y。 */
     private modelBaseY = 0;
     /** 最小法线 Y 分量，地面法线与竖直夹角 ≤ 8° 视为台阶/平地（注入平滑）。 */
-    private readonly minFloorNormalY = Math.cos(8 * Math.PI / 180);
+    readonly minFloorNormalY = Math.cos(8 * Math.PI / 180);
 
     // ==================== 移动端 ====================
     /** 移动端控件。 */
     mobileControls: MobileControls | null = null;
     /** 靠近车辆。 */
-    private isNearVehicle = false;
+    isNearVehicle = false;
 
     // ==================== 调试 ====================
     /** 显示场景碰撞体。 */
@@ -150,30 +152,30 @@ export class playerController {
 
     // ==================== 方向常量 & 复用向量 ====================
     /** 朝向旋转速度。 */
-    private rotationSpeed = 10;
+    rotationSpeed = 10;
     /** 世界上方向。 */
     upVector = new THREE.Vector3(0, 1, 0);
     /** 前。 */
-    private DIR_FWD = new THREE.Vector3(0, 0, -1);
+    DIR_FWD = new THREE.Vector3(0, 0, -1);
     /** 右。 */
-    private DIR_RGT = new THREE.Vector3(1, 0, 0);
+    DIR_RGT = new THREE.Vector3(1, 0, 0);
 
     /** XZ 加速响应速度。 */
     playerAcceleration = 30;
     /** XZ 减速响应速度。 */
     playerDeceleration = 30;
     /** 减速基准速度。 */
-    private decelBase = 300;
+    decelBase = 300;
     /** 玩家速度。 */
     playerVelocity = new THREE.Vector3();
     /** 相机方向缓存。 */
-    private camDir = new THREE.Vector3();
+    camDir = new THREE.Vector3();
     /** 移动方向缓存。 */
-    private moveDir = new THREE.Vector3();
+    moveDir = new THREE.Vector3();
     /** 步进方向缓存。 */
-    private xzDir = new THREE.Vector3();
+    xzDir = new THREE.Vector3();
     /** 本步移动前的胶囊位置。 */
-    private moveStepOrigin = new THREE.Vector3();
+    moveStepOrigin = new THREE.Vector3();
     /** 单帧胶囊碰撞子步上限。 */
     maxMoveSteps = 8;
     /** 目标四元数。 */
@@ -181,11 +183,11 @@ export class playerController {
     /** 目标变换矩阵。 */
     targetMat = new THREE.Matrix4();
     /** 静态碰撞临时对象。 */
-    private staticTemps: CollisionTemps = createCollisionTemps();
+    staticTemps: CollisionTemps = createCollisionTemps();
     /** 运动学碰撞临时对象。 */
-    private kinematicTemps: CollisionTemps = createCollisionTemps();
+    kinematicTemps: CollisionTemps = createCollisionTemps();
     /** 地面检测射线。 */
-    private groundRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+    groundRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
 
     // ==================== 插件 ====================
     /** 后处理等可选插件。 */
@@ -216,6 +218,8 @@ export class playerController {
     input = new InputSystem(this);
     /** 载具系统。 */
     vehicle = new VehicleSystem(this);
+    /** 动态刚体系统。 */
+    dynamics = new DynamicBodySystem(this);
 
     constructor() {
         (this.groundRaycaster as any).firstHitOnly = true;
@@ -276,14 +280,10 @@ export class playerController {
             await this.mobileControls.init(opts.mobileControls);
         }
 
-        this.buildStaticCollider(opts.staticCollider, opts.staticColliderOptions);
-        await this.loadPlayerModel();
-
-        // 初始化时注册运动学碰撞体
-        if (opts.kinematicCollider) {
-            const list = Array.isArray(opts.kinematicCollider) ? opts.kinematicCollider : [opts.kinematicCollider];
-            for (const obj of list) this.addKinematicCollider(obj);
+        if (opts.colliders?.length) {
+            for (const desc of opts.colliders) this.addCollider(desc);
         }
+        await this.loadPlayerModel();
 
         this.input.bindEvents();
         this.cam.setCamPos();
@@ -459,6 +459,8 @@ export class playerController {
             this.playerCapsule.capsuleInfo = {
                 radius: r,
                 segment: new THREE.Line3(new THREE.Vector3(), new THREE.Vector3(0, -segmentLength, 0)),
+                // 动态体用接到脚底的完整胶囊，避免球从悬空间隙钻过
+                dynamicsSegment: new THREE.Line3(new THREE.Vector3(), new THREE.Vector3(0, -segmentLength - rideHeightScaled, 0)),
             };
             this.recomputeGroundThresholds();
             this.playerCapsule.name = "capsule";
@@ -552,260 +554,61 @@ export class playerController {
 
     // ==================== 碰撞体构建和查询 ====================
 
-    /** 补全必要属性。 */
-    private ensureAttributesMinimal(geom: THREE.BufferGeometry): THREE.BufferGeometry | null {
-        if (!geom.attributes.position) return null;
-        const position = geom.attributes.position.array;
-        for (let i = 0; i < position.length; i++) {
-            if (!Number.isFinite(position[i])) return null;
-        }
-        if (geom.attributes.position.count < 3) return null;
-        if (!geom.attributes.normal) geom.computeVertexNormals();
-        if (!geom.attributes.uv) {
-            const count = geom.attributes.position.count;
-            geom.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(count * 2), 2));
-        }
-        return geom;
+    /** @internal BVH worker。 */
+    getBvhWorkerPool() { return this.bvhWorkerPool; }
+    /** @internal 调试线框开关。 */
+    getDisplayCollider() { return this.displayCollider; }
+
+    /** 统一创建碰撞体。 */
+    addCollider(desc: ColliderDesc): ColliderHandle {
+        return this.colliders.add(desc);
     }
 
-    /** 统一属性格式。 */
-    private unifiedAttribute(collected: THREE.BufferGeometry[]) {
-        type AttrMeta = { itemSize: number; arrayCtor: any; examples: number; normalized: boolean };
-        const attrMap = new Map<string, AttrMeta>();
-        const attrConflict = new Set<string>();
-        const required = new Set(["position", "normal", "uv"]);
-
-        // 清除非必要属性
-        for (const g of collected)
-            for (const name of Object.keys(g.attributes))
-                if (!required.has(name)) g.deleteAttribute(name);
-
-        // 统计属性元信息
-        for (const g of collected) {
-            for (const name of Object.keys(g.attributes)) {
-                const attr = g.attributes[name] as THREE.BufferAttribute;
-                const ctor = (attr.array as any).constructor;
-                if (!attrMap.has(name)) {
-                    attrMap.set(name, { itemSize: attr.itemSize, arrayCtor: ctor, examples: 1, normalized: attr.normalized });
-                } else {
-                    const m = attrMap.get(name)!;
-                    if (m.itemSize !== attr.itemSize || m.arrayCtor !== ctor || m.normalized !== attr.normalized) attrConflict.add(name);
-                    else m.examples++;
-                }
-            }
-        }
-
-        // 移除冲突属性
-        for (const name of attrConflict) {
-            for (const g of collected) if (g.attributes[name]) g.deleteAttribute(name);
-            attrMap.delete(name);
-        }
-
-        // 补全缺失属性
-        for (const [name, meta] of attrMap) {
-            for (const g of collected) {
-                if (!g.attributes[name]) {
-                    const count = g.attributes.position.count;
-                    g.setAttribute(name, new THREE.BufferAttribute(new meta.arrayCtor(count * meta.itemSize), meta.itemSize, meta.normalized));
-                }
-            }
-        }
-        return collected;
+    /** 按句柄移除碰撞体。 */
+    removeCollider(handle: ColliderHandle | number): void {
+        this.colliders.remove(handle);
     }
 
-    /** 构建静态碰撞体。`options.useWorker` 时完成前不参与查询。 */
-    buildStaticCollider(sources?: THREE.Object3D | THREE.Object3D[], options?: BuildStaticColliderOptions) {
-        this.staticColliderBuildId += 1;
-        const buildId = this.staticColliderBuildId;
-        this.staticColliderReady = false;
-        this.collected = [];
-        if (this.collider) { this.scene.remove(this.collider); this.collider = null; }
-
-        const collectMesh = (mesh: THREE.Mesh | THREE.LineSegments) => {
-            try {
-                let geom = mesh.geometry.clone();
-                geom.applyMatrix4(mesh.matrixWorld);
-                if (geom.index) geom = geom.toNonIndexed();
-                const safe = this.ensureAttributesMinimal(geom);
-                if (safe) this.collected.push(safe);
-            } catch (e) {
-                console.warn("处理网格时出错：", mesh, e);
-            }
-        };
-
-        // 收集碰撞网格：传入则用指定对象，否则遍历整个场景
-        if (sources) {
-            const list = Array.isArray(sources) ? sources : [sources];
-            for (const obj of list) {
-                obj.updateMatrixWorld(true);
-                obj.traverse(c => {
-                    const a = c as any;
-                    if ((a.isMesh || a.isLineSegments) && a.geometry && c.name !== "capsule") collectMesh(a);
-                });
-            }
-        } else {
-            this.scene.traverse(c => {
-                const m = c as THREE.Mesh;
-                if (m?.isMesh && m.geometry && c.name !== "capsule") collectMesh(m);
-            });
-        }
-
-        if (!this.collected.length) return;
-        this.collected = this.unifiedAttribute(this.collected);
-
-        // 合并并构建BVH
-        const merged = BufferGeometryUtils.mergeGeometries(this.collected, false);
-        if (!merged) { console.error("合并几何失败"); return; }
-        this.collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ opacity: 0.5, transparent: true, wireframe: true, depthTest: true, side: THREE.DoubleSide }));
-        this.collider.raycast = acceleratedRaycast;
-        this.collider.layers.enable(1);
-
-        if (options?.useWorker) {
-            void this.bvhWorkerPool.generate(merged).then((bvh) => {
-                if (buildId !== this.staticColliderBuildId || this.collider?.geometry !== merged) return;
-                (merged as any).boundsTree = bvh;
-                this.staticColliderReady = true;
-                if (this.displayCollider && !this.scene.children.includes(this.collider)) this.scene.add(this.collider);
-            }).catch((error) => {
-                if (buildId !== this.staticColliderBuildId || this.collider?.geometry !== merged) return;
-                console.warn("异步构建静态碰撞 BVH 失败，回退到主线程：", error);
-                (merged as any).boundsTree = new MeshBVH(merged, { maxDepth: 100 });
-                this.staticColliderReady = true;
-                if (this.displayCollider && !this.scene.children.includes(this.collider)) this.scene.add(this.collider);
-            });
-            return;
-        }
-
-        (merged as any).boundsTree = new MeshBVH(merged, { maxDepth: 100 });
-        this.staticColliderReady = true;
-        if (this.displayCollider) this.scene.add(this.collider);
+    /** 清除碰撞体；可按 motion 过滤。 */
+    clearColliders(filter?: { motion?: MotionType }): void {
+        this.colliders.clear(filter);
     }
 
-    /** 注册运动学碰撞体。 */
-    addKinematicCollider(source: THREE.Object3D, options?: AddKinematicColliderOptions) {
-        if (this.kinematicColliders.find(e => e.source === source)) return;
-        source.updateMatrixWorld(true);
-
-        // 收集网格，几何保留在 source 本地空间
-        const collected: THREE.BufferGeometry[] = [];
-        const invSource = new THREE.Matrix4().copy(source.matrixWorld).invert();
-        source.traverse(c => {
-            const m = c as THREE.Mesh;
-            if (!m?.isMesh || !m.geometry || c.name === "capsule") return;
-            try {
-                let geom = (m.geometry as THREE.BufferGeometry).clone();
-                geom.applyMatrix4(new THREE.Matrix4().multiplyMatrices(invSource, m.matrixWorld));
-                if (geom.index) geom = geom.toNonIndexed();
-                const safe = this.ensureAttributesMinimal(geom);
-                if (safe) collected.push(safe);
-            } catch (e) { console.warn("处理动态网格出错：", m, e); }
-        });
-
-        if (!collected.length) return;
-        const unified = this.unifiedAttribute(collected);
-        const merged = BufferGeometryUtils.mergeGeometries(unified, false);
-        if (!merged) { console.error("合并动态几何失败"); return; }
-
-        const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ opacity: 0.5, transparent: true, wireframe: true, depthTest: true, side: THREE.DoubleSide }));
-        mesh.raycast = acceleratedRaycast;
-        mesh.matrixAutoUpdate = false;
-        mesh.matrix.copy(source.matrixWorld);
-        mesh.updateMatrixWorld(true);
-
-        const entry: KinematicColliderEntry = {
-            source,
-            mesh,
-            prevWorldMatrix: new THREE.Matrix4().copy(source.matrixWorld),
-            deltaPos: new THREE.Vector3(),
-            deltaRotY: 0,
-            ready: !options?.useWorker,
-            buildId: 1,
-        };
-        this.kinematicColliders.push(entry);
-
-        if (options?.useWorker) {
-            const buildId = entry.buildId;
-            void this.bvhWorkerPool.generate(merged).then((bvh) => {
-                if (entry.buildId !== buildId || !this.kinematicColliders.includes(entry)) return;
-                (merged as any).boundsTree = bvh;
-                entry.ready = true;
-                if (this.displayCollider && !this.scene.children.includes(mesh)) this.scene.add(mesh);
-            }).catch((error) => {
-                if (entry.buildId !== buildId || !this.kinematicColliders.includes(entry)) return;
-                console.warn("异步构建运动学碰撞 BVH 失败，回退到主线程：", error);
-                (merged as any).boundsTree = new MeshBVH(merged);
-                entry.ready = true;
-                if (this.displayCollider && !this.scene.children.includes(mesh)) this.scene.add(mesh);
-            });
-            return;
-        }
-
-        (merged as any).boundsTree = new MeshBVH(merged);
-        if (this.displayCollider) this.scene.add(mesh);
+    /** 人物胶囊 / 相机查询用的静态与运动学网格。 */
+    queryPlayerMeshes(options?: { skipIds?: number[] }): THREE.Mesh[] {
+        return this.collisionWorld.queryMeshes({ mask: CHARACTER_QUERY_MASK }, options);
     }
 
-    /** 静态碰撞体是否已就绪。 */
+    /** 车辆轮射线 / 车身接触使用的网格。跳过全部车辆外观，车车改走底盘盒。 */
+    getVehicleGroundMeshes(v: VehicleInstance): THREE.Mesh[] {
+        const chassis = v.chassisColliderId != null ? this.collisionWorld.get(v.chassisColliderId) : null;
+        const skipIds = this.vehicle.meshSkipIds;
+        skipIds.length = 0;
+        for (const other of this.vehicle.list) {
+            if (other.meshColliderId != null) skipIds.push(other.meshColliderId);
+        }
+        if (!chassis) return [];
+        return this.collisionWorld.queryMeshes(chassis, { skipIds });
+    }
+
+    /** 静态碰撞体是否已有至少一份就绪的 mesh。 */
     isStaticColliderUsable() {
-        return this.staticColliderReady && Boolean(this.collider && (this.collider.geometry as any).boundsTree);
+        return this.colliders.isStaticUsable();
     }
 
     /** 运动学碰撞体是否已就绪。 */
     isKinematicColliderUsable(entry: KinematicColliderEntry) {
-        return entry.ready && Boolean((entry.mesh.geometry as any).boundsTree);
+        return this.colliders.isKinematicUsable(entry);
     }
 
-    /** 注销运动学碰撞体。 */
-    removeKinematicCollider(source: THREE.Object3D) {
-        const idx = this.kinematicColliders.findIndex(e => e.source === source);
-        if (idx === -1) return;
-        const entry = this.kinematicColliders[idx];
-        entry.buildId += 1;
-        this.scene.remove(entry.mesh);
-        entry.mesh.geometry.dispose();
-        (entry.mesh.material as THREE.Material).dispose();
-        if (this.activeKinematicCollider === entry) this.activeKinematicCollider = null;
-        this.kinematicColliders.splice(idx, 1);
-    }
-
-    /** 清除所有运动学碰撞体。 */
-    clearKinematicColliders() {
-        for (const entry of this.kinematicColliders) {
-            entry.buildId += 1;
-            this.scene.remove(entry.mesh);
-            entry.mesh.geometry.dispose();
-            (entry.mesh.material as THREE.Material).dispose();
-        }
-        this.kinematicColliders = [];
-        this.activeKinematicCollider = null;
-    }
-
-    /** 更新运动学碰撞体。 */
+    /** 更新运动学碰撞体网格，并计算本帧位移增量。 */
     private updateKinematicColliders() {
-        if (!this.playerCapsule) return;
-        const playerWorldPos = this.playerCapsule.position.clone();
+        this.colliders.updateKinematicFollow();
+    }
 
-        for (const entry of this.kinematicColliders) {
-            // 将玩家位置变换到平台上一帧本地空间
-            const prevInv = new THREE.Matrix4().copy(entry.prevWorldMatrix).invert();
-            const playerInLocal = playerWorldPos.clone().applyMatrix4(prevInv);
-
-            // 更新 mesh 跟随 source
-            entry.source.updateMatrixWorld(true);
-            entry.mesh.matrix.copy(entry.source.matrixWorld);
-            entry.mesh.updateMatrixWorld(true);
-
-            // 变换回新世界空间，得到含旋转的完整位移
-            const playerInNewWorld = playerInLocal.clone().applyMatrix4(entry.source.matrixWorld);
-            entry.deltaPos.subVectors(playerInNewWorld, playerWorldPos);
-
-            // 计算平台本帧 Y 轴旋转增量
-            const prevEuler = new THREE.Euler().setFromRotationMatrix(entry.prevWorldMatrix, "YXZ");
-            const curEuler = new THREE.Euler().setFromRotationMatrix(entry.source.matrixWorld, "YXZ");
-            entry.deltaRotY = curEuler.y - prevEuler.y;
-
-            // 保存当前矩阵供下帧使用
-            entry.prevWorldMatrix.copy(entry.source.matrixWorld);
-        }
+    /** 本帧碰撞用完后再提交平台矩阵，供车辆按 prev→current 带走。 */
+    private commitKinematicPrevMatrices() {
+        this.colliders.commitKinematicPrev();
     }
 
     // ==================== 主循环 ====================
@@ -817,9 +620,10 @@ export class playerController {
             delta = (now - _lastUpdateTime) / 1000;
             _lastUpdateTime = now;
         }
-        if (!this.isupdate || !this.playerCapsule || !this.collider) return;
+        if (!this.isupdate || !this.playerCapsule) return;
         delta = Math.min(delta, 1 / 40) * this.timeScale;
         this.currentDelta = delta;
+        this.updateKinematicColliders();
         if (this.controllerMode === 1) {
             this.vehicle.preparePhysics(delta);
             this.vehicle.finishPhysics(delta);
@@ -829,219 +633,17 @@ export class playerController {
             this.updatePlayer(delta);
             if (this.isChangeControllerTransitionTimer) this.vehicle.finishPhysics(delta);
         }
+        this.dynamics.step(delta);
+        this.commitKinematicPrevMatrices();
     }
 
     /** 玩家帧更新。 */
     updatePlayer(delta: number) {
-        // 更新运动学碰撞体位置与增量
-        this.updateKinematicColliders();
-
-        // 车辆模式下退出
-        if (this.controllerMode === 1) {
-            this.runAnimationPass(delta);
-            return;
-        }
-
-        // 计算移动方向
-        this.camera.getWorldDirection(this.camDir);
-        const angle = 2 * Math.PI - (Math.atan2(this.camDir.z, this.camDir.x) + Math.PI / 2);
-
-        // 键盘使用八方向，摇杆使用 360° 连续方向
-        const moveAxes = this.input.getMoveAxes();
-        this.moveDir.copy(this.DIR_RGT).multiplyScalar(moveAxes.x).addScaledVector(this.DIR_FWD, moveAxes.y);
-        if (this.isFlying) {
-            if (this.input.fwd || moveAxes.isAnalog) this.moveDir.copy(this.camDir);
-            if (this.input.space) this.moveDir.y += 1;
-            this.curPlayerSpeed = this.input.shift ? this.playerFlySpeed * 2 : this.playerFlySpeed;
-        } else {
-            this.curPlayerSpeed = this.input.shift ? this.playerRunSpeed : this.playerSpeed;
-        }
-
-        this.moveDir.normalize(); // 归一化方向向量
-        if (!this.isFlying || (!moveAxes.isAnalog && !this.input.fwd)) this.moveDir.applyAxisAngle(this.upVector, angle); // 应用相机角度
-
-        // 速度驱动
-        const accelStep = this.playerAcceleration * this.decelBase * delta; // 加速步长
-        const decelStep = this.playerDeceleration * this.decelBase * delta; // 减速步长
-        const targetX = this.moveDir.x * this.curPlayerSpeed; // 目标速度X
-        const targetZ = this.moveDir.z * this.curPlayerSpeed; // 目标速度Z
-        const diffX = targetX - this.playerVelocity.x; // 速度差X
-        const diffZ = targetZ - this.playerVelocity.z; // 速度差Z
-        // XZ 作为整体2D向量限幅
-        const hasXZInput = this.moveDir.x !== 0 || this.moveDir.z !== 0;
-        const xzDiffLen = Math.hypot(diffX, diffZ);
-        if (xzDiffLen > 0) {
-            const xzApplied = Math.min(xzDiffLen, hasXZInput ? accelStep : decelStep);
-            this.playerVelocity.x += (diffX / xzDiffLen) * xzApplied;
-            this.playerVelocity.z += (diffZ / xzDiffLen) * xzApplied;
-        }
-        if (this.isFlying) {
-            const targetY = this.moveDir.y * this.curPlayerSpeed;
-            const diffY = targetY - this.playerVelocity.y;
-            this.playerVelocity.y += Math.sign(diffY) * Math.min(Math.abs(diffY), this.moveDir.y !== 0 ? accelStep : decelStep);
-        }
-
-        // 地面检测
-        this.groundRaycaster.ray.origin.copy(this.playerCapsule.position);
-        const staticHits = this.isStaticColliderUsable()
-            ? this.groundRaycaster.intersectObject(this.collider!, false)
-            : [];
-
-        // 同时检测运动学碰撞体，取最高地面点
-        let bestHit: THREE.Intersection | undefined = staticHits[0];
-        let hitEntry: KinematicColliderEntry | null = null;
-        for (const entry of this.kinematicColliders) {
-            if (!this.isKinematicColliderUsable(entry)) continue;
-            const kinHits = this.groundRaycaster.intersectObject(entry.mesh, false);
-            if (kinHits.length > 0 && (!bestHit || kinHits[0].point.y > bestHit.point.y)) {
-                bestHit = kinHits[0];
-                hitEntry = entry;
-            }
-        }
-        // 更新当前运动学碰撞体
-        this.activeKinematicCollider = hitEntry;
-
-        if (!this.isFlying) {
-            if (bestHit) {
-                const snapY = bestHit.point.y + this.snapH;
-                const dist = this.playerCapsule.position.y - bestHit.point.y;
-                if (dist > this.maxH) {
-                    this.applyGravity(delta);
-                } else if (this.playerVelocity.y <= 0) {
-                    if (this.playerIsOnGround) {
-                        // 已在地面：跟随地形（斜坡、动态平台）。仅当脚下是水平台面（台阶/平地）才注入平滑
-                        this.snapToGround(snapY, this.isFlatFloor(bestHit), delta);
-                    } else {
-                        // 从空中落下：只有本帧速度能到达落点才 snap，否则继续应用重力
-                        const predictedY = this.playerCapsule.position.y + this.playerVelocity.y * delta;
-                        if (predictedY <= snapY) {
-                            this.snapToGround(snapY);
-                        } else {
-                            this.applyGravity(delta);
-                        }
-                    }
-                } else {
-                    // 近地但还在上升：仍当空中，继续重力
-                    this.applyGravity(delta);
-                }
-            } else {
-                this.applyGravity(delta);
-            }
-            // 应用重力速度
-            this.playerCapsule.position.y += this.playerVelocity.y * delta;
-        }
-
-        // 分步碰撞移动
-        const capsuleInfo = this.playerCapsule.capsuleInfo;
-        const xzSpeed = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
-        const totalDist = this.isFlying ? this.playerVelocity.length() * delta : xzSpeed * delta;
-        this.xzDir.set(this.playerVelocity.x, this.isFlying ? this.playerVelocity.y : 0, this.playerVelocity.z).normalize();
-        const maxStep = capsuleInfo.radius * 0.8;
-        const steps = Math.min(Math.max(1, Math.ceil(totalDist / maxStep)), this.maxMoveSteps);
-        const stepDist = totalDist / steps;
-        const blockedEpsSq = (maxStep * 0.05) ** 2;
-        for (let i = 0; i < steps; i++) {
-            this.moveStepOrigin.copy(this.playerCapsule.position);
-            this.playerCapsule.position.addScaledVector(this.xzDir, stepDist);
-            this.playerCapsule.updateMatrixWorld();
-
-            if (!this.skipCapsuleCollision) {
-                // 静态碰撞检测
-                if (this.isStaticColliderUsable()) {
-                    applyCapsuleCollision(
-                        this.playerCapsule,
-                        capsuleInfo,
-                        this.collider!,
-                        this.staticTemps,
-                    );
-                }
-
-                // 运动学碰撞检测
-                for (const kinEntry of this.kinematicColliders) {
-                    if (!this.isKinematicColliderUsable(kinEntry)) continue;
-                    this.playerCapsule.updateMatrixWorld();
-                    applyCapsuleCollision(
-                        this.playerCapsule,
-                        capsuleInfo,
-                        kinEntry.mesh,
-                        this.kinematicTemps,
-                    );
-                }
-
-                if (this.playerCapsule.position.distanceToSquared(this.moveStepOrigin) < blockedEpsSq) {
-                    break;
-                }
-            }
-        }
-
-        // 动态平台带动玩家
-        if (this.activeKinematicCollider && this.playerIsOnGround && !this.isFlying) {
-            this.playerCapsule.position.add(this.activeKinematicCollider.deltaPos);
-            if (this.activeKinematicCollider.deltaRotY !== 0) {
-                this.playerCapsule.rotateY(this.activeKinematicCollider.deltaRotY);
-            }
-        }
-
-        // 玩家朝向
-        if (!this.isFirstPerson) {
-            const camDirFlat = this.camDir.clone().setY(0).normalize().negate();
-            const moveDirFlat = this.moveDir.clone().normalize().negate();
-
-            if (!this.isFlying) {
-                if (this.cam.mouseMode === 4 || this.cam.mouseMode === 5) {
-                    // mode 4/5: 胶囊朝向始终与相机水平朝向一致，鼠标旋转即驱动人物转向
-                    this.targetMat.lookAt(this.playerCapsule.position, this.playerCapsule.position.clone().add(camDirFlat), this.playerCapsule.up);
-                    this.playerCapsule.quaternion.copy(this.targetQuat.setFromRotationMatrix(this.targetMat));
-                } else if (this.cam.mouseMode === 0 || this.cam.mouseMode === 2) {
-                    const lookTarget = this.playerCapsule.position.clone().add(moveDirFlat.lengthSq() > 0 ? moveDirFlat : camDirFlat);
-                    this.targetMat.lookAt(this.playerCapsule.position, lookTarget, this.playerCapsule.up);
-                    this.playerCapsule.quaternion.slerp(this.targetQuat.setFromRotationMatrix(this.targetMat), Math.min(1, this.rotationSpeed * delta));
-                } else if (moveDirFlat.lengthSq() > 0) {
-                    this.targetMat.lookAt(this.playerCapsule.position, this.playerCapsule.position.clone().add(moveDirFlat), this.playerCapsule.up);
-                    this.playerCapsule.quaternion.slerp(this.targetQuat.setFromRotationMatrix(this.targetMat), Math.min(1, this.rotationSpeed * delta));
-                }
-            } else {
-                const lookTarget = this.playerCapsule.position.clone().add(this.input.fwd ? moveDirFlat : camDirFlat);
-                this.targetMat.lookAt(this.playerCapsule.position, lookTarget, this.playerCapsule.up);
-                this.playerCapsule.quaternion.slerp(this.targetQuat.setFromRotationMatrix(this.targetMat), Math.min(1, this.rotationSpeed * delta));
-            }
-        }
-
-        // 第三人称相机跟随
-        if (!this.isFirstPerson) {
-            const lookTarget = this.cam.springTarget(this.cam.getLookAtPoint(), delta);
-            this.camera.position.sub(this.controls.target);
-            this.camera.position.add(lookTarget);
-            this.controls.target.copy(lookTarget);
-            this.controls.update();
-
-            if (!this.cam.zoomEnabled) {
-                this.cam.updateWithRaycast(
-                    this.controls.target,
-                );
-            }
-        }
-
-        // 移动端车辆按钮检测
-        if (this.isShowMobileControls && this.vehicle.list.length) {
-            let near = false;
-            for (const veh of this.vehicle.list) {
-                if (this.vehicle.isInBoardingRange(veh, this.playerCapsule.position)) { near = true; break; }
-            }
-            if (near !== this.isNearVehicle) {
-                this.isNearVehicle = near;
-                this.mobileControls?.syncVehicleBtn(near);
-            }
-        }
-
-        // 设置动画
-        this.animation.setAnimationByPressed();
-        // 更新动画混合器（含插件 before/after 钩子）
-        this.runAnimationPass(delta);
+        this.character.update(delta);
     }
 
     /** 在插件的恢复与应用钩子之间更新动画混合器。 */
-    private runAnimationPass(delta: number): void {
+    runAnimationPass(delta: number): void {
         for (const plugin of this.plugins) plugin.onBeforeAnimationUpdate?.(delta);
         this.animation.updateMixers(delta);
         for (const plugin of this.plugins) plugin.onAfterAnimationUpdate?.(delta);
@@ -1054,24 +656,25 @@ export class playerController {
         if (!this.playerCapsule) return;
         const dbg = this.displayCollider;
 
-        // 静态碰撞体：BVH 未就绪时不挂线框
-        if (this.collider) {
-            if (dbg && this.isStaticColliderUsable()) {
-                if (!this.scene.children.includes(this.collider)) this.scene.add(this.collider);
-            } else this.scene.remove(this.collider);
-        }
-
         // 玩家胶囊线框
         (this.playerCapsule.material as THREE.Material).visible = dbg && this.displayPlayerCapsule;
 
-        // 运动学碰撞体线框（含车辆模型 BVH）
-        for (const entry of this.kinematicColliders) {
-            if (dbg && this.isKinematicColliderUsable(entry)) {
-                if (!this.scene.children.includes(entry.mesh)) this.scene.add(entry.mesh);
-            } else this.scene.remove(entry.mesh);
+        // 全部已登记的查询用 mesh 线框（static / kinematic）
+        for (const mesh of this.queryPlayerMeshes()) {
+            if (dbg && (mesh.geometry as any).boundsTree) {
+                if (!this.scene.children.includes(mesh)) this.scene.add(mesh);
+            } else this.scene.remove(mesh);
         }
 
-        // 车辆底盘物理盒
+        // 动态刚体碰撞线框
+        for (const body of this.dynamics.list) {
+            const mesh = body.debugMesh;
+            if (dbg) {
+                if (!this.scene.children.includes(mesh)) this.scene.add(mesh);
+            } else this.scene.remove(mesh);
+        }
+
+        // 车辆底盘物理盒（dynamic + box）
         this.vehicle.params.debug.showPhysicsBox = dbg;
         for (const v of this.vehicle.list) {
             if (!v.physicsBoxMesh) continue;
@@ -1091,20 +694,20 @@ export class playerController {
     }
 
     /** 应用重力。 */
-    private applyGravity(delta: number) {
+    applyGravity(delta: number) {
         this.playerVelocity.y += delta * this.gravity;
         this.setOnGround(false);
     }
 
     /** 判断脚下地面是否为水平台面（法线接近竖直）。 */
-    private isFlatFloor(hit: THREE.Intersection): boolean {
+    isFlatFloor(hit: THREE.Intersection): boolean {
         const n = hit.face?.normal;
         if (!n) return true;
         return n.y >= this.minFloorNormalY; // 大于等于最小法线 Y 分量时为水平台面
     }
 
     /** 吸附到地面。 */
-    private snapToGround(groundY: number, smooth = false, delta = 0) {
+    snapToGround(groundY: number, smooth = false, delta = 0) {
         this.playerVelocity.y = 0;
         const dy = groundY - this.playerCapsule.position.y;
         if (smooth && Math.abs(dy) <= this.rideHeight * this.playerModelConfig.scale) {
@@ -1156,6 +759,9 @@ export class playerController {
         if (this.playerCapsule?.capsuleInfo) {
             this.playerCapsule.capsuleInfo.radius *= ratio;
             this.playerCapsule.capsuleInfo.segment.end.y *= ratio;
+            if (this.playerCapsule.capsuleInfo.dynamicsSegment) {
+                this.playerCapsule.capsuleInfo.dynamicsSegment.end.y *= ratio;
+            }
             this.recomputeGroundThresholds(); // 几何随缩放变化，重算站立/落地阈值
         }
         if (this.isFirstPerson) this.cam.setFirstPerson();
@@ -1181,7 +787,7 @@ export class playerController {
     getCapsuleGroundHeight() { return this.snapH; }
 
     /** 运动学碰撞体列表（供车辆下车检测使用）。 */
-    getKinematicColliderEntries() { return this.kinematicColliders; }
+    getKinematicColliderEntries() { return this.colliders.kinematicColliders; }
 
     /** 将人物模型挂载到车辆座位点。 */
     syncMountedPlayer(vehicle: VehicleInstance) {
@@ -1230,10 +836,17 @@ export class playerController {
     getActiveVehicle() { return this.vehicle.active; }
     /** 获取所有载具。 */
     getAllVehicles() { return this.vehicle.list; }
-    /** 获取碰撞体。 */
-    getCollider() { return this.collider; }
+    /** 人物 / 相机查询用的全部碰撞网格（CollisionWorld）。 */
+    getColliderMeshes() { return this.queryPlayerMeshes(); }
     /** 获取当前站立的运动学碰撞体。 */
     getActiveKinematicCollider() { return this.activeKinematicCollider; }
+
+    /** 移除动态刚体。 */
+    removeDynamicBody(body: DynamicBody) { this.dynamics.remove(body); }
+    /** 全部动态刚体。 */
+    getDynamicBodies(): DynamicBody[] { return this.dynamics.list; }
+    /** 清除全部动态刚体。 */
+    clearDynamicBodies() { this.dynamics.clear(); }
 
     /** 设置鼠标灵敏度。 */
     setMouseSensitivity(value: number) {
@@ -1345,17 +958,14 @@ export class playerController {
 
         // 清除碰撞体和相机
         this.cam.resetControls();
-        this.staticColliderBuildId += 1;
-        this.staticColliderReady = false;
-        if (this.collider) { this.scene.remove(this.collider); this.collider = null; }
+        this.clearColliders();
         this.mobileControls?.destroy();
         this.mobileControls = null;
-
-        // 清除运动学碰撞体
-        this.clearKinematicColliders();
         this.bvhWorkerPool.dispose();
 
         // 清除所有车辆
         this.vehicle.destroy();
+        this.dynamics.clear();
+        this.collisionWorld.clear();
     }
 }
