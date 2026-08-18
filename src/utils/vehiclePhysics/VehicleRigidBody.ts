@@ -110,6 +110,13 @@ export class VehicleRigidBody {
         return this._mass;
     }
 
+    /** 设置质量并按当前碰撞盒重算惯量。 */
+    setMass(mass: number): void {
+        this._mass = Math.max(1e-6, mass);
+        this.invMass = 1 / this._mass;
+        this.setCuboidInertia(this._mass, this.halfExtents);
+    }
+
     /** 在质心施加冲量。 */
     applyImpulse(impulse: THREE.Vector3): void {
         this.linearVelocity.addScaledVector(impulse, this.invMass);

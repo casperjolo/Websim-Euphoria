@@ -161,6 +161,12 @@ export class BVHVehicleController {
         if (wheel) wheel.sideFrictionStiffness = value;
     }
 
+    /** 设置侧向力对侧倾的影响，0 为几乎不侧倾，1 为按真实触地点侧倾。 */
+    setWheelRollInfluence(i: number, value: number): void {
+        const wheel = this.wheelAt(i);
+        if (wheel) wheel.rollInfluence = value;
+    }
+
     /** 读取转向角。 */
     wheelSteering(i: number): number | null {
         return this.wheelAt(i)?.steering ?? null;
@@ -352,13 +358,13 @@ export class BVHVehicleController {
         }
     }
 
-    // 沿接触法线施加悬挂冲量
+    // 沿接触法线施加悬挂冲量；作用点用轮心，减少转向时接地点把车顶歪
     private applySuspensionImpulses(dt: number): void {
         for (const wheel of this.wheels) {
             if (!wheel.isInContact) continue;
             const force = Math.min(wheel.suspensionForce, wheel.maxSuspensionForce);
             this.impulse.copy(wheel.contactNormal).multiplyScalar(force * dt);
-            this.chassis.applyImpulseAtPoint(this.impulse, wheel.contactPoint);
+            this.chassis.applyImpulseAtPoint(this.impulse, wheel.hardPointWS);
         }
     }
 

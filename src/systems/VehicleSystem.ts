@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { playerController } from "../playerController";
 import { loadVehicleModel as loadVehicleModelUtil } from "../utils/vehicleLoader";
+import { DEFAULT_MAX_SUSPENSION_TRAVEL, DEFAULT_WHEEL_PHYSICS } from "../utils/vehicleController";
 import { applyCapsuleCollision, createCollisionTemps } from "../utils/capsuleCollision";
 import type { VehicleInstance, VehicleOptions, KinematicColliderEntry } from "../types";
 import { CollisionGroup } from "../collision/groups";
@@ -18,25 +19,26 @@ export class VehicleSystem {
         chassis: { density: 1, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
         power: { acceleration: 8, deceleration: 8, maxSpeed: 300 }, // 动力参数
-        steering: { maxSteerAngle: Math.PI / 4, steerTime: 1, steerReturnTimeSlow: 0.8, steerReturnTimeFast: 0.6 }, // 转向参数：打满/低速回正/高速回正（秒）
+        steering: { maxSteerAngle: Math.PI / 5, steerTime: 0.45, steerReturnTimeSlow: 0.55, steerReturnTimeFast: 0.4, highSpeedSteerScale: 0.5 }, // 转向：打满/回正时间（秒），高速收舵
         grip: {
             maxG: 1.2,
-            sideFrictionIdle: 2,
-            sideFrictionFrontMin: 1.1,
-            sideFrictionRearMin: 0.9,
+            sideFrictionIdle: 1,
+            sideFrictionFrontMin: 0.55,
+            sideFrictionRearMin: 0.45,
             handbrakeRearFriction: 0.35,
             handbrakeRearDriveScale: 0.65,
             handbrakeReleaseTime: 0.15,
             wheelbaseRatio: 0.55,
         }, // 抓地预算
         suspension: {
-            travelRatio: 0.3, 
-            stiffness: 250,
-            compression: 6,
-            relaxation: 6,
-            maxForce: 10000,
-            frictionSlip: 20,
-            sideFrictionStiffness: 2,
+            maxTravel: DEFAULT_MAX_SUSPENSION_TRAVEL, 
+            stiffness: DEFAULT_WHEEL_PHYSICS.suspensionStiffness,
+            compression: DEFAULT_WHEEL_PHYSICS.suspensionCompression,
+            relaxation: DEFAULT_WHEEL_PHYSICS.suspensionRelaxation,
+            maxForce: DEFAULT_WHEEL_PHYSICS.maxSuspensionForce,
+            frictionSlip: DEFAULT_WHEEL_PHYSICS.frictionSlip,
+            sideFrictionStiffness: DEFAULT_WHEEL_PHYSICS.sideFrictionStiffness,
+            rollInfluence: DEFAULT_WHEEL_PHYSICS.rollInfluence,
         },
         followVehicleDirection: true, // 相机跟随方向
     };
@@ -237,22 +239,24 @@ export class VehicleSystem {
         const linv = chassisBody.linvel();
         const speed01 = Math.min(1, Math.hypot(linv.x, linv.z) / Math.max(0.01, v.maxSpeed / 3.6));
 
-        // 转向：参数为走完满舵行程的时间（秒），打方向与回正都按恒定角速度逼近
-        const { maxSteerAngle, steerTime, steerReturnTimeSlow, steerReturnTimeFast } = this.params.steering;
+        // 转向：参数为走完满舵行程的时间（秒）；车速越高可用转角越小
+        const { maxSteerAngle, steerTime, steerReturnTimeSlow, steerReturnTimeFast, highSpeedSteerScale = 0.5 } = v.steering;
         const currentSteering = vehicleController.wheelSteering(0) || 0;
         const steerDir = Number(c.input.lft) - Number(c.input.rgt);
-        const targetSteering = maxSteerAngle * steerDir;
+        const speedSteer = 1 - (1 - highSpeedSteerScale) * speed01 * speed01;
+        const steerLimit = maxSteerAngle * speedSteer;
+        const targetSteering = steerLimit * steerDir;
         const responseTime = steerDir === 0
             ? steerReturnTimeSlow + (steerReturnTimeFast - steerReturnTimeSlow) * speed01
             : steerTime;
-        const maxStep = maxSteerAngle / Math.max(1e-4, responseTime) * delta;
+        const maxStep = Math.max(steerLimit, 1e-4) / Math.max(1e-4, responseTime) * delta;
         const steeringDelta = targetSteering - currentSteering;
         const steering = currentSteering + Math.sign(steeringDelta) * Math.min(Math.abs(steeringDelta), maxStep);
         vehicleController.setWheelSteering(0, steering);
         vehicleController.setWheelSteering(1, steering);
 
         // 抓地预算
-        const { maxG, sideFrictionIdle, sideFrictionFrontMin, sideFrictionRearMin, handbrakeRearFriction, handbrakeRearDriveScale, handbrakeReleaseTime, wheelbaseRatio } = this.params.grip;
+        const { maxG, sideFrictionIdle, sideFrictionFrontMin, sideFrictionRearMin, handbrakeRearFriction, handbrakeRearDriveScale, handbrakeReleaseTime, wheelbaseRatio } = v.grip;
         const vFwd = linv.x * forward.x + linv.y * forward.y + linv.z * forward.z;
         const wheelbase = Math.max(0.01, v.size.l * wheelbaseRatio);
         const latA = vFwd * vFwd * Math.tan(Math.min(1.5, Math.abs(steering))) / wheelbase;
@@ -454,7 +458,7 @@ export class VehicleSystem {
         for (let i = 0; i < wheelCount; i++) {
             v.vehicleController.setWheelEngineForce(i, 0);
             v.vehicleController.setWheelBrake(i, brake);
-            v.vehicleController.setWheelSideFrictionStiffness(i, this.params.suspension.sideFrictionStiffness);
+            v.vehicleController.setWheelSideFrictionStiffness(i, v.sideFrictionStiffness);
         }
     }
 

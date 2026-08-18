@@ -11,18 +11,18 @@ export class VehicleWheel {
     suspensionLength = 0.1; // 当前悬挂长度
     maxSuspensionTravel = 0.1; // 最大行程
 
-    stiffness = 250; // 悬挂刚度
-    dampingCompression = 6; // 压缩阻尼
-    dampingRelaxation = 6; // 回弹阻尼
-    maxSuspensionForce = 10000; // 最大悬挂力
+    stiffness = 18; // 悬挂刚度（质量归一化）
+    dampingCompression = 2.1; // 压缩阻尼
+    dampingRelaxation = 2.5; // 回弹阻尼
+    maxSuspensionForce = 6000; // 最大悬挂力
 
     steering = 0; // 转向角
     engineForce = 0; // 驱动力
     brake = 0; // 制动力
 
-    frictionSlip = 20; // 纵向抓地
-    sideFrictionStiffness = 2; // 侧向摩擦
-    rollInfluence = 0.03; // 侧向力对侧倾的影响
+    frictionSlip = 8; // 纵向抓地
+    sideFrictionStiffness = 1; // 侧向摩擦
+    rollInfluence = 0.12; // 侧向力对侧倾的影响
 
     isInContact = false; // 是否接地
     contactPoint = new THREE.Vector3(); // 接地点

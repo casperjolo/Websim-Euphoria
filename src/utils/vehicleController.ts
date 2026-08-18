@@ -21,17 +21,22 @@ export type WheelPhysicsParams = {
     maxSuspensionForce: number;
     frictionSlip: number;
     sideFrictionStiffness: number;
+    rollInfluence: number;
 };
 
-/** 悬挂与抓地默认值。 */
+/** 悬挂与抓地默认值。静止长度不传时按轮直径 × 0.2。 */
 export const DEFAULT_WHEEL_PHYSICS: WheelPhysicsParams = {
-    suspensionStiffness: 250,
-    suspensionCompression: 6,
-    suspensionRelaxation: 6,
-    maxSuspensionForce: 10000,
-    frictionSlip: 20,
-    sideFrictionStiffness: 2,
+    suspensionStiffness: 18,
+    suspensionCompression: 2.1,
+    suspensionRelaxation: 2.5,
+    maxSuspensionForce: 6000,
+    frictionSlip: 8,
+    sideFrictionStiffness: 1,
+    rollInfluence: 0.12,
 };
+
+/** 悬挂最大行程默认值（米）。 */
+export const DEFAULT_MAX_SUSPENSION_TRAVEL = 0.35;
 
 /** 创建 BVH 车辆控制器并同步轮子视觉。 */
 export function createVehicleController(
@@ -61,6 +66,7 @@ export function createVehicleController(
         vehicle.setWheelEngineForce(index, 0); // 驱动力
         vehicle.setWheelFrictionSlip(index, physics.frictionSlip); // 纵向抓地
         vehicle.setWheelSideFrictionStiffness(index, physics.sideFrictionStiffness); // 侧向摩擦
+        vehicle.setWheelRollInfluence(index, physics.rollInfluence); // 侧倾影响
     });
 
     const up = new THREE.Vector3(0, 1, 0);

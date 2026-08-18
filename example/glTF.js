@@ -156,11 +156,8 @@ const VEHICLE_CONFIG = {
     url: "./glb/sedan.glb",
     scale: 0.1,
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-    suspensionRestLengthRatio: 0.2,
-    density: 1,
-    maxSpeed: 200,
-    acceleration: 8,
-    deceleration: 30,
+    chassis: { density: 1 },
+    power: { maxSpeed: 200, acceleration: 8, deceleration: 30 },
     driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
     driverSeatRotation: -Math.PI / 2,
 };

@@ -197,6 +197,84 @@ export type LegacyVehicleModelSource = LegacyModelSource;
 /** 车辆模型来源。 */
 export type VehicleModelSource = LoadedVehicleModelSource | LegacyVehicleModelSource;
 
+/** 底盘碰撞盒与阻尼。 */
+export type VehicleChassisOptions = {
+    /** 密度，质量 = 碰撞盒体积 × 密度，默认 1。 */
+    density?: number;
+    /** 线阻尼，默认 0.05。 */
+    linearDamping?: number;
+    /** 角阻尼，默认 0.5。 */
+    angularDamping?: number;
+    /** 盒底相对轮胎触地点的高度（随 scale 缩放）；不传则盒底至少罩到轮心。 */
+    clearance?: number;
+};
+
+/** 悬挂与轮胎。 */
+export type VehicleSuspensionOptions = {
+    /** 静止长度（米，随 scale 缩放）；不传则取 max(轮直径 × 0.2, 静载下沉 × 1.2)。 */
+    restLength?: number;
+    /** 最大行程（米），默认 0.35。 */
+    maxTravel?: number;
+    /** 刚度（质量归一化），默认 18。 */
+    stiffness?: number;
+    /** 压缩阻尼，默认 2.1。 */
+    compression?: number;
+    /** 回弹阻尼，默认 2.5。 */
+    relaxation?: number;
+    /** 单轮最大悬挂力，默认 6000。 */
+    maxForce?: number;
+    /** 纵向抓地，默认 8。 */
+    frictionSlip?: number;
+    /** 侧向摩擦刚度，默认 1。 */
+    sideFrictionStiffness?: number;
+    /** 侧向力对侧倾的影响，默认 0.12。 */
+    rollInfluence?: number;
+};
+
+/** 转向手感。 */
+export type VehicleSteeringOptions = {
+    /** 最大转向角（弧度），默认 π/5。 */
+    maxSteerAngle?: number;
+    /** 打满舵时间（秒），默认 0.45。 */
+    steerTime?: number;
+    /** 低速回正时间（秒），默认 0.55。 */
+    steerReturnTimeSlow?: number;
+    /** 高速回正时间（秒），默认 0.4。 */
+    steerReturnTimeFast?: number;
+    /** 最高车速时转向角相对满舵的比例，默认 0.5。 */
+    highSpeedSteerScale?: number;
+};
+
+/** 过弯抓地与手刹。 */
+export type VehicleGripOptions = {
+    /** 侧向加速度上限（g），默认 1.2。 */
+    maxG?: number;
+    /** 直线侧向摩擦，默认 1。 */
+    sideFrictionIdle?: number;
+    /** 满载前轮侧向摩擦下限，默认 0.55。 */
+    sideFrictionFrontMin?: number;
+    /** 满载后轮侧向摩擦下限，默认 0.45。 */
+    sideFrictionRearMin?: number;
+    /** 手刹后轮侧向摩擦，默认 0.35。 */
+    handbrakeRearFriction?: number;
+    /** 手刹时后驱比例，默认 0.65。 */
+    handbrakeRearDriveScale?: number;
+    /** 松手刹恢复时间（秒），默认 0.15。 */
+    handbrakeReleaseTime?: number;
+    /** 轴距相对车长比例，默认 0.55。 */
+    wheelbaseRatio?: number;
+};
+
+/** 动力。 */
+export type VehiclePowerOptions = {
+    /** 最高速度基准（km/h，按 scale 缩放），默认 300。 */
+    maxSpeed?: number;
+    /** 加速度基准（m/s²，按 scale 缩放），默认 8。 */
+    acceleration?: number;
+    /** 制动减速度基准（m/s²，按 scale 缩放），默认 8。 */
+    deceleration?: number;
+};
+
 /** 车辆模型、物理和驾驶参数。 */
 export type VehicleOptions = VehicleModelSource & {
     /** 车辆初始世界坐标；y 为最低轮底对齐高度。 */
@@ -207,36 +285,27 @@ export type VehicleOptions = VehicleModelSource & {
     scale?: number;
     /** 驾驶位胶囊中心，使用车辆底盘局部坐标。 */
     driverSeatPosition: THREE.Vector3;
-    /** 驾驶位相对车辆底盘局部的水平旋转（弧度），默认 0。 */
+    /** 驾驶位相对底盘局部的水平旋转（弧度），默认 0。 */
     driverSeatRotation?: number;
-    /** 盒底相对轮胎触地点的高度（随 scale 缩放）；不传则盒底用车身包围盒底。 */
-    chassisClearance?: number;
-    /** 悬挂静止长度比例（相对轮直径），默认 0.2。 */
-    suspensionRestLengthRatio?: number;
-    /** 悬挂最大行程比例（相对轮直径），默认 0.3。 */
-    suspensionTravelRatio?: number;
-    /** 悬挂刚度，默认 250。 */
-    suspensionStiffness?: number;
-    /** 压缩阻尼，默认 6。 */
-    suspensionCompression?: number;
-    /** 回弹阻尼，默认 6。 */
-    suspensionRelaxation?: number;
-    /** 单轮最大悬挂力，默认 10000。 */
-    maxSuspensionForce?: number;
-    /** 纵向抓地系数，默认 20。 */
-    frictionSlip?: number;
-    /** 侧向摩擦刚度，默认 2。 */
-    sideFrictionStiffness?: number;
+    /** 模型绕 Y 旋转（弧度），默认 -π/2。 */
+    modelRotation?: number;
     /** 驾驶时镜头是否跟随车辆朝向，默认 true。 */
     followVehicleDirection?: boolean;
-    /** 底盘密度，质量 = 碰撞盒体积 × 密度，默认 1。 */
-    density?: number;
-    /** 最高速度基准（km/h，按 scale 缩放），默认 300。 */
-    maxSpeed?: number;
-    /** 加速度基准（m/s²，按 scale 缩放），默认 8。 */
-    acceleration?: number;
-    /** 制动减速度基准（m/s²，按 scale 缩放），默认 8。 */
-    deceleration?: number;
+    /** 调试显示。 */
+    debug?: {
+        /** 是否显示底盘物理盒，默认 false。 */
+        showPhysicsBox?: boolean;
+    };
+    /** 底盘碰撞盒与阻尼。 */
+    chassis?: VehicleChassisOptions;
+    /** 悬挂与轮胎。 */
+    suspension?: VehicleSuspensionOptions;
+    /** 转向手感。 */
+    steering?: VehicleSteeringOptions;
+    /** 过弯抓地与手刹。 */
+    grip?: VehicleGripOptions;
+    /** 动力。 */
+    power?: VehiclePowerOptions;
 };
 
 /** 已加载车辆的运行时对象。 */
@@ -253,20 +322,33 @@ export type VehicleInstance = {
     destroyVehicleController: () => void;
     /** 车辆缩放。 */
     scale: number;
-    /** 车辆模型归一化缩放。 */
-    modelScale: number;
     /** 驾驶位胶囊中心，使用车辆底盘局部坐标。 */
     driverSeatPosition: THREE.Vector3;
     /** 驾驶位相对车辆底盘局部的水平旋转（弧度）。 */
     driverSeatRotation: number;
     /** 由前后轮中心推算的车辆底盘本地前向。 */
     forwardLocal: THREE.Vector3;
-    /** 盒底相对轮胎触地点的高度；未设置时为车身包围盒底。 */
-    chassisClearance?: number;
-    /** 悬挂静止长度比例。 */
-    suspensionRestLengthRatio: number;
-    /** 悬挂最大行程比例。 */
-    suspensionTravelRatio: number;
+    /** 驻车时侧向摩擦。 */
+    sideFrictionStiffness: number;
+    /** 转向参数。 */
+    steering: {
+        maxSteerAngle: number;
+        steerTime: number;
+        steerReturnTimeSlow: number;
+        steerReturnTimeFast: number;
+        highSpeedSteerScale: number;
+    };
+    /** 抓地预算。 */
+    grip: {
+        maxG: number;
+        sideFrictionIdle: number;
+        sideFrictionFrontMin: number;
+        sideFrictionRearMin: number;
+        handbrakeRearFriction: number;
+        handbrakeRearDriveScale: number;
+        handbrakeReleaseTime: number;
+        wheelbaseRatio: number;
+    };
     /** 车辆尺寸（长、宽、高）。 */
     size: {
         l: number;
@@ -275,8 +357,6 @@ export type VehicleInstance = {
     };
     /** 底盘碰撞盒半边长（底盘局部坐标）。 */
     halfExtents: THREE.Vector3;
-    /** 底盘密度。 */
-    density: number;
     /** 最高速度（km/h）。 */
     maxSpeed: number;
     /** 加速度（m/s²）。 */

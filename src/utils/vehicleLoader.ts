@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { createVehicleController } from "./vehicleController";
+import { createVehicleController, DEFAULT_MAX_SUSPENSION_TRAVEL, DEFAULT_WHEEL_PHYSICS } from "./vehicleController";
 import { VehicleRigidBody } from "./vehiclePhysics/VehicleRigidBody";
 import { getBbox } from "./bbox";
 import type { VehicleOptions, VehicleInstance } from "../types";
@@ -13,15 +13,27 @@ export type VehicleLoaderContext = {
         chassis: { density: number; linearDamping: number; angularDamping: number };
         model: { rotation: number };
         power: { acceleration: number; deceleration: number; maxSpeed: number };
-        steering: { maxSteerAngle: number; steerTime: number; steerReturnTimeSlow: number; steerReturnTimeFast: number };
+        steering: { maxSteerAngle: number; steerTime: number; steerReturnTimeSlow: number; steerReturnTimeFast: number; highSpeedSteerScale: number };
+        grip: {
+            maxG: number;
+            sideFrictionIdle: number;
+            sideFrictionFrontMin: number;
+            sideFrictionRearMin: number;
+            handbrakeRearFriction: number;
+            handbrakeRearDriveScale: number;
+            handbrakeReleaseTime: number;
+            wheelbaseRatio: number;
+        };
         suspension: {
+            restLength?: number;
+            maxTravel: number;
             stiffness: number;
             compression: number;
             relaxation: number;
             maxForce: number;
             frictionSlip: number;
             sideFrictionStiffness: number;
-            travelRatio: number;
+            rollInfluence: number;
         };
         followVehicleDirection: boolean;
     };
@@ -29,6 +41,10 @@ export type VehicleLoaderContext = {
 };
 
 const MIN_BOX_HEIGHT = 1e-3;
+
+function mergeOpts<T extends object>(base: T, over?: Partial<T>): T {
+    return over ? { ...base, ...over } : { ...base };
+}
 
 // ==================== 主函数 ====================
 
@@ -40,14 +56,19 @@ export async function loadVehicleModel(
     const { loader, scene, vehicleParams, vehicleLength } = ctx;
 
     const scale = opts.scale ?? 1;
-    const suspensionRestLengthRatio = opts.suspensionRestLengthRatio ?? 0.2;
-    const suspensionTravelRatio = opts.suspensionTravelRatio ?? vehicleParams.suspension.travelRatio ?? 0.3;
-    const density = Math.max(1e-8, opts.density ?? vehicleParams.chassis.density);
-    const maxSpeed = (opts.maxSpeed ?? vehicleParams.power.maxSpeed) * scale;
-    const acceleration = (opts.acceleration ?? vehicleParams.power.acceleration) * scale;
-    const deceleration = (opts.deceleration ?? vehicleParams.power.deceleration) * scale;
-
-    vehicleParams.followVehicleDirection = opts.followVehicleDirection ?? true;
+    const debug = mergeOpts(vehicleParams.debug, opts.debug);
+    const chassis = mergeOpts(vehicleParams.chassis, opts.chassis);
+    const power = mergeOpts(vehicleParams.power, opts.power);
+    const steering = mergeOpts(vehicleParams.steering, opts.steering);
+    const grip = mergeOpts(vehicleParams.grip, opts.grip);
+    const sus = mergeOpts(vehicleParams.suspension, opts.suspension);
+    const density = Math.max(1e-8, chassis.density);
+    const linearDamping = chassis.linearDamping;
+    const angularDamping = chassis.angularDamping;
+    const maxSpeed = power.maxSpeed * scale;
+    const acceleration = power.acceleration * scale;
+    const deceleration = power.deceleration * scale;
+    const followVehicleDirection = opts.followVehicleDirection ?? vehicleParams.followVehicleDirection;
 
     let model: THREE.Object3D;
     if (opts.model) {
@@ -75,14 +96,14 @@ export async function loadVehicleModel(
     const tempGroup = new THREE.Group();
     scene.add(tempGroup);
     model.scale.multiplyScalar(modelScale * scale);
-    model.rotateY(vehicleParams.model.rotation);
+    model.rotateY(opts.modelRotation ?? vehicleParams.model.rotation);
     const { center } = getBbox(model);
     model.position.set(-center.x, -center.y, -center.z);
     tempGroup.add(model);
     tempGroup.updateMatrixWorld(true);
 
     // 收集轮子世界变换信息
-    let wheelRadius = 0, suspensionRestLength = 0, maxSuspensionTravel = 0, wheelSizeInit = false;
+    let wheelRadius = 0, wheelSizeInit = false;
     const wheelsInfo: any[] = [];
 
     for (const wheel of wheelObjects) {
@@ -97,8 +118,6 @@ export async function loadVehicleModel(
         if (!wheelSizeInit) {
             const { size: ws } = getBbox(wheel);
             wheelRadius = Math.max(ws.x, ws.y, ws.z) / 2;
-            suspensionRestLength = wheelRadius * 2 * suspensionRestLengthRatio;
-            maxSuspensionTravel = wheelRadius * 2 * suspensionTravelRatio;
             wheelSizeInit = true;
         }
 
@@ -108,8 +127,6 @@ export async function loadVehicleModel(
             quaternion: worldQuat,
             scale: worldScale,
             radius: wheelRadius,
-            suspensionRestLength,
-            maxSuspensionTravel,
             object: wheel,
         });
     }
@@ -162,14 +179,17 @@ export async function loadVehicleModel(
     const localMax = vehicleGroup.worldToLocal(bodyBbox.max.clone());
 
     let minTireBottom = Infinity;
+    let minHubY = Infinity;
     for (const wrapper of wheelWrappers) {
+        minHubY = Math.min(minHubY, wrapper.position.y);
         minTireBottom = Math.min(minTireBottom, wrapper.position.y - wheelRadius);
     }
 
     const boxTop = localMax.y;
-    let boxBottom = localMin.y;
-    if (opts.chassisClearance != null) {
-        boxBottom = minTireBottom + opts.chassisClearance * scale;
+    // 默认盒底罩到轮心，弹簧压死后由盒子托住，避免只靠轮网格撑地
+    let boxBottom = Math.min(localMin.y, minHubY);
+    if (opts.chassis?.clearance != null) {
+        boxBottom = minTireBottom + opts.chassis.clearance * scale;
         boxBottom = Math.max(boxBottom, minTireBottom);
     }
     if (boxBottom > boxTop - MIN_BOX_HEIGHT) boxBottom = boxTop - MIN_BOX_HEIGHT;
@@ -180,7 +200,15 @@ export async function loadVehicleModel(
         vehicleGroup.updateMatrixWorld(true);
     }
 
-    // 硬点用模型轮心，接地时悬挂长度≈0，由弹簧预载撑车
+    // 硬点用模型轮心。静止长度不传时按轮直径 × 0.2，且不低于静载下沉。
+    const stiffness = sus.stiffness ?? DEFAULT_WHEEL_PHYSICS.suspensionStiffness;
+    const staticSag = 9.81 * scale / (4 * Math.max(1e-4, stiffness));
+    const restLengthOpt = sus.restLength;
+    // 传入值按 scale 1 的米；未传时轮半径已含 scale，不再乘
+    const restFromOptOrWheel = restLengthOpt != null ? restLengthOpt * scale : wheelRadius * 2 * 0.2;
+    const suspensionRestLength = Math.max(restFromOptOrWheel, staticSag * 1.2);
+    const maxSuspensionTravel = sus.maxTravel ?? DEFAULT_MAX_SUSPENSION_TRAVEL;
+    const rollInfluence = sus.rollInfluence ?? DEFAULT_WHEEL_PHYSICS.rollInfluence;
     for (let i = 0; i < wheelsInfo.length; i++) {
         wheelsInfo[i].position = wheelWrappers[i].position.clone();
         wheelsInfo[i].suspensionRestLength = suspensionRestLength;
@@ -216,8 +244,8 @@ export async function loadVehicleModel(
         position: spawnPosition,
         mass,
         halfExtents,
-        linearDamping: vehicleParams.chassis.linearDamping,
-        angularDamping: vehicleParams.chassis.angularDamping,
+        linearDamping,
+        angularDamping,
         gravityScale: scale,
     });
 
@@ -226,19 +254,19 @@ export async function loadVehicleModel(
         new THREE.BoxGeometry(halfExtents.x * 2, halfExtents.y * 2, halfExtents.z * 2),
         new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.3 }),
     );
-    if (vehicleParams.debug.showPhysicsBox) vehicleGroup.add(physicsBoxMesh);
+    if (debug.showPhysicsBox) vehicleGroup.add(physicsBoxMesh);
 
     vehicleGroup.position.copy(spawnPosition);
     vehicleGroup.updateMatrixWorld(true);
 
-    const sus = vehicleParams.suspension;
     const wheelPhysics = {
-        suspensionStiffness: opts.suspensionStiffness ?? sus.stiffness,
-        suspensionCompression: opts.suspensionCompression ?? sus.compression,
-        suspensionRelaxation: opts.suspensionRelaxation ?? sus.relaxation,
-        maxSuspensionForce: opts.maxSuspensionForce ?? sus.maxForce,
-        frictionSlip: opts.frictionSlip ?? sus.frictionSlip,
-        sideFrictionStiffness: opts.sideFrictionStiffness ?? sus.sideFrictionStiffness,
+        suspensionStiffness: sus.stiffness ?? DEFAULT_WHEEL_PHYSICS.suspensionStiffness,
+        suspensionCompression: sus.compression ?? DEFAULT_WHEEL_PHYSICS.suspensionCompression,
+        suspensionRelaxation: sus.relaxation ?? DEFAULT_WHEEL_PHYSICS.suspensionRelaxation,
+        maxSuspensionForce: sus.maxForce ?? DEFAULT_WHEEL_PHYSICS.maxSuspensionForce,
+        frictionSlip: sus.frictionSlip ?? DEFAULT_WHEEL_PHYSICS.frictionSlip,
+        sideFrictionStiffness: sus.sideFrictionStiffness ?? DEFAULT_WHEEL_PHYSICS.sideFrictionStiffness,
+        rollInfluence,
     };
 
     const { vehicle, updateWheelVisuals, destroy } = createVehicleController(
@@ -255,20 +283,18 @@ export async function loadVehicleModel(
         updateWheelVisuals,
         destroyVehicleController: destroy,
         scale,
-        modelScale,
         driverSeatPosition: opts.driverSeatPosition.clone(),
         driverSeatRotation: opts.driverSeatRotation ?? 0,
         forwardLocal,
-        chassisClearance: opts.chassisClearance,
-        suspensionRestLengthRatio,
-        suspensionTravelRatio,
+        sideFrictionStiffness: wheelPhysics.sideFrictionStiffness,
+        steering,
+        grip,
         size: { l: Math.max(bodySize.x, bodySize.z), w: Math.min(bodySize.x, bodySize.z), h: bodySize.y },
         halfExtents,
-        density,
         maxSpeed,
         acceleration,
         deceleration,
-        followVehicleDirection: opts.followVehicleDirection ?? true,
+        followVehicleDirection,
         physicsBoxMesh,
     };
 }

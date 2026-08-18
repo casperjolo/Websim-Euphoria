@@ -45,6 +45,51 @@ const VEHICLE_SPAWNS = [
     new Vector3(-1, 0, 11),
 ];
 
+// 车辆调参（加载与 GUI 共用）
+const VEHICLE_TUNING = {
+    followVehicleDirection: true,
+    debug: { showPhysicsBox: false },
+    chassis: {
+        density: 1,
+        linearDamping: 0.05,
+        angularDamping: 0.5,
+        clearance: 0.55,
+    },
+    suspension: {
+        restLength: 0.25,
+        maxTravel: 0.2,
+        stiffness: 18,
+        compression: 2.1,
+        relaxation: 2.5,
+        maxForce: 6000,
+        frictionSlip: 8,
+        sideFrictionStiffness: 1,
+        rollInfluence: 0.12,
+    },
+    steering: {
+        maxSteerAngle: Math.PI / 5,
+        steerTime: 0.45,
+        steerReturnTimeSlow: 0.55,
+        steerReturnTimeFast: 0.4,
+        highSpeedSteerScale: 0.5,
+    },
+    grip: {
+        maxG: 1.2,
+        sideFrictionIdle: 1,
+        sideFrictionFrontMin: 0.55,
+        sideFrictionRearMin: 0.45,
+        handbrakeRearFriction: 0.35,
+        handbrakeRearDriveScale: 0.65,
+        handbrakeReleaseTime: 0.15,
+        wheelbaseRatio: 0.55,
+    },
+    power: {
+        maxSpeed: 100,
+        acceleration: 8,
+        deceleration: 8,
+    },
+};
+
 // 半埋障碍带
 const OBSTACLE_X0 = -9;
 const OBSTACLE_COUNT = 6;
@@ -195,6 +240,7 @@ async function init() {
         maxCamDistance: 300,
         camLookAtHeightRatio: 0.5,
         enableSpringCamera: true,
+        springCameraTime: 0.1,
         playerModelConfig: {
             model: playerGltf.scene,
             animations: playerGltf.animations,
@@ -617,20 +663,14 @@ async function spawnShowcaseVehicles(gltfLoader) {
             wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
             driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
             driverSeatRotation: -Math.PI / 2,
-            chassisClearance: 1,
-            suspensionRestLengthRatio: 0.2,
-            suspensionTravelRatio: 0.3,
-            suspensionStiffness: 250,
-            suspensionCompression: 6,
-            suspensionRelaxation: 6,
-            maxSuspensionForce: 10000,
-            frictionSlip: 20,
-            sideFrictionStiffness: 2,
-            followVehicleDirection: true,
-            density: 1,
-            maxSpeed: 100,
-            acceleration: 8,
-            deceleration: 30,
+            modelRotation: -Math.PI / 2,
+            followVehicleDirection: VEHICLE_TUNING.followVehicleDirection,
+            debug: VEHICLE_TUNING.debug,
+            chassis: VEHICLE_TUNING.chassis,
+            suspension: VEHICLE_TUNING.suspension,
+            steering: VEHICLE_TUNING.steering,
+            grip: VEHICLE_TUNING.grip,
+            power: VEHICLE_TUNING.power,
         });
 
         const vehicle = player.getAllVehicles().at(-1);
@@ -842,12 +882,56 @@ function enableModelShadows(root) {
     });
 }
 
+// 将调参写回场上全部车辆
+function applyVehicleTuning() {
+    const t = VEHICLE_TUNING;
+    const vehicles = player?.getAllVehicles?.() ?? [];
+    for (const v of vehicles) {
+        const he = v.halfExtents;
+        const volume = 8 * he.x * he.y * he.z;
+        v.chassisBody.setMass(volume * Math.max(1e-8, t.chassis.density));
+        v.chassisBody.linearDamping = t.chassis.linearDamping;
+        v.chassisBody.angularDamping = t.chassis.angularDamping;
+
+        Object.assign(v.steering, t.steering);
+        Object.assign(v.grip, t.grip);
+        v.maxSpeed = t.power.maxSpeed * v.scale;
+        v.acceleration = t.power.acceleration * v.scale;
+        v.deceleration = t.power.deceleration * v.scale;
+        v.followVehicleDirection = t.followVehicleDirection;
+
+        const sus = t.suspension;
+        const staticSag = 9.81 * v.scale / (4 * Math.max(1e-4, sus.stiffness));
+        const rest = Math.max(sus.restLength * v.scale, staticSag * 1.2);
+        v.sideFrictionStiffness = sus.sideFrictionStiffness;
+
+        const n = v.vehicleController.numWheels();
+        for (let i = 0; i < n; i++) {
+            v.vehicleController.setWheelSuspensionRestLength(i, rest);
+            v.vehicleController.setWheelMaxSuspensionTravel(i, sus.maxTravel);
+            v.vehicleController.setWheelSuspensionStiffness(i, sus.stiffness);
+            v.vehicleController.setWheelSuspensionCompression(i, sus.compression);
+            v.vehicleController.setWheelSuspensionRelaxation(i, sus.relaxation);
+            v.vehicleController.setWheelMaxSuspensionForce(i, sus.maxForce);
+            v.vehicleController.setWheelFrictionSlip(i, sus.frictionSlip);
+            v.vehicleController.setWheelSideFrictionStiffness(i, sus.sideFrictionStiffness);
+            v.vehicleController.setWheelRollInfluence(i, sus.rollInfluence);
+        }
+
+        if (v.physicsBoxMesh) {
+            if (t.debug.showPhysicsBox) v.vehicleGroup.add(v.physicsBoxMesh);
+            else v.vehicleGroup.remove(v.physicsBoxMesh);
+        }
+    }
+}
+
 // 创建调试面板
 function createDebugPanel() {
     const params = {
         colliderDebug: false,
         playerCapsuleDebug: false,
         footIKEnabled: true,
+        maxSteerDeg: VEHICLE_TUNING.steering.maxSteerAngle * 180 / Math.PI,
         resetVehicle() {
             player?.resetVehicle();
         },
@@ -856,25 +940,83 @@ function createDebugPanel() {
         },
     };
 
-    gui = new GUI({ title: "Debug", width: 260 });
-    gui.domElement.style.position = "fixed";
-    gui.domElement.style.top = "12px";
-    gui.domElement.style.right = "12px";
+    gui = new GUI({ title: "调试", width: 300 });
+    Object.assign(gui.domElement.style, {
+        position: "fixed",
+        top: "12px",
+        right: "12px",
+        maxHeight: "calc(100vh - 24px)",
+        overflowY: "auto",
+    });
     gui.domElement.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-    const sceneFolder = gui.addFolder("Scene");
-    sceneFolder.add(params, "colliderDebug").name("Collider Debug").onChange((value) => {
+    const sceneFolder = gui.addFolder("场景");
+    sceneFolder.add(params, "colliderDebug").name("碰撞体调试").onChange((value) => {
         player?.setColliderDebug(value);
     });
-    sceneFolder.add(params, "playerCapsuleDebug").name("Player Capsule").onChange((value) => {
+    sceneFolder.add(params, "playerCapsuleDebug").name("角色胶囊").onChange((value) => {
         player?.setPlayerCapsuleDebug?.(value);
     });
-    sceneFolder.add(params, "footIKEnabled").name("Foot IK").onChange((value) => {
+    sceneFolder.add(params, "footIKEnabled").name("脚部 IK").onChange((value) => {
         footIK?.setEnabled(value);
     });
-    sceneFolder.add(params, "resetVehicle").name("Reset Vehicle");
-    sceneFolder.add(params, "clearSpheres").name("Clear Spheres");
+    sceneFolder.add(params, "resetVehicle").name("翻正车辆");
+    sceneFolder.add(params, "clearSpheres").name("清除动态球");
     sceneFolder.open();
+
+    const t = VEHICLE_TUNING;
+    const vehicleFolder = gui.addFolder("车辆");
+
+    vehicleFolder.add(t, "followVehicleDirection").name("镜头跟随车头").onChange(applyVehicleTuning);
+    vehicleFolder.add(t.debug, "showPhysicsBox").name("显示物理盒").onChange(applyVehicleTuning);
+
+    const chassisFolder = vehicleFolder.addFolder("底盘");
+    chassisFolder.add(t.chassis, "density", 0.1, 10, 0.05).name("密度").onChange(applyVehicleTuning);
+    chassisFolder.add(t.chassis, "linearDamping", 0, 2, 0.01).name("线阻尼").onChange(applyVehicleTuning);
+    chassisFolder.add(t.chassis, "angularDamping", 0, 5, 0.01).name("角阻尼").onChange(applyVehicleTuning);
+    chassisFolder.open();
+
+    const susFolder = vehicleFolder.addFolder("悬挂");
+    susFolder.add(t.suspension, "restLength", 0.05, 2, 0.01).name("静止长度").onChange(applyVehicleTuning);
+    susFolder.add(t.suspension, "maxTravel", 0.05, 10, 0.05).name("最大行程").onChange(applyVehicleTuning);
+    susFolder.add(t.suspension, "stiffness", 0.1, 50, 0.01).name("刚度").onChange(applyVehicleTuning);
+    susFolder.add(t.suspension, "compression", 0, 8, 0.01).name("压缩阻尼").onChange(applyVehicleTuning);
+    susFolder.add(t.suspension, "relaxation", 0, 8, 0.01).name("回弹阻尼").onChange(applyVehicleTuning);
+    susFolder.add(t.suspension, "maxForce", 100, 50000, 100).name("最大悬挂力").onChange(applyVehicleTuning);
+    susFolder.add(t.suspension, "frictionSlip", 0.1, 50, 0.1).name("纵向抓地").onChange(applyVehicleTuning);
+    susFolder.add(t.suspension, "sideFrictionStiffness", 0, 5, 0.01).name("侧向摩擦刚度").onChange(applyVehicleTuning);
+    susFolder.add(t.suspension, "rollInfluence", 0, 1, 0.01).name("侧倾影响").onChange(applyVehicleTuning);
+    susFolder.open();
+
+    const steerFolder = vehicleFolder.addFolder("转向");
+    steerFolder.add(params, "maxSteerDeg", 5, 60, 0.5).name("最大转向角").onChange((deg) => {
+        t.steering.maxSteerAngle = deg * Math.PI / 180;
+        applyVehicleTuning();
+    });
+    steerFolder.add(t.steering, "steerTime", 0.05, 3, 0.05).name("打满舵时间").onChange(applyVehicleTuning);
+    steerFolder.add(t.steering, "steerReturnTimeSlow", 0.05, 3, 0.05).name("低速回正时间").onChange(applyVehicleTuning);
+    steerFolder.add(t.steering, "steerReturnTimeFast", 0.05, 3, 0.05).name("高速回正时间").onChange(applyVehicleTuning);
+    steerFolder.add(t.steering, "highSpeedSteerScale", 0.15, 1, 0.01).name("高速转角比例").onChange(applyVehicleTuning);
+    steerFolder.open();
+
+    const gripFolder = vehicleFolder.addFolder("抓地");
+    gripFolder.add(t.grip, "maxG", 0.1, 3, 0.05).name("侧向加速度上限").onChange(applyVehicleTuning);
+    gripFolder.add(t.grip, "sideFrictionIdle", 0, 2, 0.01).name("直线侧向摩擦").onChange(applyVehicleTuning);
+    gripFolder.add(t.grip, "sideFrictionFrontMin", 0, 2, 0.01).name("前轮摩擦下限").onChange(applyVehicleTuning);
+    gripFolder.add(t.grip, "sideFrictionRearMin", 0, 2, 0.01).name("后轮摩擦下限").onChange(applyVehicleTuning);
+    gripFolder.add(t.grip, "handbrakeRearFriction", 0, 2, 0.01).name("手刹后轮摩擦").onChange(applyVehicleTuning);
+    gripFolder.add(t.grip, "handbrakeRearDriveScale", 0, 1, 0.01).name("手刹后驱比例").onChange(applyVehicleTuning);
+    gripFolder.add(t.grip, "handbrakeReleaseTime", 0.01, 1, 0.01).name("松手刹时间").onChange(applyVehicleTuning);
+    gripFolder.add(t.grip, "wheelbaseRatio", 0.2, 1, 0.01).name("轴距比例").onChange(applyVehicleTuning);
+    gripFolder.open();
+
+    const powerFolder = vehicleFolder.addFolder("动力");
+    powerFolder.add(t.power, "maxSpeed", 10, 400, 1).name("最高速度").onChange(applyVehicleTuning);
+    powerFolder.add(t.power, "acceleration", 0.5, 40, 0.1).name("加速度").onChange(applyVehicleTuning);
+    powerFolder.add(t.power, "deceleration", 0.5, 80, 0.1).name("制动减速度").onChange(applyVehicleTuning);
+    powerFolder.open();
+
+    vehicleFolder.open();
 }
 
 // 窗口尺寸变化

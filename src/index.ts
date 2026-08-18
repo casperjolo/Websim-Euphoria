@@ -16,6 +16,11 @@ export type {
     VehicleInstance,
     VehicleModelSource,
     VehicleOptions,
+    VehicleChassisOptions,
+    VehicleSuspensionOptions,
+    VehicleSteeringOptions,
+    VehicleGripOptions,
+    VehiclePowerOptions,
     KinematicColliderEntry,
 } from "./types";
 export type { PlayerPlugin } from "./plugins/types";
