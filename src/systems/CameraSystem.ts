@@ -65,7 +65,8 @@ export class CameraSystem {
         }
         const capsuleInfo = this.ctrl.playerCapsule.capsuleInfo;
         const r = capsuleInfo.radius;
-        const totalH = -capsuleInfo.segment.end.y + 2 * r;
+        const sy = this.ctrl.playerCapsule.scale.y || 1;
+        const totalH = (-capsuleInfo.segment.end.y) * sy + 2 * r;
         const y = this.ctrl.playerCapsule.position.y + r - totalH * (1 - this.lookAtHeightRatio);
         return this.lookAtPoint.copy(this.ctrl.playerCapsule.position).setY(y);
     }
