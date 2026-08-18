@@ -186,7 +186,6 @@ async function initPlayer() {
         animations: vehicleGltf.animations,
         scale: 1,
         wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-        chassisRatio: 0.35,
         suspensionRestLengthRatio: 0.2,
         mass: 1500,
         maxSpeed: 300,

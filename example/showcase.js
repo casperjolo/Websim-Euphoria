@@ -41,8 +41,8 @@ const DECK_THICK = 0.12;
 
 // 车辆停放
 const VEHICLE_SPAWNS = [
-    new Vector3(-1, 0.4, -11),
-    new Vector3(-1, 0.4, 11),
+    new Vector3(-1, 0, -11),
+    new Vector3(-1, 0, 11),
 ];
 
 // 半埋障碍带
@@ -615,14 +615,22 @@ async function spawnShowcaseVehicles(gltfLoader) {
             scale: 0.5,
             position: spawnPos.clone(),
             wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-            chassisRatio: 0.5,
+            driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
+            driverSeatRotation: -Math.PI / 2,
+            chassisClearance: 1,
             suspensionRestLengthRatio: 0.2,
+            suspensionTravelRatio: 0.3,
+            suspensionStiffness: 250,
+            suspensionCompression: 6,
+            suspensionRelaxation: 6,
+            maxSuspensionForce: 10000,
+            frictionSlip: 20,
+            sideFrictionStiffness: 2,
+            followVehicleDirection: true,
             mass: 1500,
             maxSpeed: 100,
             acceleration: 8,
             deceleration: 30,
-            driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
-            driverSeatRotation: -Math.PI / 2,
         });
 
         const vehicle = player.getAllVehicles().at(-1);

@@ -199,7 +199,7 @@ export type VehicleModelSource = LoadedVehicleModelSource | LegacyVehicleModelSo
 
 /** 车辆模型、物理和驾驶参数。 */
 export type VehicleOptions = VehicleModelSource & {
-    /** 车辆初始世界坐标。 */
+    /** 车辆初始世界坐标；y 为最低轮底对齐高度。 */
     position: THREE.Vector3;
     /** 车轮节点名，顺序为左前、右前、左后、右后。 */
     wheelsNames: string[];
@@ -209,8 +209,8 @@ export type VehicleOptions = VehicleModelSource & {
     driverSeatPosition: THREE.Vector3;
     /** 驾驶位相对车辆底盘局部的水平旋转（弧度），默认 0。 */
     driverSeatRotation?: number;
-    /** 底盘高度比例（相对轮直径，从整车包围盒高度中扣除），默认 0.2。 */
-    chassisRatio?: number;
+    /** 盒底相对轮胎触地点的高度（随 scale 缩放）；不传则盒底用车身包围盒底。 */
+    chassisClearance?: number;
     /** 悬挂静止长度比例（相对轮直径），默认 0.2。 */
     suspensionRestLengthRatio?: number;
     /** 悬挂最大行程比例（相对轮直径），默认 0.3。 */
@@ -261,8 +261,8 @@ export type VehicleInstance = {
     driverSeatRotation: number;
     /** 由前后轮中心推算的车辆底盘本地前向。 */
     forwardLocal: THREE.Vector3;
-    /** 底盘高度比例。 */
-    chassisRatio: number;
+    /** 盒底相对轮胎触地点的高度；未设置时为车身包围盒底。 */
+    chassisClearance?: number;
     /** 悬挂静止长度比例。 */
     suspensionRestLengthRatio: number;
     /** 悬挂最大行程比例。 */

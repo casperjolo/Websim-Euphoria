@@ -28,6 +28,8 @@ export type VehicleLoaderContext = {
     vehicleLength: number;
 };
 
+const MIN_BOX_HEIGHT = 1e-3;
+
 // ==================== 主函数 ====================
 
 // 加载车辆模型
@@ -38,7 +40,6 @@ export async function loadVehicleModel(
     const { loader, scene, vehicleParams, vehicleLength } = ctx;
 
     const scale = opts.scale ?? 1;
-    const chassisRatio = opts.chassisRatio ?? 0.2;
     const suspensionRestLengthRatio = opts.suspensionRestLengthRatio ?? 0.2;
     const suspensionTravelRatio = opts.suspensionTravelRatio ?? vehicleParams.suspension.travelRatio ?? 0.3;
     const mass = (opts.mass ?? vehicleParams.chassis.mass) * scale;
@@ -75,13 +76,13 @@ export async function loadVehicleModel(
     scene.add(tempGroup);
     model.scale.multiplyScalar(modelScale * scale);
     model.rotateY(vehicleParams.model.rotation);
-    const { size, center } = getBbox(model);
+    const { center } = getBbox(model);
     model.position.set(-center.x, -center.y, -center.z);
     tempGroup.add(model);
     tempGroup.updateMatrixWorld(true);
 
     // 收集轮子世界变换信息
-    let wheelRadius = 0, suspensionRestLength = 0, maxSuspensionTravel = 0, chassisHeight = 0, wheelSizeInit = false;
+    let wheelRadius = 0, suspensionRestLength = 0, maxSuspensionTravel = 0, wheelSizeInit = false;
     const wheelsInfo: any[] = [];
 
     for (const wheel of wheelObjects) {
@@ -98,7 +99,6 @@ export async function loadVehicleModel(
             wheelRadius = Math.max(ws.x, ws.y, ws.z) / 2;
             suspensionRestLength = wheelRadius * 2 * suspensionRestLengthRatio;
             maxSuspensionTravel = wheelRadius * 2 * suspensionTravelRatio;
-            chassisHeight = wheelRadius * 2 * chassisRatio;
             wheelSizeInit = true;
         }
 
@@ -146,6 +146,48 @@ export async function loadVehicleModel(
         wheelWrappers.push(wheelWrapper);
     }
 
+    const shiftContent = (offset: THREE.Vector3) => {
+        model.position.sub(offset);
+        for (const wrapper of wheelWrappers) wrapper.position.sub(offset);
+    };
+
+    // 拆轮后按车身包围盒重定原点，物理盒不含轮胎
+    vehicleGroup.updateMatrixWorld(true);
+    const { center: bodyCenter, size: bodySize } = getBbox(model);
+    shiftContent(vehicleGroup.worldToLocal(bodyCenter.clone()));
+    vehicleGroup.updateMatrixWorld(true);
+
+    const { bbox: bodyBbox } = getBbox(model);
+    const localMin = vehicleGroup.worldToLocal(bodyBbox.min.clone());
+    const localMax = vehicleGroup.worldToLocal(bodyBbox.max.clone());
+
+    let minTireBottom = Infinity;
+    for (const wrapper of wheelWrappers) {
+        minTireBottom = Math.min(minTireBottom, wrapper.position.y - wheelRadius);
+    }
+
+    const boxTop = localMax.y;
+    let boxBottom = localMin.y;
+    if (opts.chassisClearance != null) {
+        boxBottom = minTireBottom + opts.chassisClearance * scale;
+        boxBottom = Math.max(boxBottom, minTireBottom);
+    }
+    if (boxBottom > boxTop - MIN_BOX_HEIGHT) boxBottom = boxTop - MIN_BOX_HEIGHT;
+
+    const boxCenterY = (boxTop + boxBottom) * 0.5;
+    if (Math.abs(boxCenterY) > 1e-8) {
+        shiftContent(new THREE.Vector3(0, boxCenterY, 0));
+        vehicleGroup.updateMatrixWorld(true);
+    }
+
+    // 硬点用模型轮心，接地时悬挂长度≈0，由弹簧预载撑车
+    for (let i = 0; i < wheelsInfo.length; i++) {
+        wheelsInfo[i].position = wheelWrappers[i].position.clone();
+        wheelsInfo[i].suspensionRestLength = suspensionRestLength;
+        wheelsInfo[i].maxSuspensionTravel = maxSuspensionTravel;
+        wheelsInfo[i].radius = wheelRadius;
+    }
+
     // 按左前、右前、左后、右后轮中心推算车辆前向
     const frontCenter = wheelWrappers[0].position.clone().add(wheelWrappers[1].position).multiplyScalar(0.5);
     const rearCenter = wheelWrappers[2].position.clone().add(wheelWrappers[3].position).multiplyScalar(0.5);
@@ -154,15 +196,22 @@ export async function loadVehicleModel(
     if (forwardLocal.lengthSq() < 1e-8) forwardLocal.set(1, 0, 0);
     else forwardLocal.normalize();
 
-    // 创建车身物理碰撞体：整车包围盒按 chassisRatio 从高度扣一层，车身网格同步下移
-    const halfExtents = size.clone().multiplyScalar(0.5);
-    halfExtents.y = halfExtents.y - chassisHeight / 2;
-    model.position.y -= chassisHeight / 2;
-    halfExtents.x *= 0.95;
-    halfExtents.z *= 0.95;
+    const halfExtents = new THREE.Vector3(
+        bodySize.x * 0.5 * 0.95,
+        (boxTop - boxBottom) * 0.5,
+        bodySize.z * 0.5 * 0.95,
+    );
+
+    // position.y 对齐最低轮底
+    minTireBottom = Infinity;
+    for (const wrapper of wheelWrappers) {
+        minTireBottom = Math.min(minTireBottom, wrapper.position.y - wheelRadius);
+    }
+    const spawnPosition = opts.position.clone();
+    spawnPosition.y -= minTireBottom;
 
     const chassisBody = new VehicleRigidBody({
-        position: opts.position,
+        position: spawnPosition,
         mass,
         halfExtents,
         linearDamping: vehicleParams.chassis.linearDamping,
@@ -177,7 +226,7 @@ export async function loadVehicleModel(
     );
     if (vehicleParams.debug.showPhysicsBox) vehicleGroup.add(physicsBoxMesh);
 
-    vehicleGroup.position.copy(opts.position);
+    vehicleGroup.position.copy(spawnPosition);
     vehicleGroup.updateMatrixWorld(true);
 
     const sus = vehicleParams.suspension;
@@ -208,10 +257,10 @@ export async function loadVehicleModel(
         driverSeatPosition: opts.driverSeatPosition.clone(),
         driverSeatRotation: opts.driverSeatRotation ?? 0,
         forwardLocal,
-        chassisRatio,
+        chassisClearance: opts.chassisClearance,
         suspensionRestLengthRatio,
         suspensionTravelRatio,
-        size: { l: Math.max(size.x, size.z), w: Math.min(size.x, size.z), h: size.y },
+        size: { l: Math.max(bodySize.x, bodySize.z), w: Math.min(bodySize.x, bodySize.z), h: bodySize.y },
         halfExtents,
         mass,
         maxSpeed,
