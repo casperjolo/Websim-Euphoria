@@ -15,7 +15,7 @@ export class VehicleSystem {
     vehicleLength = 6; // 车辆模型归一化后的最大边长度
     params = {
         debug: { showPhysicsBox: false }, // 调试显示
-        chassis: { mass: 1500, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
+        chassis: { density: 1, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
         power: { acceleration: 8, deceleration: 8, maxSpeed: 300 }, // 动力参数
         steering: { maxSteerAngle: Math.PI / 4, steerTime: 1, steerReturnTimeSlow: 0.8, steerReturnTimeFast: 0.6 }, // 转向参数：打满/低速回正/高速回正（秒）

@@ -157,7 +157,7 @@ const VEHICLE_CONFIG = {
     scale: 0.1,
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
     suspensionRestLengthRatio: 0.2,
-    mass: 1500,
+    density: 1,
     maxSpeed: 200,
     acceleration: 8,
     deceleration: 30,

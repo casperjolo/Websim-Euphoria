@@ -229,8 +229,8 @@ export type VehicleOptions = VehicleModelSource & {
     sideFrictionStiffness?: number;
     /** 驾驶时镜头是否跟随车辆朝向，默认 true。 */
     followVehicleDirection?: boolean;
-    /** 车辆质量基准（kg，按 scale 缩放），默认 1500。 */
-    mass?: number;
+    /** 底盘密度，质量 = 碰撞盒体积 × 密度，默认 1。 */
+    density?: number;
     /** 最高速度基准（km/h，按 scale 缩放），默认 300。 */
     maxSpeed?: number;
     /** 加速度基准（m/s²，按 scale 缩放），默认 8。 */
@@ -275,8 +275,8 @@ export type VehicleInstance = {
     };
     /** 底盘碰撞盒半边长（底盘局部坐标）。 */
     halfExtents: THREE.Vector3;
-    /** 车辆质量（kg）。 */
-    mass: number;
+    /** 底盘密度。 */
+    density: number;
     /** 最高速度（km/h）。 */
     maxSpeed: number;
     /** 加速度（m/s²）。 */

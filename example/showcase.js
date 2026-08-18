@@ -627,7 +627,7 @@ async function spawnShowcaseVehicles(gltfLoader) {
             frictionSlip: 20,
             sideFrictionStiffness: 2,
             followVehicleDirection: true,
-            mass: 1500,
+            density: 1,
             maxSpeed: 100,
             acceleration: 8,
             deceleration: 30,

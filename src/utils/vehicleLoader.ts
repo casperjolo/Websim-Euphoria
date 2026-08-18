@@ -10,7 +10,7 @@ export type VehicleLoaderContext = {
     scene: THREE.Scene;
     vehicleParams: {
         debug: { showPhysicsBox: boolean };
-        chassis: { mass: number; linearDamping: number; angularDamping: number };
+        chassis: { density: number; linearDamping: number; angularDamping: number };
         model: { rotation: number };
         power: { acceleration: number; deceleration: number; maxSpeed: number };
         steering: { maxSteerAngle: number; steerTime: number; steerReturnTimeSlow: number; steerReturnTimeFast: number };
@@ -42,7 +42,7 @@ export async function loadVehicleModel(
     const scale = opts.scale ?? 1;
     const suspensionRestLengthRatio = opts.suspensionRestLengthRatio ?? 0.2;
     const suspensionTravelRatio = opts.suspensionTravelRatio ?? vehicleParams.suspension.travelRatio ?? 0.3;
-    const mass = (opts.mass ?? vehicleParams.chassis.mass) * scale;
+    const density = Math.max(1e-8, opts.density ?? vehicleParams.chassis.density);
     const maxSpeed = (opts.maxSpeed ?? vehicleParams.power.maxSpeed) * scale;
     const acceleration = (opts.acceleration ?? vehicleParams.power.acceleration) * scale;
     const deceleration = (opts.deceleration ?? vehicleParams.power.deceleration) * scale;
@@ -201,6 +201,8 @@ export async function loadVehicleModel(
         (boxTop - boxBottom) * 0.5,
         bodySize.z * 0.5 * 0.95,
     );
+    const volume = 8 * halfExtents.x * halfExtents.y * halfExtents.z;
+    const mass = volume * density;
 
     // position.y 对齐最低轮底
     minTireBottom = Infinity;
@@ -262,7 +264,7 @@ export async function loadVehicleModel(
         suspensionTravelRatio,
         size: { l: Math.max(bodySize.x, bodySize.z), w: Math.min(bodySize.x, bodySize.z), h: bodySize.y },
         halfExtents,
-        mass,
+        density,
         maxSpeed,
         acceleration,
         deceleration,
