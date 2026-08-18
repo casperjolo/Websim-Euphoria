@@ -269,7 +269,7 @@ export class BVHVehicleController {
         for (const wheel of this.wheels) {
             wheel.isInContact = false;
             wheel.contactMesh = null;
-            const rayLen = wheel.restLength + wheel.radius;
+            const rayLen = wheel.restLength + wheel.maxSuspensionTravel + wheel.radius;
             if (!colliders.length || rayLen <= 1e-6) {
                 this.setWheelAirborne(wheel);
                 continue;
@@ -304,7 +304,7 @@ export class BVHVehicleController {
 
             // 夹紧悬挂长度，并投影相对速度
             let suspensionLength = hit.distance - wheel.radius;
-            const minLen = wheel.restLength - wheel.maxSuspensionTravel;
+            const minLen = Math.max(0, wheel.restLength - wheel.maxSuspensionTravel);
             const maxLen = wheel.restLength + wheel.maxSuspensionTravel;
             wheel.suspensionLength = Math.min(maxLen, Math.max(minLen, suspensionLength));
 

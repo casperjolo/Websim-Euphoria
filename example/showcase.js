@@ -605,7 +605,7 @@ function spawnPropBodies() {
 
 // 加载展示车辆
 async function spawnShowcaseVehicles(gltfLoader) {
-    const gltf = await gltfLoader.loadAsync("./glb/sedan.glb");
+    const gltf = await gltfLoader.loadAsync("./glb/suv.glb");
     for (const spawnPos of VEHICLE_SPAWNS) {
         // 每辆车需要独立模型实例
         const model = gltf.scene.clone(true);

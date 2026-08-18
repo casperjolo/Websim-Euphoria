@@ -5,8 +5,32 @@ import type { VehicleRigidBody } from "./vehiclePhysics/VehicleRigidBody";
 export type WheelInfo = {
     axleCs: THREE.Vector3;
     suspensionRestLength: number;
+    maxSuspensionTravel: number;
     position: THREE.Vector3;
     radius: number;
+};
+
+/**
+ * 车轮悬挂与抓地参数（质量归一化刚度/阻尼）。
+ * stiffness / damping / friction 不随 scale 缩放。
+ */
+export type WheelPhysicsParams = {
+    suspensionStiffness: number;
+    suspensionCompression: number;
+    suspensionRelaxation: number;
+    maxSuspensionForce: number;
+    frictionSlip: number;
+    sideFrictionStiffness: number;
+};
+
+/** 悬挂与抓地默认值。 */
+export const DEFAULT_WHEEL_PHYSICS: WheelPhysicsParams = {
+    suspensionStiffness: 250,
+    suspensionCompression: 6,
+    suspensionRelaxation: 6,
+    maxSuspensionForce: 10000,
+    frictionSlip: 20,
+    sideFrictionStiffness: 2,
 };
 
 /** 创建 BVH 车辆控制器并同步轮子视觉。 */
@@ -14,6 +38,7 @@ export function createVehicleController(
     chassisBody: VehicleRigidBody,
     wheels: (THREE.Object3D | null)[],
     wheelsInfo: WheelInfo[],
+    physics: WheelPhysicsParams = DEFAULT_WHEEL_PHYSICS,
 ) {
     const vehicle = new BVHVehicleController(chassisBody);
     const suspensionDirection = new THREE.Vector3(0, -1, 0);
@@ -26,16 +51,16 @@ export function createVehicleController(
         vehicle.setWheelAxleCs(index, wheel.axleCs); // 轮轴方向
         vehicle.setWheelSuspensionRestLength(index, wheel.suspensionRestLength); // 静止长度
         vehicle.setWheelRadius(index, wheel.radius); // 轮胎半径
-        vehicle.setWheelMaxSuspensionTravel(index, wheel.suspensionRestLength); // 最大行程
-        vehicle.setWheelSuspensionStiffness(index, 250); // 悬挂刚度
-        vehicle.setWheelSuspensionCompression(index, 6); // 压缩阻尼
-        vehicle.setWheelSuspensionRelaxation(index, 6); // 回弹阻尼
-        vehicle.setWheelMaxSuspensionForce(index, 10000); // 最大作用力
+        vehicle.setWheelMaxSuspensionTravel(index, wheel.maxSuspensionTravel); // 最大行程
+        vehicle.setWheelSuspensionStiffness(index, physics.suspensionStiffness); // 悬挂刚度
+        vehicle.setWheelSuspensionCompression(index, physics.suspensionCompression); // 压缩阻尼
+        vehicle.setWheelSuspensionRelaxation(index, physics.suspensionRelaxation); // 回弹阻尼
+        vehicle.setWheelMaxSuspensionForce(index, physics.maxSuspensionForce); // 最大作用力
         vehicle.setWheelBrake(index, 0); // 制动
         vehicle.setWheelSteering(index, 0); // 转向角
         vehicle.setWheelEngineForce(index, 0); // 驱动力
-        vehicle.setWheelFrictionSlip(index, 20); // 纵向抓地
-        vehicle.setWheelSideFrictionStiffness(index, 2); // 侧向摩擦
+        vehicle.setWheelFrictionSlip(index, physics.frictionSlip); // 纵向抓地
+        vehicle.setWheelSideFrictionStiffness(index, physics.sideFrictionStiffness); // 侧向摩擦
     });
 
     const up = new THREE.Vector3(0, 1, 0);

@@ -14,6 +14,15 @@ export type VehicleLoaderContext = {
         model: { rotation: number };
         power: { acceleration: number; deceleration: number; maxSpeed: number };
         steering: { maxSteerAngle: number; steerTime: number; steerReturnTimeSlow: number; steerReturnTimeFast: number };
+        suspension: {
+            stiffness: number;
+            compression: number;
+            relaxation: number;
+            maxForce: number;
+            frictionSlip: number;
+            sideFrictionStiffness: number;
+            travelRatio: number;
+        };
         followVehicleDirection: boolean;
     };
     vehicleLength: number;
@@ -31,6 +40,7 @@ export async function loadVehicleModel(
     const scale = opts.scale ?? 1;
     const chassisRatio = opts.chassisRatio ?? 0.2;
     const suspensionRestLengthRatio = opts.suspensionRestLengthRatio ?? 0.2;
+    const suspensionTravelRatio = opts.suspensionTravelRatio ?? vehicleParams.suspension.travelRatio ?? 0.3;
     const mass = (opts.mass ?? vehicleParams.chassis.mass) * scale;
     const maxSpeed = (opts.maxSpeed ?? vehicleParams.power.maxSpeed) * scale;
     const acceleration = (opts.acceleration ?? vehicleParams.power.acceleration) * scale;
@@ -71,7 +81,7 @@ export async function loadVehicleModel(
     tempGroup.updateMatrixWorld(true);
 
     // 收集轮子世界变换信息
-    let wheelRadius = 0, suspensionRestLength = 0, chassisHeight = 0, wheelSizeInit = false;
+    let wheelRadius = 0, suspensionRestLength = 0, maxSuspensionTravel = 0, chassisHeight = 0, wheelSizeInit = false;
     const wheelsInfo: any[] = [];
 
     for (const wheel of wheelObjects) {
@@ -87,11 +97,21 @@ export async function loadVehicleModel(
             const { size: ws } = getBbox(wheel);
             wheelRadius = Math.max(ws.x, ws.y, ws.z) / 2;
             suspensionRestLength = wheelRadius * 2 * suspensionRestLengthRatio;
+            maxSuspensionTravel = wheelRadius * 2 * suspensionTravelRatio;
             chassisHeight = wheelRadius * 2 * chassisRatio;
             wheelSizeInit = true;
         }
 
-        wheelsInfo.push({ axleCs: new THREE.Vector3(0, 0, -1), position: worldPos, quaternion: worldQuat, scale: worldScale, radius: wheelRadius, suspensionRestLength, object: wheel });
+        wheelsInfo.push({
+            axleCs: new THREE.Vector3(0, 0, -1),
+            position: worldPos,
+            quaternion: worldQuat,
+            scale: worldScale,
+            radius: wheelRadius,
+            suspensionRestLength,
+            maxSuspensionTravel,
+            object: wheel,
+        });
     }
 
     tempGroup.remove(model);
@@ -134,7 +154,7 @@ export async function loadVehicleModel(
     if (forwardLocal.lengthSq() < 1e-8) forwardLocal.set(1, 0, 0);
     else forwardLocal.normalize();
 
-    // 创建车身物理碰撞体
+    // 创建车身物理碰撞体：整车包围盒按 chassisRatio 从高度扣一层，车身网格同步下移
     const halfExtents = size.clone().multiplyScalar(0.5);
     halfExtents.y = halfExtents.y - chassisHeight / 2;
     model.position.y -= chassisHeight / 2;
@@ -160,7 +180,22 @@ export async function loadVehicleModel(
     vehicleGroup.position.copy(opts.position);
     vehicleGroup.updateMatrixWorld(true);
 
-    const { vehicle, updateWheelVisuals, destroy } = createVehicleController(chassisBody, wheelWrappers, wheelsInfo);
+    const sus = vehicleParams.suspension;
+    const wheelPhysics = {
+        suspensionStiffness: opts.suspensionStiffness ?? sus.stiffness,
+        suspensionCompression: opts.suspensionCompression ?? sus.compression,
+        suspensionRelaxation: opts.suspensionRelaxation ?? sus.relaxation,
+        maxSuspensionForce: opts.maxSuspensionForce ?? sus.maxForce,
+        frictionSlip: opts.frictionSlip ?? sus.frictionSlip,
+        sideFrictionStiffness: opts.sideFrictionStiffness ?? sus.sideFrictionStiffness,
+    };
+
+    const { vehicle, updateWheelVisuals, destroy } = createVehicleController(
+        chassisBody,
+        wheelWrappers,
+        wheelsInfo,
+        wheelPhysics,
+    );
 
     return {
         vehicleGroup,
@@ -175,6 +210,7 @@ export async function loadVehicleModel(
         forwardLocal,
         chassisRatio,
         suspensionRestLengthRatio,
+        suspensionTravelRatio,
         size: { l: Math.max(size.x, size.z), w: Math.min(size.x, size.z), h: size.y },
         halfExtents,
         mass,

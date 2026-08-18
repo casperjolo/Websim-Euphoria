@@ -209,10 +209,24 @@ export type VehicleOptions = VehicleModelSource & {
     driverSeatPosition: THREE.Vector3;
     /** 驾驶位相对车辆底盘局部的水平旋转（弧度），默认 0。 */
     driverSeatRotation?: number;
-    /** 底盘高度比例，默认 0.2。 */
+    /** 底盘高度比例（相对轮直径，从整车包围盒高度中扣除），默认 0.2。 */
     chassisRatio?: number;
-    /** 悬挂静止长度比例，默认 0.2。 */
+    /** 悬挂静止长度比例（相对轮直径），默认 0.2。 */
     suspensionRestLengthRatio?: number;
+    /** 悬挂最大行程比例（相对轮直径），默认 0.3。 */
+    suspensionTravelRatio?: number;
+    /** 悬挂刚度，默认 250。 */
+    suspensionStiffness?: number;
+    /** 压缩阻尼，默认 6。 */
+    suspensionCompression?: number;
+    /** 回弹阻尼，默认 6。 */
+    suspensionRelaxation?: number;
+    /** 单轮最大悬挂力，默认 10000。 */
+    maxSuspensionForce?: number;
+    /** 纵向抓地系数，默认 20。 */
+    frictionSlip?: number;
+    /** 侧向摩擦刚度，默认 2。 */
+    sideFrictionStiffness?: number;
     /** 驾驶时镜头是否跟随车辆朝向，默认 true。 */
     followVehicleDirection?: boolean;
     /** 车辆质量基准（kg，按 scale 缩放），默认 1500。 */
@@ -251,6 +265,8 @@ export type VehicleInstance = {
     chassisRatio: number;
     /** 悬挂静止长度比例。 */
     suspensionRestLengthRatio: number;
+    /** 悬挂最大行程比例。 */
+    suspensionTravelRatio: number;
     /** 车辆尺寸（长、宽、高）。 */
     size: {
         l: number;

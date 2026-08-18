@@ -29,6 +29,15 @@ export class VehicleSystem {
             handbrakeReleaseTime: 0.15,
             wheelbaseRatio: 0.55,
         }, // 抓地预算
+        suspension: {
+            travelRatio: 0.3, 
+            stiffness: 250,
+            compression: 6,
+            relaxation: 6,
+            maxForce: 10000,
+            frictionSlip: 20,
+            sideFrictionStiffness: 2,
+        },
         followVehicleDirection: true, // 相机跟随方向
     };
 
@@ -445,7 +454,7 @@ export class VehicleSystem {
         for (let i = 0; i < wheelCount; i++) {
             v.vehicleController.setWheelEngineForce(i, 0);
             v.vehicleController.setWheelBrake(i, brake);
-            v.vehicleController.setWheelSideFrictionStiffness(i, 2);
+            v.vehicleController.setWheelSideFrictionStiffness(i, this.params.suspension.sideFrictionStiffness);
         }
     }
 
