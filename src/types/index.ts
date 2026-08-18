@@ -213,7 +213,7 @@ export type VehicleChassisOptions = {
 export type VehicleSuspensionOptions = {
     /** 静止长度（米，随 scale 缩放）；不传则取 max(轮直径 × 0.2, 静载下沉 × 1.2)。 */
     restLength?: number;
-    /** 最大行程（米），默认 0.35。 */
+    /** 最大行程（米，随 scale 缩放），默认 0.35。 */
     maxTravel?: number;
     /** 刚度（质量归一化），默认 18。 */
     stiffness?: number;

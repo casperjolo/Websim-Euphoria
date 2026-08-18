@@ -35,7 +35,7 @@ export const DEFAULT_WHEEL_PHYSICS: WheelPhysicsParams = {
     rollInfluence: 0.12,
 };
 
-/** 悬挂最大行程默认值（米）。 */
+/** 悬挂最大行程默认值（米，scale 1）。 */
 export const DEFAULT_MAX_SUSPENSION_TRAVEL = 0.35;
 
 /** 创建 BVH 车辆控制器并同步轮子视觉。 */

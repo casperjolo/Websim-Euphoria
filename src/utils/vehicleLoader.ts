@@ -207,7 +207,7 @@ export async function loadVehicleModel(
     // 传入值按 scale 1 的米；未传时轮半径已含 scale，不再乘
     const restFromOptOrWheel = restLengthOpt != null ? restLengthOpt * scale : wheelRadius * 2 * 0.2;
     const suspensionRestLength = Math.max(restFromOptOrWheel, staticSag * 1.2);
-    const maxSuspensionTravel = sus.maxTravel ?? DEFAULT_MAX_SUSPENSION_TRAVEL;
+    const maxSuspensionTravel = (sus.maxTravel ?? DEFAULT_MAX_SUSPENSION_TRAVEL) * scale;
     const rollInfluence = sus.rollInfluence ?? DEFAULT_WHEEL_PHYSICS.rollInfluence;
     for (let i = 0; i < wheelsInfo.length; i++) {
         wheelsInfo[i].position = wheelWrappers[i].position.clone();

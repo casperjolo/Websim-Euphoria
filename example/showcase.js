@@ -908,7 +908,7 @@ function applyVehicleTuning() {
         const n = v.vehicleController.numWheels();
         for (let i = 0; i < n; i++) {
             v.vehicleController.setWheelSuspensionRestLength(i, rest);
-            v.vehicleController.setWheelMaxSuspensionTravel(i, sus.maxTravel);
+            v.vehicleController.setWheelMaxSuspensionTravel(i, sus.maxTravel * v.scale);
             v.vehicleController.setWheelSuspensionStiffness(i, sus.stiffness);
             v.vehicleController.setWheelSuspensionCompression(i, sus.compression);
             v.vehicleController.setWheelSuspensionRelaxation(i, sus.relaxation);
