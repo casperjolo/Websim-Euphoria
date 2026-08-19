@@ -9,7 +9,7 @@ export type VehicleLoaderContext = {
     loader: GLTFLoader;
     scene: THREE.Scene;
     vehicleParams: {
-        debug: { showPhysicsBox: boolean };
+        debug: { showPhysicsBox: boolean; showWheelRays: boolean; showWheelTravel: boolean };
         chassis: { density: number; linearDamping: number; angularDamping: number };
         model: { rotation: number };
         power: { acceleration: number; deceleration: number; maxSpeed: number };
@@ -269,12 +269,16 @@ export async function loadVehicleModel(
         rollInfluence,
     };
 
-    const { vehicle, updateWheelVisuals, destroy } = createVehicleController(
+    const { vehicle, updateWheelVisuals, destroy, wheelRayDebug, wheelTravelDebug } = createVehicleController(
         chassisBody,
         wheelWrappers,
         wheelsInfo,
         wheelPhysics,
     );
+    vehicleGroup.add(wheelRayDebug);
+    vehicleGroup.add(wheelTravelDebug);
+    wheelRayDebug.visible = debug.showWheelRays;
+    wheelTravelDebug.visible = debug.showWheelTravel;
 
     return {
         vehicleGroup,
@@ -296,5 +300,7 @@ export async function loadVehicleModel(
         deceleration,
         followVehicleDirection,
         physicsBoxMesh,
+        wheelRayDebug,
+        wheelTravelDebug,
     };
 }

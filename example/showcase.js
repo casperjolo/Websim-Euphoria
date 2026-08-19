@@ -47,7 +47,7 @@ const VEHICLE_SPAWNS = [
 // 车辆调参（加载与 GUI 共用）
 const VEHICLE_TUNING = {
     followVehicleDirection: true,
-    debug: { showPhysicsBox: false },
+    debug: { showPhysicsBox: false, showWheelRays: false, showWheelTravel: false },
     chassis: {
         density: 1,
         linearDamping: 0.05,
@@ -1176,6 +1176,11 @@ function applyVehicleTuning() {
             else v.vehicleGroup.remove(v.physicsBoxMesh);
         }
     }
+    if (player?.vehicle?.params?.debug) {
+        player.vehicle.params.debug.showPhysicsBox = t.debug.showPhysicsBox;
+        player.vehicle.params.debug.showWheelRays = t.debug.showWheelRays;
+        player.vehicle.params.debug.showWheelTravel = t.debug.showWheelTravel;
+    }
 }
 
 // 创建调试面板
@@ -1226,6 +1231,8 @@ function createDebugPanel() {
 
     vehicleFolder.add(t, "followVehicleDirection").name("镜头跟随车头").onChange(applyVehicleTuning);
     vehicleFolder.add(t.debug, "showPhysicsBox").name("显示物理盒").onChange(applyVehicleTuning);
+    vehicleFolder.add(t.debug, "showWheelRays").name("车轮射线").onChange(applyVehicleTuning);
+    vehicleFolder.add(t.debug, "showWheelTravel").name("车轮行程").onChange(applyVehicleTuning);
 
     const chassisFolder = vehicleFolder.addFolder("底盘");
     chassisFolder.add(t.chassis, "density", 0.1, 10, 0.05).name("密度").onChange(applyVehicleTuning);

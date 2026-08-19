@@ -295,6 +295,10 @@ export type VehicleOptions = VehicleModelSource & {
     debug?: {
         /** 是否显示底盘物理盒，默认 false。 */
         showPhysicsBox?: boolean;
+        /** 是否显示车轮射线，默认 false。 */
+        showWheelRays?: boolean;
+        /** 是否显示车轮 Y 向活动范围，默认 false。 */
+        showWheelTravel?: boolean;
     };
     /** 底盘碰撞盒与阻尼。 */
     chassis?: VehicleChassisOptions;
@@ -367,6 +371,10 @@ export type VehicleInstance = {
     followVehicleDirection: boolean;
     /** 物理盒体调试网格。 */
     physicsBoxMesh?: THREE.Mesh;
+    /** 车轮射线调试。 */
+    wheelRayDebug?: THREE.Group;
+    /** 车轮 Y 向活动范围调试。 */
+    wheelTravelDebug?: THREE.Group;
     /** CollisionWorld 中底盘动态碰撞体 id。 */
     chassisColliderId?: number;
     /** CollisionWorld 中车模运动学网格 id。 */

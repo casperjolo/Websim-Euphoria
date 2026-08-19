@@ -15,7 +15,7 @@ export class VehicleSystem {
     meshSkipIds: number[] = []; // 全部车辆外观 collider id，网格查询时跳过
     vehicleLength = 6; // 车辆模型归一化后的最大边长度
     params = {
-        debug: { showPhysicsBox: false }, // 调试显示
+        debug: { showPhysicsBox: false, showWheelRays: false, showWheelTravel: false }, // 调试显示
         chassis: { density: 1, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
         power: { acceleration: 8, deceleration: 8, maxSpeed: 300 }, // 动力参数
@@ -409,6 +409,8 @@ export class VehicleSystem {
         const r = v.chassisBody.rotation();
         v.vehicleGroup.position.set(t.x, t.y, t.z);
         v.vehicleGroup.quaternion.set(r.x, r.y, r.z, r.w);
+        if (v.wheelRayDebug) v.wheelRayDebug.visible = this.params.debug.showWheelRays;
+        if (v.wheelTravelDebug) v.wheelTravelDebug.visible = this.params.debug.showWheelTravel;
         v.updateWheelVisuals?.(delta);
     }
 
