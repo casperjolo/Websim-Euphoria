@@ -6,7 +6,7 @@ import { effectiveMass } from "./VehicleMath";
 import type { VehicleRigidBody } from "./VehicleRigidBody";
 import { VehicleWheel } from "./VehicleWheel";
 
-const SIDE_CONTACT_DAMPING = 0.2; // 侧向速度阻尼
+const SIDE_DAMPING_RATE = 13; // 侧向速度阻尼率（1/s）
 const FWD_FACTOR = 0.5; // 摩擦椭圆纵向权重
 const SIDE_FACTOR = 1.0; // 摩擦椭圆侧向权重
 
@@ -402,7 +402,11 @@ export class BVHVehicleController {
                 this.chassis, wheel.contactPoint, wheel.sideWS,
                 this.r, this.gcross, this.local, this.world, this.invQuat,
             );
-            wheel.sideImpulse = -SIDE_CONTACT_DAMPING * sideSpeed * mass * wheel.sideFrictionStiffness;
+            const dampFactor = Math.min(
+                1,
+                (1 - Math.exp(-SIDE_DAMPING_RATE * dt)) * wheel.sideFrictionStiffness,
+            );
+            wheel.sideImpulse = -dampFactor * sideSpeed * mass;
         }
 
         // 驱动或制动纵向冲量，并检测摩擦椭圆

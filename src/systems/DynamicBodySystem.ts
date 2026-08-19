@@ -26,7 +26,8 @@ import { capsuleSphereOverlap, createCollisionTemps } from "../utils/capsuleColl
 import { VehicleCollision } from "../utils/vehiclePhysics/VehicleCollision";
 import { createObbObbTemps, resolveObbObb } from "../collision/ObbObb";
 
-const SUBSTEPS = 5; // 每帧物理子步
+const TARGET_SUB_DT = 1 / 1200; // 目标子步时长（秒）
+const MAX_SUBSTEPS = 20; // 单帧最多子步数
 const MAX_PUSH_RATIO = 2; // 单次位置修正不超过特征尺寸的倍数
 const MAX_SPEED_GRAVITY = 2; // 速度上限相对 |gravity| 的倍数
 /** 推动态体时用的人物质量。 */
@@ -223,8 +224,9 @@ export class DynamicBodySystem {
         for (const v of this.ctrl.vehicle.list) {
             if (v.meshColliderId != null) this.skipVehicleMeshes.push(v.meshColliderId);
         }
-        const sub = delta / SUBSTEPS;
-        for (let i = 0; i < SUBSTEPS; i++) this.stepSub(sub);
+        const substeps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(delta / TARGET_SUB_DT)));
+        const sub = delta / substeps;
+        for (let i = 0; i < substeps; i++) this.stepSub(sub);
         for (const body of this.list) this.applyKinematicCarry(body);
         for (const body of this.list) this.updateSleep(body, delta);
         for (const body of this.list) {
