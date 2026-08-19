@@ -8,21 +8,23 @@ import {
     CylinderGeometry,
     DirectionalLight,
     DoubleSide,
+    ExtrudeGeometry,
     Float32BufferAttribute,
     Group,
-    LatheGeometry,
+    Matrix4,
     Mesh,
     MeshStandardMaterial,
     PerspectiveCamera,
     PlaneGeometry,
+    Quaternion,
     RepeatWrapping,
     ShaderMaterial,
+    Shape,
     SphereGeometry,
     SRGBColorSpace,
     Scene,
     TextureLoader,
     VSMShadowMap,
-    Vector2,
     Vector3,
     WebGLRenderer,
 } from "three";
@@ -111,13 +113,13 @@ const KINE_SPIN_SPEED = 0.35;
 
 const MINI_SCALE = 0.1; // 小场景相对大场景的比例
 const PLAYER_SCALE_NORMAL = 0.005; // 大场景人物缩放
-const PLAYER_SCALE_MINI = PLAYER_SCALE_NORMAL * MINI_SCALE;
 const VEHICLE_SCALE_NORMAL = 0.5; // 大场景车辆缩放
-const VEHICLE_SCALE_MINI = VEHICLE_SCALE_NORMAL * MINI_SCALE;
-const SCALE_ANIM_DURATION = 1;
-const ZONE_EPS = 0.05; // 离开小场景判定的外扩余量
-// 圆形场地半径相对矩形平台长边的倍数
-const CIRCLE_RADIUS_SCALE = 1.5;
+// 梯形连接段长度：相对宽端开口宽度（宽矩形 / 收腰）
+const TRAP_WIDE_LEN_RATIO = 0.45;
+const TRAP_SLOPE_LEN_RATIO = 0.4;
+const SLOPE_DOMINO_COUNT = 10;
+// 收腰段：青通道 tint
+const TRAP_TINT_COLOR = 0x88c8e0;
 
 // 按比例生成场景布局
 function createShowcaseLayout(scale = 1) {
@@ -164,12 +166,10 @@ let gui;
 let stats;
 let kinematicPlatforms = [];
 let mainLayout;
-let miniScaleGate = null;
-let glowPortal = null;
-let zoneScale = 1; // 当前场景总缩放
-let isScaling = false;
-let scaleAnimFrame = null;
-const scaleGateWorldPos = new Vector3(); // 闸门判定用的世界坐标缓冲
+let trapScaleRange = null; // 收腰段：wideWestX 处 scale=1，westX 处 scale=0.1
+let glowPortals = [];
+let zoneScale = 1; // 当前场景总缩放（1 → MINI_SCALE）
+const scaleGateWorldPos = new Vector3(); // 缩放判定用的世界坐标缓冲
 
 init();
 
@@ -242,12 +242,12 @@ async function init() {
     const prototypeMat = await loadTiledMaterial("./textures/showcase/prototype.png");
     mainLayout = createShowcaseLayout(1);
     const miniLayout = createShowcaseLayout(MINI_SCALE);
-    // 矩形西墙全开，开口贴合南北墙外缘，与圆东侧相接
+    // 矩形西墙全开，开口贴合南北墙外缘，与梯形宽端相接
     const mainWestOpening = {
         zCenter: 0,
         width: mainLayout.platform.sizeZ + 2 * mainLayout.wallT,
     };
-    // 小场景南北墙外缘宽度：大圆西豁口 / 小矩形西墙 / 小圆东豁口共用
+    // 小场景南北墙外缘宽度：梯形窄端西口与小矩形东侧共用
     const miniOpening = {
         zCenter: 0,
         width: miniLayout.platform.sizeZ + 2 * miniLayout.wallT,
@@ -260,55 +260,33 @@ async function init() {
     world.add(mainWorld);
 
     const mainWestX = mainLayout.platform.x - mainLayout.platform.sizeX * 0.5;
-    const circleRadius = Math.max(mainLayout.platform.sizeX, mainLayout.platform.sizeZ) * CIRCLE_RADIUS_SCALE;
-    const circleCenter = {
-        x: mainWestX - chordOffset(circleRadius, mainWestOpening.width),
-        z: 0,
-    };
-    const circleWestX = circleCenter.x - chordOffset(circleRadius, miniOpening.width);
-
-    const circleWorld = buildCircularArena(prototypeMat, mainLayout, {
-        radius: circleRadius,
-        center: circleCenter,
-        eastGap: { angle: Math.PI * 0.5, width: mainWestOpening.width },
-        westGap: { angle: Math.PI * 1.5, width: miniOpening.width },
-    });
-    circleWorld.name = "CircleWorld";
-    world.add(circleWorld);
+    const trapLayout = createTrapezoidLayout(
+        mainWestX,
+        mainLayout.platform.sizeZ,
+        miniLayout.platform.sizeZ,
+    );
+    const trapWorld = buildTrapezoidArena(prototypeMat, mainLayout, trapLayout, miniLayout.wallH);
+    trapWorld.name = "TrapezoidWorld";
+    world.add(trapWorld);
+    trapScaleRange = { eastX: trapLayout.wideWestX, westX: trapLayout.westX };
 
     const miniWorld = buildShowcaseWorld(prototypeMat, miniLayout, {
         omitEast: true,
-        westGap: miniOpening,
     });
     miniWorld.name = "MiniWorld";
     const miniLocalEast = miniLayout.platform.x + miniLayout.platform.sizeX * 0.5;
-    // 小场景台面东缘对齐大圆西侧豁口弦；南北墙东端略伸入豁口与圆墙咬合
-    miniWorld.position.set(circleWestX - miniLocalEast, 0, 0);
-
-    const miniCircleRadius = Math.max(miniLayout.platform.sizeX, miniLayout.platform.sizeZ) * CIRCLE_RADIUS_SCALE;
-    const miniWestX = miniLayout.platform.x - miniLayout.platform.sizeX * 0.5;
-    const miniCircleCenter = {
-        x: miniWestX - chordOffset(miniCircleRadius, miniOpening.width),
-        z: 0,
-    };
-    const miniCircleWorld = buildCircularArena(prototypeMat, miniLayout, {
-        radius: miniCircleRadius,
-        center: miniCircleCenter,
-        eastGap: { angle: Math.PI * 0.5, width: miniOpening.width },
-    });
-    miniCircleWorld.name = "MiniCircleWorld";
-    miniWorld.add(miniCircleWorld);
+    // 小场景台面东缘对齐梯形窄端西口
+    miniWorld.position.set(trapLayout.westX - miniLocalEast, 0, 0);
     world.add(miniWorld);
     scene.add(world);
 
-    // 豁口发光门帘（大圆西侧，进入小场景处）
-    glowPortal = createGlowGapPortal(mainLayout, miniOpening, circleWestX);
-    scene.add(glowPortal);
-    miniScaleGate = createMiniScaleBounds(miniLayout, miniWorld.position, {
-        radius: miniCircleRadius,
-        center: miniCircleCenter,
-        wallT: miniLayout.wallT,
-    });
+    // 豁口发光门帘：宽矩形/收腰交界 + 梯形西口（进入小场景）
+    const slopeEastOpening = { zCenter: 0, width: trapLayout.halfWide * 2 };
+    glowPortals = [
+        createGlowGapPortal(mainLayout, slopeEastOpening, trapLayout.wideWestX),
+        createGlowGapPortal(miniLayout, miniOpening, trapLayout.westX),
+    ];
+    for (const portal of glowPortals) scene.add(portal);
 
     // 加载玩家模型
 
@@ -383,7 +361,12 @@ async function init() {
     await spawnShowcaseVehicles(gltfLoader);
     spawnVehiclePropBodies(prototypeMat);
     spawnLayoutPropBodies(prototypeMat, miniLayout, miniWorld.position);
-    createKinematicPlatforms(prototypeMat, mainLayout, scene);
+    spawnSlopeDominoes(prototypeMat, mainLayout, trapLayout, miniLayout.wallH);
+    createKinematicPlatforms(prototypeMat, mainLayout, scene, {
+        meetCenterX: trapLayout.eastX,
+        slopeMeetCenterX: trapLayout.wideWestX,
+        slopeWestX: trapLayout.westX,
+    });
     createKinematicPlatforms(prototypeMat, miniLayout, miniWorld);
 
     createDebugPanel();
@@ -538,95 +521,185 @@ function createPlatformWalls(root, baseMat, layout, options = {}) {
     }
 }
 
-// 圆心到豁口弦的水平距离
-function chordOffset(radius, gapWidth) {
-    const half = gapWidth * 0.5;
-    return Math.sqrt(Math.max(0, radius * radius - half * half));
+// 梯形连接段尺寸（东贴大场景，西贴小场景）
+function createTrapezoidLayout(eastX, eastWidth, westWidth) {
+    const wideLen = eastWidth * TRAP_WIDE_LEN_RATIO;
+    const slopeLen = eastWidth * TRAP_SLOPE_LEN_RATIO;
+    const wideWestX = eastX - wideLen;
+    const westX = wideWestX - slopeLen;
+    return {
+        eastX,
+        westX,
+        wideWestX,
+        halfWide: eastWidth * 0.5,
+        halfNarrow: westWidth * 0.5,
+    };
 }
 
-// 豁口半角（相对圆心）
-function gapHalfAngle(radius, gapWidth) {
-    return Math.atan2(gapWidth * 0.5, chordOffset(radius, gapWidth));
+function getTrapezoidOutline(trap) {
+    const { eastX, westX, wideWestX, halfWide, halfNarrow } = trap;
+    return [
+        { x: eastX, z: halfWide },
+        { x: wideWestX, z: halfWide },
+        { x: westX, z: halfNarrow },
+        { x: westX, z: -halfNarrow },
+        { x: wideWestX, z: -halfWide },
+        { x: eastX, z: -halfWide },
+    ];
 }
 
-// 圆形场地：圆盘地面 + 东/西豁口围墙
-function buildCircularArena(baseMat, layout, { radius, center, eastGap, westGap }) {
+function getWideSectionOutline(trap) {
+    const { eastX, wideWestX, halfWide } = trap;
+    return [
+        { x: eastX, z: halfWide },
+        { x: wideWestX, z: halfWide },
+        { x: wideWestX, z: -halfWide },
+        { x: eastX, z: -halfWide },
+    ];
+}
+
+function getSlopeSectionOutline(trap) {
+    const { wideWestX, westX, halfWide, halfNarrow } = trap;
+    return [
+        { x: wideWestX, z: halfWide },
+        { x: westX, z: halfNarrow },
+        { x: westX, z: -halfNarrow },
+        { x: wideWestX, z: -halfWide },
+    ];
+}
+
+function isSlopeSectionEdge(a, b) {
+    return Math.abs(b.x - a.x) > 1e-4 && Math.abs(b.z - a.z) > 1e-4;
+}
+
+// 宽矩形 + 收腰梯形
+function buildTrapezoidArena(baseMat, layout, trap, westWallH) {
     const root = new Group();
-    const { deckY, deckThick, tileSize } = layout;
-    const floorPos = new Vector3(center.x, deckY, center.z);
-    const floorGeo = applyWorldTileUV(
-        new CylinderGeometry(radius, radius, deckThick, 96),
-        floorPos,
-        tileSize,
-    );
-    const floor = new Mesh(floorGeo, baseMat);
-    floor.name = "CircleFloor";
-    floor.position.copy(floorPos);
-    floor.castShadow = true;
-    floor.receiveShadow = true;
-    root.add(floor);
-
-    addCircularWalls(root, baseMat, layout, radius, center, eastGap, westGap);
+    const trapMat = tintMaterial(baseMat, TRAP_TINT_COLOR);
+    addPolygonFloor(root, getWideSectionOutline(trap), layout, baseMat);
+    addPolygonFloor(root, getSlopeSectionOutline(trap), layout, trapMat);
+    addOutlineWalls(root, getTrapezoidOutline(trap), layout, baseMat, trapMat, trap, westWallH);
     return root;
 }
 
-// Lathe 绕 Y：phi=0 为 +Z，phi=π/2 为 +X，phi=3π/2 为 -X
-function addCircularWalls(root, baseMat, layout, radius, center, eastGap, westGap) {
-    const alphaE = gapHalfAngle(radius, eastGap.width);
-
-    if (!westGap || westGap.width <= 0) {
-        addArcWall(root, baseMat, layout, radius, center, eastGap.angle + alphaE, Math.PI * 2 - 2 * alphaE);
-        addGapCap(root, baseMat, layout, radius, center, eastGap.angle - alphaE);
-        addGapCap(root, baseMat, layout, radius, center, eastGap.angle + alphaE);
-        return;
+function addPolygonFloor(root, points, layout, material) {
+    const { deckY, deckThick, tileSize } = layout;
+    const shape = new Shape();
+    shape.moveTo(points[0].x, -points[0].z);
+    for (let i = 1; i < points.length; i++) {
+        shape.lineTo(points[i].x, -points[i].z);
     }
+    shape.closePath();
 
-    const alphaW = gapHalfAngle(radius, westGap.width);
-
-    addArcWall(root, baseMat, layout, radius, center, eastGap.angle + alphaE, Math.PI - alphaE - alphaW);
-    addArcWall(root, baseMat, layout, radius, center, westGap.angle + alphaW, Math.PI - alphaE - alphaW);
-
-    addGapCap(root, baseMat, layout, radius, center, eastGap.angle - alphaE);
-    addGapCap(root, baseMat, layout, radius, center, eastGap.angle + alphaE);
-    addGapCap(root, baseMat, layout, radius, center, westGap.angle - alphaW);
-    addGapCap(root, baseMat, layout, radius, center, westGap.angle + alphaW);
+    const geo = new ExtrudeGeometry(shape, { depth: deckThick, bevelEnabled: false, steps: 1 });
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, deckY - deckThick * 0.5, 0);
+    const floor = new Mesh(applyWorldTileUV(geo, { x: 0, y: 0, z: 0 }, tileSize), material);
+    floor.name = "TrapezoidFloor";
+    floor.castShadow = true;
+    floor.receiveShadow = true;
+    root.add(floor);
+    return floor;
 }
 
-// 一段有厚度的圆弧墙
-function addArcWall(root, baseMat, layout, radius, center, phiStart, phiLength) {
-    const { wallH, wallT, tileSize } = layout;
-    const points = [
-        new Vector2(radius, 0),
-        new Vector2(radius + wallT, 0),
-        new Vector2(radius + wallT, wallH),
-        new Vector2(radius, wallH),
-        new Vector2(radius, 0),
-    ];
-    const segs = Math.max(12, Math.ceil(96 * Math.abs(phiLength) / (Math.PI * 2)));
-    const geo = applyWorldTileUV(
-        new LatheGeometry(points, segs, phiStart, phiLength),
-        { x: center.x, y: 0, z: center.z },
-        tileSize,
+// 沿多边形外缘砌墙，跳过东西两端开口；收腰段墙高从大场景线性降到小场景
+function addOutlineWalls(root, points, layout, wideMat, slopeMat, trap, westWallH) {
+    const n = points.length;
+    let cx = 0;
+    let cz = 0;
+    for (const p of points) {
+        cx += p.x;
+        cz += p.z;
+    }
+    cx /= n;
+    cz /= n;
+
+    const heightAt = (p) => (
+        Math.abs(p.x - trap.wideWestX) < 1e-4 || p.x > trap.wideWestX
+            ? layout.wallH
+            : westWallH
     );
-    const mesh = new Mesh(geo, baseMat);
-    mesh.position.set(center.x, 0, center.z);
+
+    for (let i = 0; i < n; i++) {
+        const a = points[i];
+        const b = points[(i + 1) % n];
+        const isEastGap = Math.abs(a.x - trap.eastX) < 1e-4 && Math.abs(b.x - trap.eastX) < 1e-4;
+        const isWestGap = Math.abs(a.x - trap.westX) < 1e-4 && Math.abs(b.x - trap.westX) < 1e-4;
+        if (isEastGap || isWestGap) continue;
+
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const len = Math.hypot(dx, dz);
+        if (len < 1e-4) continue;
+
+        const midX = (a.x + b.x) * 0.5;
+        const midZ = (a.z + b.z) * 0.5;
+        let nx = -dz / len;
+        let nz = dx / len;
+        if (nx * (cx - midX) + nz * (cz - midZ) > 0) {
+            nx = -nx;
+            nz = -nz;
+        }
+
+        const hA = heightAt(a);
+        const hB = heightAt(b);
+        const material = isSlopeSectionEdge(a, b) ? slopeMat : wideMat;
+        if (Math.abs(hA - hB) > 1e-4) {
+            addTaperedWall(root, layout, material, a, b, hA, hB, nx, nz);
+        } else {
+            addOrientedWall(root, layout, material, midX, midZ, len, nx, nz, dx, dz);
+        }
+    }
+}
+
+function addTaperedWall(root, layout, material, a, b, hA, hB, nx, nz) {
+    const { wallT, tileSize } = layout;
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const along = new Vector3((b.x - a.x) / len, 0, (b.z - a.z) / len);
+    const up = new Vector3(0, 1, 0);
+    const out = new Vector3(nx, 0, nz);
+
+    // 外法线与 along×up 反向时会变成左手系，正面被剔掉；改为从另一端挤出
+    let origin = a;
+    let startH = hA;
+    let endH = hB;
+    const xAxis = along.clone();
+    if (xAxis.clone().cross(up).dot(out) < 0) {
+        xAxis.negate();
+        origin = b;
+        startH = hB;
+        endH = hA;
+    }
+
+    const shape = new Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(len, 0);
+    shape.lineTo(len, endH);
+    shape.lineTo(0, startH);
+    shape.closePath();
+
+    const geo = new ExtrudeGeometry(shape, { depth: wallT, bevelEnabled: false, steps: 1 });
+    const m = new Matrix4().makeBasis(xAxis, up, out);
+    m.setPosition(origin.x, 0, origin.z);
+    geo.applyMatrix4(m);
+
+    const mesh = new Mesh(applyWorldTileUV(geo, { x: 0, y: 0, z: 0 }, tileSize), material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     root.add(mesh);
     return mesh;
 }
 
-// 豁口端面，封住墙体厚度
-function addGapCap(root, baseMat, layout, radius, center, phi) {
+function addOrientedWall(root, layout, material, midX, midZ, length, nx, nz, dx, dz) {
     const { wallH, wallT, tileSize } = layout;
-    const rMid = radius + wallT * 0.5;
-    const pos = new Vector3(
-        center.x + rMid * Math.sin(phi),
-        wallH * 0.5,
-        center.z + rMid * Math.cos(phi),
-    );
-    const mesh = addBox(root, pos, new Vector3(wallT, wallH, wallT), baseMat, tileSize);
-    mesh.rotation.y = phi - Math.PI * 0.5;
+    const pos = new Vector3(midX + nx * wallT * 0.5, wallH * 0.5, midZ + nz * wallT * 0.5);
+    const geo = new BoxGeometry(wallT, wallH, length);
+    geo.rotateY(Math.atan2(dx, dz));
+    const mesh = new Mesh(applyWorldTileUV(geo, pos, tileSize), material);
+    mesh.position.copy(pos);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    root.add(mesh);
     return mesh;
 }
 
@@ -686,43 +759,10 @@ function createGlowGapPortal(layout, westGap, doorX) {
 
 // 更新发光门帘时间
 function updateGlowPortal(t) {
-    const mat = glowPortal?.userData?.material;
-    if (mat?.uniforms?.uTime) mat.uniforms.uTime.value = t;
-}
-
-// 小场景世界范围
-function createMiniScaleBounds(layout, worldOffset, circle) {
-    const { platform, wallT } = layout;
-    const ox = worldOffset.x + platform.x;
-    const oz = (worldOffset.z ?? 0) + platform.z;
-    const halfX = platform.sizeX * 0.5;
-    const halfZ = platform.sizeZ * 0.5;
-    const bounds = {
-        minX: ox - halfX - wallT,
-        maxX: ox + halfX,
-        minZ: oz - halfZ - wallT,
-        maxZ: oz + halfZ + wallT,
-    };
-    if (!circle) return bounds;
-
-    const cx = worldOffset.x + circle.center.x;
-    const cz = (worldOffset.z ?? 0) + (circle.center.z ?? 0);
-    const r = circle.radius + (circle.wallT ?? wallT);
-    bounds.minX = Math.min(bounds.minX, cx - r);
-    bounds.maxX = Math.max(bounds.maxX, cx + r);
-    bounds.minZ = Math.min(bounds.minZ, cz - r);
-    bounds.maxZ = Math.max(bounds.maxZ, cz + r);
-    return bounds;
-}
-
-// 点是否落在小场景范围内
-function isInsideMiniScaleBounds(pos, bounds, pad = 0) {
-    return (
-        pos.x >= bounds.minX - pad
-        && pos.x <= bounds.maxX + pad
-        && pos.z >= bounds.minZ - pad
-        && pos.z <= bounds.maxZ + pad
-    );
+    for (const portal of glowPortals) {
+        const mat = portal?.userData?.material;
+        if (mat?.uniforms?.uTime) mat.uniforms.uTime.value = t;
+    }
 }
 
 // 两数是否视为同一缩放
@@ -730,22 +770,30 @@ function isNearScale(a, b) {
     return Math.abs(a - b) <= Math.max(Math.abs(b) * 1e-4, 1e-8);
 }
 
-// 当前总缩放下的人物目标尺寸
+// 收腰段 X：eastX → 1，westX → MINI_SCALE
+// 收腰段 X：wideWestX → 1，westX → MINI_SCALE；宽矩形段保持 1
+function zoneScaleFromX(x) {
+    if (!trapScaleRange) return 1;
+    const { eastX: narrowStartX, westX } = trapScaleRange;
+    if (x > narrowStartX) return 1;
+    const span = narrowStartX - westX;
+    if (span <= 1e-6) return x <= westX ? MINI_SCALE : 1;
+    const t = Math.min(1, Math.max(0, (narrowStartX - x) / span));
+    return 1 + t * (MINI_SCALE - 1);
+}
+
 function playerScaleForZone(z = zoneScale) {
-    return z < 1 ? PLAYER_SCALE_MINI : PLAYER_SCALE_NORMAL;
+    return PLAYER_SCALE_NORMAL * z;
 }
 
-// 当前总缩放下的车辆目标尺寸
 function vehicleScaleForZone(z = zoneScale) {
-    return z < 1 ? VEHICLE_SCALE_MINI : VEHICLE_SCALE_NORMAL;
+    return VEHICLE_SCALE_NORMAL * z;
 }
 
-// 是否处于载具驾驶
 function isDriving() {
     return player?.controllerMode === 1 && Boolean(player.getActiveVehicle?.());
 }
 
-// 缩放闸门用的世界坐标；驾驶时取车身位置
 function getScaleGatePosition() {
     if (isDriving()) {
         const v = player.getActiveVehicle();
@@ -756,14 +804,6 @@ function getScaleGatePosition() {
     return player?.getPosition?.() ?? null;
 }
 
-// 人物当前缩放是否已对齐总缩放
-function playerNeedsZoneScale(z = zoneScale) {
-    const current = player?.playerModelConfig?.scale;
-    if (current == null) return false;
-    return !isNearScale(current, playerScaleForZone(z));
-}
-
-// 按胶囊尺寸重算站立 / 落地阈值
 function recomputePlayerGroundThresholds() {
     const cap = player?.playerCapsule;
     const info = cap?.capsuleInfo;
@@ -788,93 +828,21 @@ function applyPlayerScale(targetScale) {
     recomputePlayerGroundThresholds();
 }
 
-// 收集尚未对齐目标尺寸的车辆
-function pickVehiclesForZone(z) {
-    const all = player?.getAllVehicles?.() ?? [];
-    if (!all.length || !miniScaleGate) return [];
-    const target = vehicleScaleForZone(z);
-    const active = player.getActiveVehicle?.() ?? null;
-    return all.filter((v) => {
-        if (isNearScale(v.scale, target)) return false;
-        if (v === active) return true;
-        const pos = v.vehicleGroup.position;
-        if (z < 1) return isInsideMiniScaleBounds(pos, miniScaleGate, ZONE_EPS);
-        return !isInsideMiniScaleBounds(pos, miniScaleGate, 0);
-    });
-}
-
-// 插值到指定总缩放
-function animateToZone(nextZone, duration = SCALE_ANIM_DURATION) {
-    if (!player) return;
-    if (scaleAnimFrame !== null) {
-        cancelAnimationFrame(scaleAnimFrame);
-        scaleAnimFrame = null;
-    }
-
-    zoneScale = nextZone;
-    const playerTarget = playerScaleForZone(nextZone);
-    const vehicleTarget = vehicleScaleForZone(nextZone);
-    const vehiclesToScale = pickVehiclesForZone(nextZone);
-    const fromPlayer = player.playerModelConfig?.scale ?? playerTarget;
-    const scalePlayer = playerNeedsZoneScale(nextZone);
-    const fromVehicleScales = vehiclesToScale.map((v) => v.scale);
-
-    if (!scalePlayer && !vehiclesToScale.length) return;
-
-    isScaling = true;
-    const startTime = performance.now();
-
-    const tick = (now) => {
-        const t = Math.min((now - startTime) / (duration * 1000), 1);
-
-        if (player.setVehicleScale) {
-            for (let i = 0; i < vehiclesToScale.length; i++) {
-                const vs = fromVehicleScales[i] + (vehicleTarget - fromVehicleScales[i]) * t;
-                player.setVehicleScale(vehiclesToScale[i], vs);
-            }
-        }
-
-        if (scalePlayer) {
-            const current = fromPlayer + (playerTarget - fromPlayer) * t;
-            applyPlayerScale(current);
-        }
-
-        if (t < 1) {
-            scaleAnimFrame = requestAnimationFrame(tick);
-        } else {
-            scaleAnimFrame = null;
-            isScaling = false;
-        }
-    };
-
-    scaleAnimFrame = requestAnimationFrame(tick);
-}
-
-// 进入 / 离开小场景范围时切换缩放
-function updateMiniScaleGate() {
-    if (!player || !miniScaleGate || isScaling) return;
+// 按收腰段 X 连续缩放：越往 -X 越小
+function updateTrapScale() {
+    if (!player || !trapScaleRange) return;
     const pos = getScaleGatePosition();
     if (!pos) return;
 
-    const inside = isInsideMiniScaleBounds(pos, miniScaleGate, 0);
-    const insideLoose = isInsideMiniScaleBounds(pos, miniScaleGate, ZONE_EPS);
+    zoneScale = zoneScaleFromX(pos.x);
+    applyPlayerScale(playerScaleForZone(zoneScale));
 
-    if (zoneScale === 1 && inside) {
-        animateToZone(MINI_SCALE);
-        return;
+    const vehicles = player.getAllVehicles?.() ?? [];
+    if (!vehicles.length || !player.setVehicleScale) return;
+    for (const v of vehicles) {
+        const target = vehicleScaleForZone(zoneScaleFromX(v.vehicleGroup.position.x));
+        if (!isNearScale(v.scale, target)) player.setVehicleScale(v, target);
     }
-    if (zoneScale === MINI_SCALE && !insideLoose) {
-        animateToZone(1);
-        return;
-    }
-
-    // 当前范围内尚未对齐的对象补齐缩放
-    if (playerNeedsZoneScale()) {
-        animateToZone(zoneScale);
-        return;
-    }
-    const pending = pickVehiclesForZone(zoneScale);
-    if (pending.length) animateToZone(zoneScale);
 }
 
 // 半埋圆柱 + 半埋长方体
@@ -1096,6 +1064,57 @@ function spawnBoxWallAt({ mat, center, right, boxSize, deckTop, gravity }) {
     }
 }
 
+// 收腰段两侧：沿斜墙各 10 个渐小动态长方体
+function spawnSlopeDominoes(baseMat, layout, trap, westWallH) {
+    if (!player) return;
+    const mat = tintMaterial(baseMat, PROP_ACCENT_COLOR);
+    const deckTop = layout.deckY + layout.deckThick * 0.5;
+    const slopeLen = trap.wideWestX - trap.westX;
+    const geo = new BoxGeometry(1, 1, 1);
+
+    const spawnSide = (sign) => {
+        const zWide = sign * trap.halfWide;
+        const zNarrow = sign * trap.halfNarrow;
+        const inward = sign > 0 ? -1 : 1;
+
+        for (let i = 0; i < SLOPE_DOMINO_COUNT; i++) {
+            const t = (i + 0.5) / SLOPE_DOMINO_COUNT;
+            const sizeMul = 1 + t * (MINI_SCALE - 1);
+            const wallH = layout.wallH * (1 - t) + westWallH * t;
+            const dominoH = wallH;
+            const dominoLen = (slopeLen / SLOPE_DOMINO_COUNT) * 0.82 * sizeMul;
+            const dominoW = 0.3 * sizeMul;
+            // 宽面（高×长）朝向 ±X，薄边在 X 轴
+            const halfExtents = new Vector3(dominoW * 0.5, dominoH * 0.5, dominoLen * 0.5);
+
+            const x = trap.wideWestX + t * (trap.westX - trap.wideWestX);
+            const zEdge = zWide + t * (zNarrow - zWide);
+            const inset = layout.wallT + dominoLen * 0.5 + 0.04;
+            const pos = new Vector3(x, deckTop + dominoH * 0.5, zEdge + inward * inset);
+
+            const mesh = new Mesh(geo, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            player.addCollider({
+                motion: "dynamic",
+                shape: {
+                    kind: "box",
+                    halfExtents,
+                    position: pos,
+                },
+                mesh,
+                restitution: 0.15,
+                friction: 0.65,
+                density: 1,
+            });
+        }
+    };
+
+    spawnSide(1);
+    spawnSide(-1);
+}
+
 // 六棱柱攀爬尺寸
 function getHexClimbMetrics(layout) {
     const stairWidth = layout.stairWidth;
@@ -1118,7 +1137,7 @@ function getHexClimbMetrics(layout) {
 }
 
 // 运动学往返平台
-function createKinematicPlatforms(baseMat, layout, parent) {
+function createKinematicPlatforms(baseMat, layout, parent, options = {}) {
     const { sideLength, topHeight, platformApothem } = getHexClimbMetrics(layout);
     const size = new Vector3(sideLength, layout.kineThickness, sideLength);
     const y = topHeight + layout.kineTopOffset - layout.kineThickness * 0.5;
@@ -1129,12 +1148,18 @@ function createKinematicPlatforms(baseMat, layout, parent) {
     const farEastX = -platformApothem - half;
     const deckWestX = layout.platform.x - layout.platform.sizeX * 0.5;
     const farWestX = deckWestX + half;
-    const midX = (farEastX + farWestX) * 0.5;
+    const defaultMeetX = (farEastX + farWestX) * 0.5;
+    const meetCenterX = options.meetCenterX ?? defaultMeetX;
+    const slopeMeetCenterX = options.slopeMeetCenterX;
+    const slopeWestX = options.slopeWestX;
 
+    // 同一相位 p：p=1 在收腰矩形并排；有收腰段时 p=0 在收腰起点并排
     const farEast = new Vector3(farEastX, y, 0);
-    const meetEast = new Vector3(midX + half, y, 0);
-    const farWest = new Vector3(farWestX, y, 0);
-    const meetWest = new Vector3(midX - half, y, 0);
+    const meetEast = new Vector3(meetCenterX + half, y, 0);
+    const spinFrom = Number.isFinite(slopeMeetCenterX)
+        ? new Vector3(slopeMeetCenterX + half, y, 0)
+        : new Vector3(farWestX, y, 0);
+    const spinTo = new Vector3(meetCenterX - half, y, 0);
 
     addKinematicShuttle({
         parent,
@@ -1149,17 +1174,31 @@ function createKinematicPlatforms(baseMat, layout, parent) {
     addKinematicShuttle({
         parent,
         name: `${prefix}ShuttleSpin`,
-        from: farWest,
-        to: meetWest,
+        from: spinFrom,
+        to: spinTo,
         size,
         mat,
         spinSpeed: KINE_SPIN_SPEED,
         tileSize: layout.tileSize,
     });
+
+    if (Number.isFinite(slopeMeetCenterX) && Number.isFinite(slopeWestX)) {
+        addKinematicShuttle({
+            parent,
+            name: `${prefix}ShuttleSlope`,
+            from: new Vector3(slopeMeetCenterX - half, y, 0),
+            to: new Vector3(slopeWestX + half, y, 0),
+            size,
+            mat,
+            spinSpeed: 0,
+            tileSize: layout.tileSize,
+            zoneScale: true,
+        });
+    }
 }
 
 // 创建单个往返平台
-function addKinematicShuttle({ parent, name, from, to, size, mat, spinSpeed, tileSize }) {
+function addKinematicShuttle({ parent, name, from, to, size, mat, spinSpeed, tileSize, zoneScale = false }) {
     const mesh = addBox(parent, from.clone(), size, mat, tileSize);
     mesh.name = name;
     player.addCollider({
@@ -1167,12 +1206,26 @@ function addKinematicShuttle({ parent, name, from, to, size, mat, spinSpeed, til
         shape: { kind: "mesh", source: mesh },
         follow: mesh,
     });
-    kinematicPlatforms.push({
+    const entry = {
         mesh,
         from: from.clone(),
         to: to.clone(),
         spinSpeed,
-    });
+        zoneScale,
+        lastZoneScale: 1,
+    };
+    if (zoneScale) applyKinematicZoneScale(entry, zoneScaleFromX(from.x));
+    kinematicPlatforms.push(entry);
+}
+
+/** 收腰段运动学平台：按 X 与人物相同的 zoneScale 缩放视觉与碰撞。 */
+function applyKinematicZoneScale(entry, targetScale) {
+    if (!entry?.mesh || !Number.isFinite(targetScale)) return;
+    if (isNearScale(entry.lastZoneScale, targetScale)) return;
+    const ratio = targetScale / entry.lastZoneScale;
+    entry.mesh.scale.setScalar(targetScale);
+    player?.scaleKinematicColliderContent(entry.mesh, ratio);
+    entry.lastZoneScale = targetScale;
 }
 
 // 两端缓入缓出
@@ -1192,6 +1245,7 @@ function updateKinematicPlatforms(t) {
 
     for (const entry of kinematicPlatforms) {
         entry.mesh.position.lerpVectors(entry.from, entry.to, p);
+        if (entry.zoneScale) applyKinematicZoneScale(entry, zoneScaleFromX(entry.mesh.position.x));
         if (entry.spinSpeed) entry.mesh.rotation.y = t * entry.spinSpeed;
     }
 }
@@ -1568,7 +1622,7 @@ function animate() {
     updateGlowPortal(t);
     if (player) {
         updateKinematicPlatforms(t);
-        updateMiniScaleGate();
+        updateTrapScale();
         player.update();
     } else {
         controls?.update();
