@@ -116,7 +116,6 @@ export class VehicleSystem {
             instance.chassisColliderId = chassis.id;
             instance.wheelColliderIds = this.registerWheelSpheres(instance);
             this.attachWheelSphereDebug(instance);
-            this.setTransition();
             return instance;
         } catch (e) {
             console.error("加载车辆模型失败:", e);
@@ -172,7 +171,6 @@ export class VehicleSystem {
         c.leaveVehicleAt(this.scratchWorld, this.scratchForward);
         c.animation.playByName("idle");
         c.syncDebugVisibility();
-        this.setTransition();
         this.handbrakeBlend = 0;
         c.onVehicleExit?.(v);
     }
@@ -568,21 +566,6 @@ export class VehicleSystem {
         for (let i = 0; i < v.vehicleController.numWheels(); i++) v.vehicleController.setWheelBrake(i, 0);
     }
 
-    // 等待车辆停稳后清除速度
-    setTransition() {
-        if (this.ctrl.isChangeControllerTransitionTimer) {
-            clearTimeout(this.ctrl.isChangeControllerTransitionTimer);
-            this.ctrl.isChangeControllerTransitionTimer = null;
-        }
-        this.ctrl.isChangeControllerTransitionTimer = setTimeout(() => {
-            this.ctrl.isChangeControllerTransitionTimer = null;
-            this.list.forEach(v => {
-                if (this.ctrl.controllerMode === 1 && this.active === v) return;
-                this.clearVelocity(v);
-            });
-        }, 3000);
-    }
-
     /**
      * 运行时等比缩放车辆。
      * 保持 vehicleGroup.scale = 1，只缩放子节点与物理尺寸，避免座椅/下车点与 halfExtents 双重缩放。
@@ -673,20 +656,6 @@ export class VehicleSystem {
     /** 将列表中全部车辆缩放到同一绝对 scale。 */
     setScaleAll(newScale: number): void {
         for (const v of this.list) this.setScale(v, newScale);
-    }
-
-    // 清除车辆速度
-    private clearVelocity(v: VehicleInstance) {
-        if (!v) return;
-        const { chassisBody, vehicleController } = v;
-        chassisBody.setLinvel({ x: 0, y: 0, z: 0 });
-        chassisBody.setAngvel({ x: 0, y: 0, z: 0 });
-        const n = vehicleController.numWheels();
-        for (let i = 0; i < n; i++) { vehicleController.setWheelEngineForce(i, 0); vehicleController.setWheelBrake(i, 1e6); }
-        vehicleController.updateVehicle(1 / 60, this.ctrl.getVehicleGroundMeshes(v));
-        chassisBody.setLinvel({ x: 0, y: 0, z: 0 });
-        chassisBody.setAngvel({ x: 0, y: 0, z: 0 });
-        for (let i = 0; i < n; i++) vehicleController.setWheelBrake(i, 0);
     }
 
     private capsuleRadius(): number {

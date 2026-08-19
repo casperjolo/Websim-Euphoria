@@ -95,8 +95,6 @@ export class playerController {
     isFlying = false;
     /** 临时跳过玩家胶囊碰撞检测。 */
     skipCapsuleCollision = false;
-    /** 模式切换计时器。 */
-    isChangeControllerTransitionTimer: any = null;
     /** 启用朝向输入。 */
     enableToward = true;
 
@@ -644,7 +642,8 @@ export class playerController {
             this.runAnimationPass(delta);
         } else {
             this.updatePlayer(delta);
-            if (this.isChangeControllerTransitionTimer) this.vehicle.finishPhysics(delta);
+            // 停着的车也每帧步进，避免球砸/叠车冲量攒着、视觉冻住
+            this.vehicle.finishPhysics(delta);
         }
         this.dynamics.step(delta);
         this.commitKinematicPrevMatrices();
@@ -811,7 +810,6 @@ export class playerController {
             this.scene.attach(this.playerCapsule);
             this.animation.playByName("idle");
             this.syncDebugVisibility();
-            this.vehicle.setTransition();
         }
         this.playerVelocity.set(0, 0, 0);
         this.playerCapsule.position.copy(position ?? this.initPos);
