@@ -43,6 +43,7 @@ const SLEEP_LINEAR = 0.3; // 线速度低于该值可累计休眠
 const SLEEP_ANGULAR = 0.7; // 角速度低于该值可累计休眠
 const SLEEP_TIME = 0.35; // 连续满足阈值后进入休眠（秒）
 const SLEEP_WAKE_FACTOR = 3; // 超过阈值该倍数才清零休眠计时（迟滞）
+const BROADPHASE_CELL_SCALE = 2; // 动态体互撞宽相位：XZ 网格单元 = 最大特征尺寸 × 该系数（下限 1）。
 
 /**
  * 动态刚体推进：按 kind 分派形状窄相（球 / 盒）。
@@ -71,6 +72,15 @@ export class DynamicBodySystem {
     private wheelCenter = new THREE.Vector3();
     private wheelDir = new THREE.Vector3();
     private wheelPosBefore = new THREE.Vector3();
+    /** 动态体互撞宽相位（XZ 网格，每子步重建）。 */
+    private broadphaseGrid = new Map<string, number[]>();
+    private broadphaseCellSize = 1;
+    private bodyAabbMin: THREE.Vector3[] = [];
+    private bodyAabbMax: THREE.Vector3[] = [];
+    private broadphaseAxisX = new THREE.Vector3();
+    private broadphaseAxisY = new THREE.Vector3();
+    private broadphaseAxisZ = new THREE.Vector3();
+    private broadphasePairSeen = new Set<number>();
 
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
@@ -282,6 +292,7 @@ export class DynamicBodySystem {
             body.applyDamping(dt);
             this.clampSpeed(body);
         }
+        this.rebuildDynamicBroadphase();
         this.collideSpherePairs();
         this.collideBoxPairs();
         for (const body of this.list) {
@@ -716,32 +727,137 @@ export class DynamicBodySystem {
         return true;
     }
 
-    /** 球与球两两求解（每对一次）。 */
+    /** 球与球两两求解（宽相位筛对后窄相）。 */
     private collideSpherePairs(): void {
-        for (let i = 0; i < this.list.length; i++) {
+        for (const [i, j] of this.iterDynamicBroadphasePairs()) {
             const a = this.list[i];
-            if (!isSphereBody(a)) continue;
-            for (let j = i + 1; j < this.list.length; j++) {
-                const b = this.list[j];
-                if (!isSphereBody(b)) continue;
-                if (!this.shouldSolveDynamicPair(a, b)) continue;
-                resolveSphereSphere(a, b, this.temps, 0.5 * (a.restitution + b.restitution));
+            const b = this.list[j];
+            if (!isSphereBody(a) || !isSphereBody(b)) continue;
+            if (!this.shouldSolveDynamicPair(a, b)) continue;
+            resolveSphereSphere(a, b, this.temps, 0.5 * (a.restitution + b.restitution));
+        }
+    }
+
+    /** 盒与盒两两 OBB 求解（宽相位筛对后窄相）。 */
+    private collideBoxPairs(): void {
+        for (const [i, j] of this.iterDynamicBroadphasePairs()) {
+            const a = this.list[i];
+            const b = this.list[j];
+            if (!isBoxBody(a) || !isBoxBody(b)) continue;
+            if (!this.shouldSolveDynamicPair(a, b)) continue;
+            resolveObbObb(a, b, this.obbTemps);
+        }
+    }
+
+    /** 重建 XZ 网格宽相位；单元尺寸随最大特征体自适应。 */
+    private rebuildDynamicBroadphase(): void {
+        const n = this.list.length;
+        this.broadphaseGrid.clear();
+        if (n === 0) return;
+
+        while (this.bodyAabbMin.length < n) {
+            this.bodyAabbMin.push(new THREE.Vector3());
+            this.bodyAabbMax.push(new THREE.Vector3());
+        }
+
+        let maxExtent = 0.5;
+        for (let i = 0; i < n; i++) {
+            maxExtent = Math.max(maxExtent, this.list[i].characteristicExtent());
+            this.setBodyAabb(this.list[i], this.bodyAabbMin[i], this.bodyAabbMax[i]);
+        }
+        this.broadphaseCellSize = Math.max(1, maxExtent * BROADPHASE_CELL_SCALE);
+        const invCell = 1 / this.broadphaseCellSize;
+
+        for (let i = 0; i < n; i++) {
+            const min = this.bodyAabbMin[i];
+            const max = this.bodyAabbMax[i];
+            const ix0 = Math.floor(min.x * invCell);
+            const ix1 = Math.floor(max.x * invCell);
+            const iz0 = Math.floor(min.z * invCell);
+            const iz1 = Math.floor(max.z * invCell);
+            for (let ix = ix0; ix <= ix1; ix++) {
+                for (let iz = iz0; iz <= iz1; iz++) {
+                    const key = `${ix},${iz}`;
+                    let bucket = this.broadphaseGrid.get(key);
+                    if (!bucket) {
+                        bucket = [];
+                        this.broadphaseGrid.set(key, bucket);
+                    }
+                    bucket.push(i);
+                }
             }
         }
     }
 
-    /** 盒与盒两两 OBB 求解。 */
-    private collideBoxPairs(): void {
-        for (let i = 0; i < this.list.length; i++) {
-            const a = this.list[i];
-            if (!isBoxBody(a)) continue;
-            for (let j = i + 1; j < this.list.length; j++) {
-                const b = this.list[j];
-                if (!isBoxBody(b)) continue;
-                if (!this.shouldSolveDynamicPair(a, b)) continue;
-                resolveObbObb(a, b, this.obbTemps);
+    /** 遍历宽相位候选对（同格 + 相邻格，AABB 重叠，i < j 去重）。 */
+    private *iterDynamicBroadphasePairs(): Generator<[number, number]> {
+        const n = this.list.length;
+        if (n < 2) return;
+        this.broadphasePairSeen.clear();
+
+        for (const [key, bucketA] of this.broadphaseGrid) {
+            const comma = key.indexOf(",");
+            const ix = Number(key.slice(0, comma));
+            const iz = Number(key.slice(comma + 1));
+            for (let dz = 0; dz <= 1; dz++) {
+                for (let dx = 0; dx <= 1; dx++) {
+                    const bucketB = this.broadphaseGrid.get(`${ix + dx},${iz + dz}`);
+                    if (!bucketB) continue;
+                    for (const i of bucketA) {
+                        for (const j of bucketB) {
+                            if (i >= j) continue;
+                            const pairKey = i * n + j;
+                            if (this.broadphasePairSeen.has(pairKey)) continue;
+                            this.broadphasePairSeen.add(pairKey);
+                            if (!this.bodyAabbOverlap(i, j)) continue;
+                            yield [i, j];
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /** 写入刚体世界 AABB；盒体将 OBB 三轴投影后取包络（宽相位粗测用，偏保守）。 */
+    private setBodyAabb(body: DynamicBody, min: THREE.Vector3, max: THREE.Vector3): void {
+        if (isSphereBody(body)) {
+            const r = body.radius;
+            min.set(body.position.x - r, body.position.y - r, body.position.z - r);
+            max.set(body.position.x + r, body.position.y + r, body.position.z + r);
+            return;
+        }
+        if (isBoxBody(body)) {
+            const hx = body.halfExtents.x;
+            const hy = body.halfExtents.y;
+            const hz = body.halfExtents.z;
+            this.broadphaseAxisX.set(hx, 0, 0).applyQuaternion(body.quaternion);
+            this.broadphaseAxisY.set(0, hy, 0).applyQuaternion(body.quaternion);
+            this.broadphaseAxisZ.set(0, 0, hz).applyQuaternion(body.quaternion);
+            const ex = Math.abs(this.broadphaseAxisX.x)
+                + Math.abs(this.broadphaseAxisY.x)
+                + Math.abs(this.broadphaseAxisZ.x);
+            const ey = Math.abs(this.broadphaseAxisX.y)
+                + Math.abs(this.broadphaseAxisY.y)
+                + Math.abs(this.broadphaseAxisZ.y);
+            const ez = Math.abs(this.broadphaseAxisX.z)
+                + Math.abs(this.broadphaseAxisY.z)
+                + Math.abs(this.broadphaseAxisZ.z);
+            min.set(body.position.x - ex, body.position.y - ey, body.position.z - ez);
+            max.set(body.position.x + ex, body.position.y + ey, body.position.z + ez);
+        }
+    }
+
+    /** 宽相位候选对 AABB 三轴重叠检测；未通过则跳过窄相。 */
+    private bodyAabbOverlap(i: number, j: number): boolean {
+        const aMin = this.bodyAabbMin[i];
+        const aMax = this.bodyAabbMax[i];
+        const bMin = this.bodyAabbMin[j];
+        const bMax = this.bodyAabbMax[j];
+        return (
+            aMin.x <= bMax.x && aMax.x >= bMin.x
+            && aMin.y <= bMax.y && aMax.y >= bMin.y
+            && aMin.z <= bMax.z && aMax.z >= bMin.z
+        );
     }
 
     /**
