@@ -117,6 +117,12 @@ export class VehicleRigidBody {
         this.setCuboidInertia(this._mass, this.halfExtents);
     }
 
+    /** 设置碰撞盒半边长并按当前质量重算惯量。 */
+    setHalfExtents(half: THREE.Vector3): void {
+        this.halfExtents.copy(half);
+        this.setCuboidInertia(this._mass, this.halfExtents);
+    }
+
     /** 在质心施加冲量。 */
     applyImpulse(impulse: THREE.Vector3): void {
         this.linearVelocity.addScaledVector(impulse, this.invMass);

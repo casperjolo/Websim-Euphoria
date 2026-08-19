@@ -22,6 +22,7 @@ export class ColliderRegistry {
     private handles = new Map<number, ColliderHandle>();
     /** 静态构建代数：异步 BVH 完成时若代数变了则丢弃 */
     private buildGens = new Map<number, number>();
+    private _contentScale = new THREE.Vector3();
 
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
@@ -116,27 +117,47 @@ export class ColliderRegistry {
             if (playerWorldPos) {
                 const prevInv = new THREE.Matrix4().copy(entry.prevWorldMatrix).invert();
                 const playerInLocal = playerWorldPos.clone().applyMatrix4(prevInv);
-                entry.source.updateMatrixWorld(true);
-                entry.mesh.matrix.copy(entry.source.matrixWorld);
-                entry.mesh.updateMatrixWorld(true);
-                const playerInNewWorld = playerInLocal.clone().applyMatrix4(entry.source.matrixWorld);
+                this.writeKinematicMeshMatrix(entry);
+                const playerInNewWorld = playerInLocal.clone().applyMatrix4(entry.mesh.matrixWorld);
                 entry.deltaPos.subVectors(playerInNewWorld, playerWorldPos);
             } else {
-                entry.source.updateMatrixWorld(true);
-                entry.mesh.matrix.copy(entry.source.matrixWorld);
-                entry.mesh.updateMatrixWorld(true);
+                this.writeKinematicMeshMatrix(entry);
                 entry.deltaPos.set(0, 0, 0);
             }
             const prevEuler = new THREE.Euler().setFromRotationMatrix(entry.prevWorldMatrix, "YXZ");
-            const curEuler = new THREE.Euler().setFromRotationMatrix(entry.source.matrixWorld, "YXZ");
+            const curEuler = new THREE.Euler().setFromRotationMatrix(entry.mesh.matrixWorld, "YXZ");
             entry.deltaRotY = curEuler.y - prevEuler.y;
         }
+    }
+
+    /** 将 follow 世界矩阵（含 contentScale）写入碰撞 mesh。 */
+    private writeKinematicMeshMatrix(entry: KinematicColliderEntry): void {
+        entry.source.updateMatrixWorld(true);
+        entry.mesh.matrix.copy(entry.source.matrixWorld);
+        const s = entry.contentScale;
+        if (s !== 1) {
+            entry.mesh.matrix.scale(this._contentScale.set(s, s, s));
+        }
+        entry.mesh.updateMatrixWorld(true);
+    }
+
+    /**
+     * 运行时等比缩放已烘焙的运动学 mesh 碰撞（不重建 BVH）。
+     * source 为注册时的 follow / vehicleGroup。
+     */
+    scaleKinematicContent(source: THREE.Object3D, ratio: number): void {
+        if (!source || !Number.isFinite(ratio) || ratio === 1) return;
+        const entry = this.kinematicColliders.find(e => e.source === source);
+        if (!entry) return;
+        entry.contentScale *= ratio;
+        this.writeKinematicMeshMatrix(entry);
+        entry.prevWorldMatrix.copy(entry.mesh.matrixWorld);
     }
 
     /** 本帧物理用完后再提交平台矩阵，供下一帧算 delta。 */
     commitKinematicPrev(): void {
         for (const entry of this.kinematicColliders) {
-            entry.prevWorldMatrix.copy(entry.source.matrixWorld);
+            entry.prevWorldMatrix.copy(entry.mesh.matrixWorld);
         }
     }
 
@@ -272,6 +293,7 @@ export class ColliderRegistry {
             const entry: KinematicColliderEntry = {
                 source: follow ?? mesh,
                 mesh,
+                contentScale: 1,
                 prevWorldMatrix: new THREE.Matrix4().copy(follow?.matrixWorld ?? mesh.matrixWorld),
                 deltaPos: new THREE.Vector3(),
                 deltaRotY: 0,
@@ -313,6 +335,7 @@ export class ColliderRegistry {
         const entry: KinematicColliderEntry = {
             source: followTarget,
             mesh: built.mesh,
+            contentScale: 1,
             prevWorldMatrix: new THREE.Matrix4().copy(followTarget.matrixWorld),
             deltaPos: new THREE.Vector3(),
             deltaRotY: 0,

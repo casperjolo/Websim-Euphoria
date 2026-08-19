@@ -31,7 +31,7 @@ export class VehicleSystem {
             wheelbaseRatio: 0.55,
         }, // 抓地预算
         suspension: {
-            maxTravel: DEFAULT_MAX_SUSPENSION_TRAVEL, 
+            maxTravel: DEFAULT_MAX_SUSPENSION_TRAVEL,
             stiffness: DEFAULT_WHEEL_PHYSICS.suspensionStiffness,
             compression: DEFAULT_WHEEL_PHYSICS.suspensionCompression,
             relaxation: DEFAULT_WHEEL_PHYSICS.suspensionRelaxation,
@@ -482,6 +482,88 @@ export class VehicleSystem {
                 this.clearVelocity(v);
             });
         }, 3000);
+    }
+
+    /**
+     * 运行时等比缩放车辆。
+     * 保持 vehicleGroup.scale = 1，只缩放子节点与物理尺寸，避免座椅/下车点与 halfExtents 双重缩放。
+     * 悬挂刚度、阻尼、摩擦滑移不随 scale 变。
+     */
+    setScale(v: VehicleInstance, newScale: number): void {
+        if (!v || newScale <= 0) return;
+        const prev = v.scale > 0 ? v.scale : 1;
+        const ratio = newScale / prev;
+        if (Math.abs(ratio - 1) < 1e-12) {
+            v.scale = newScale;
+            return;
+        }
+
+        const { chassisBody, vehicleController } = v;
+        const n = vehicleController.numWheels();
+
+        // 缩放前用局部轮底估算，缩放后抬/降底盘使胎底高度基本不变
+        let localBottom = Infinity;
+        for (let i = 0; i < n; i++) {
+            const wheel = vehicleController.wheelAt(i);
+            if (!wheel) continue;
+            localBottom = Math.min(localBottom, wheel.connectionPoint.y - wheel.radius);
+        }
+        if (!Number.isFinite(localBottom)) localBottom = -v.halfExtents.y;
+
+        for (const child of v.vehicleGroup.children) {
+            if (child === v.wheelRayDebug || child === v.wheelTravelDebug) continue;
+            child.position.multiplyScalar(ratio);
+            child.scale.multiplyScalar(ratio);
+        }
+
+        v.halfExtents.multiplyScalar(ratio);
+        v.size.l *= ratio;
+        v.size.w *= ratio;
+        v.size.h *= ratio;
+        v.maxSpeed *= ratio;
+        v.acceleration *= ratio;
+        v.deceleration *= ratio;
+        v.scale = newScale;
+
+        chassisBody.setHalfExtents(v.halfExtents);
+        chassisBody.setMass(chassisBody.mass() * ratio * ratio * ratio);
+        chassisBody.gravityScale = newScale;
+        chassisBody.linearVelocity.multiplyScalar(ratio);
+
+        for (let i = 0; i < n; i++) {
+            const wheel = vehicleController.wheelAt(i);
+            if (!wheel) continue;
+            vehicleController.setWheelChassisConnectionPointCs(i, wheel.connectionPoint.multiplyScalar(ratio));
+            vehicleController.setWheelRadius(i, wheel.radius * ratio);
+            vehicleController.setWheelSuspensionRestLength(i, wheel.restLength * ratio);
+            vehicleController.setWheelMaxSuspensionTravel(i, wheel.maxSuspensionTravel * ratio);
+            wheel.suspensionLength *= ratio;
+            wheel.visualLength *= ratio;
+        }
+
+        const chassisCol = v.chassisColliderId != null
+            ? this.ctrl.collisionWorld.get(v.chassisColliderId)
+            : undefined;
+        if (chassisCol?.shape.kind === "box") {
+            chassisCol.shape.halfExtents.copy(v.halfExtents);
+        }
+
+        // 外观 mesh 碰撞在加载时烘焙，用 contentScale 对齐子节点缩放
+        this.ctrl.scaleKinematicColliderContent(v.vehicleGroup, ratio);
+
+        chassisBody.position.y += localBottom * (1 - ratio);
+        v.vehicleGroup.position.copy(chassisBody.position);
+        v.vehicleGroup.quaternion.copy(chassisBody.quaternion);
+        v.vehicleGroup.updateMatrixWorld(true);
+
+        if (this.active === v && this.ctrl.controllerMode === 1) {
+            this.ctrl.syncMountedPlayer(v);
+        }
+    }
+
+    /** 将列表中全部车辆缩放到同一绝对 scale。 */
+    setScaleAll(newScale: number): void {
+        for (const v of this.list) this.setScale(v, newScale);
     }
 
     // 清除车辆速度

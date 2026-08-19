@@ -396,6 +396,8 @@ export type KinematicColliderEntry = {
     source: THREE.Object3D;
     /** BVH 网格，使用本地空间几何。 */
     mesh: THREE.Mesh;
+    /**相对建造时几何的额外均匀缩放。 */
+    contentScale: number;
     /** 上一帧世界矩阵。 */
     prevWorldMatrix: THREE.Matrix4;
     /** 本帧位移增量。 */

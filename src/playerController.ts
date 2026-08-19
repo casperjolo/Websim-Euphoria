@@ -577,6 +577,11 @@ export class playerController {
         this.colliders.remove(handle);
     }
 
+    /** 运行时等比缩放已烘焙的运动学 mesh 碰撞（不重建 BVH）。 */
+    scaleKinematicColliderContent(source: THREE.Object3D, ratio: number): void {
+        this.colliders.scaleKinematicContent(source, ratio);
+    }
+
     /** 清除碰撞体；可按 motion 过滤。 */
     clearColliders(filter?: { motion?: MotionType }): void {
         this.colliders.clear(filter);
@@ -768,7 +773,7 @@ export class playerController {
         this.maxH = this.snapH + rideHeightScaled;
     }
 
-    /** 动态修改缩放。 */
+    /** 动态修改玩家缩放。 */
     setPlayerScale(newScale: number) {
         if (newScale <= 0) return;
         const ratio = newScale / this.playerModelConfig.scale;
@@ -784,6 +789,16 @@ export class playerController {
             this.recomputeGroundThresholds();
         }
         if (this.isFirstPerson) this.cam.setFirstPerson();
+    }
+
+    /** 动态修改单辆车的缩放（绝对 scale，与加载时 opts.scale 同一语义）。 */
+    setVehicleScale(vehicle: VehicleInstance, newScale: number) {
+        this.vehicle.setScale(vehicle, newScale);
+    }
+
+    /** 将全部已加载车辆缩放到同一绝对 scale。 */
+    setAllVehiclesScale(newScale: number) {
+        this.vehicle.setScaleAll(newScale);
     }
 
     /** 重置玩家位置。 */

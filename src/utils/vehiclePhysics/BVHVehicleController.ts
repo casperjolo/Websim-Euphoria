@@ -257,7 +257,7 @@ export class BVHVehicleController {
     }
 
     /** 按索引取车轮，越界返回 undefined。 */
-    private wheelAt(i: number): VehicleWheel | undefined {
+    wheelAt(i: number): VehicleWheel | undefined {
         return this.wheels[i];
     }
 

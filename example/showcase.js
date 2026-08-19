@@ -109,11 +109,13 @@ const PROP_ACCENT_COLOR = 0x7eb0d4;
 const KINE_SHUTTLE_SPEED = 0.9;
 const KINE_SPIN_SPEED = 0.35;
 
-const MINI_SCALE = 0.1;
-const PLAYER_SCALE_NORMAL = 0.005;
+const MINI_SCALE = 0.1; // 小场景相对大场景的比例
+const PLAYER_SCALE_NORMAL = 0.005; // 大场景人物缩放
 const PLAYER_SCALE_MINI = PLAYER_SCALE_NORMAL * MINI_SCALE;
+const VEHICLE_SCALE_NORMAL = 0.5; // 大场景车辆缩放
+const VEHICLE_SCALE_MINI = VEHICLE_SCALE_NORMAL * MINI_SCALE;
 const SCALE_ANIM_DURATION = 1;
-const ZONE_EPS = 0.05;
+const ZONE_EPS = 0.05; // 离开小场景判定的外扩余量
 // 圆形场地半径相对矩形平台长边的倍数
 const CIRCLE_RADIUS_SCALE = 1.5;
 
@@ -164,9 +166,10 @@ let kinematicPlatforms = [];
 let mainLayout;
 let miniScaleGate = null;
 let glowPortal = null;
-let isSmallScale = false;
+let zoneScale = 1; // 当前场景总缩放
 let isScaling = false;
 let scaleAnimFrame = null;
+const scaleGateWorldPos = new Vector3(); // 闸门判定用的世界坐标缓冲
 
 init();
 
@@ -722,22 +725,119 @@ function isInsideMiniScaleBounds(pos, bounds, pad = 0) {
     );
 }
 
-// 插值缩放到目标尺寸
-function animateToScale(targetScale, duration = SCALE_ANIM_DURATION) {
-    if (!player?.setPlayerScale) return;
+// 两数是否视为同一缩放
+function isNearScale(a, b) {
+    return Math.abs(a - b) <= Math.max(Math.abs(b) * 1e-4, 1e-8);
+}
+
+// 当前总缩放下的人物目标尺寸
+function playerScaleForZone(z = zoneScale) {
+    return z < 1 ? PLAYER_SCALE_MINI : PLAYER_SCALE_NORMAL;
+}
+
+// 当前总缩放下的车辆目标尺寸
+function vehicleScaleForZone(z = zoneScale) {
+    return z < 1 ? VEHICLE_SCALE_MINI : VEHICLE_SCALE_NORMAL;
+}
+
+// 是否处于载具驾驶
+function isDriving() {
+    return player?.controllerMode === 1 && Boolean(player.getActiveVehicle?.());
+}
+
+// 缩放闸门用的世界坐标；驾驶时取车身位置
+function getScaleGatePosition() {
+    if (isDriving()) {
+        const v = player.getActiveVehicle();
+        if (v?.vehicleGroup) return v.vehicleGroup.position;
+    }
+    const cap = player?.playerCapsule;
+    if (cap) return cap.getWorldPosition(scaleGateWorldPos);
+    return player?.getPosition?.() ?? null;
+}
+
+// 人物当前缩放是否已对齐总缩放
+function playerNeedsZoneScale(z = zoneScale) {
+    const current = player?.playerModelConfig?.scale;
+    if (current == null) return false;
+    return !isNearScale(current, playerScaleForZone(z));
+}
+
+// 按胶囊尺寸重算站立 / 落地阈值
+function recomputePlayerGroundThresholds() {
+    const cap = player?.playerCapsule;
+    const info = cap?.capsuleInfo;
+    if (!info) return;
+    const sy = cap.scale.y || 1;
+    const ride = player.rideHeight * player.playerModelConfig.scale;
+    player.snapH = (-info.segment.end.y) * sy + info.radius + ride;
+    player.maxH = player.snapH + ride;
+}
+
+// 应用人物缩放；驾驶中保持胶囊局部缩放，由车身缩放带动
+function applyPlayerScale(targetScale) {
+    if (!player?.setPlayerScale || isNearScale(player.playerModelConfig.scale, targetScale)) return;
+    if (!isDriving()) {
+        player.setPlayerScale(targetScale);
+        return;
+    }
+    const cap = player.playerCapsule;
+    const savedScale = cap.scale.clone();
+    player.setPlayerScale(targetScale);
+    cap.scale.copy(savedScale);
+    recomputePlayerGroundThresholds();
+}
+
+// 收集尚未对齐目标尺寸的车辆
+function pickVehiclesForZone(z) {
+    const all = player?.getAllVehicles?.() ?? [];
+    if (!all.length || !miniScaleGate) return [];
+    const target = vehicleScaleForZone(z);
+    const active = player.getActiveVehicle?.() ?? null;
+    return all.filter((v) => {
+        if (isNearScale(v.scale, target)) return false;
+        if (v === active) return true;
+        const pos = v.vehicleGroup.position;
+        if (z < 1) return isInsideMiniScaleBounds(pos, miniScaleGate, ZONE_EPS);
+        return !isInsideMiniScaleBounds(pos, miniScaleGate, 0);
+    });
+}
+
+// 插值到指定总缩放
+function animateToZone(nextZone, duration = SCALE_ANIM_DURATION) {
+    if (!player) return;
     if (scaleAnimFrame !== null) {
         cancelAnimationFrame(scaleAnimFrame);
         scaleAnimFrame = null;
     }
 
+    zoneScale = nextZone;
+    const playerTarget = playerScaleForZone(nextZone);
+    const vehicleTarget = vehicleScaleForZone(nextZone);
+    const vehiclesToScale = pickVehiclesForZone(nextZone);
+    const fromPlayer = player.playerModelConfig?.scale ?? playerTarget;
+    const scalePlayer = playerNeedsZoneScale(nextZone);
+    const fromVehicleScales = vehiclesToScale.map((v) => v.scale);
+
+    if (!scalePlayer && !vehiclesToScale.length) return;
+
     isScaling = true;
-    const fromScale = player.playerModelConfig?.scale ?? (isSmallScale ? PLAYER_SCALE_MINI : PLAYER_SCALE_NORMAL);
     const startTime = performance.now();
 
     const tick = (now) => {
         const t = Math.min((now - startTime) / (duration * 1000), 1);
-        const current = fromScale + (targetScale - fromScale) * t;
-        player.setPlayerScale(current);
+
+        if (player.setVehicleScale) {
+            for (let i = 0; i < vehiclesToScale.length; i++) {
+                const vs = fromVehicleScales[i] + (vehicleTarget - fromVehicleScales[i]) * t;
+                player.setVehicleScale(vehiclesToScale[i], vs);
+            }
+        }
+
+        if (scalePlayer) {
+            const current = fromPlayer + (playerTarget - fromPlayer) * t;
+            applyPlayerScale(current);
+        }
 
         if (t < 1) {
             scaleAnimFrame = requestAnimationFrame(tick);
@@ -753,21 +853,28 @@ function animateToScale(targetScale, duration = SCALE_ANIM_DURATION) {
 // 进入 / 离开小场景范围时切换缩放
 function updateMiniScaleGate() {
     if (!player || !miniScaleGate || isScaling) return;
-    const pos = player.getPosition?.();
+    const pos = getScaleGatePosition();
     if (!pos) return;
 
     const inside = isInsideMiniScaleBounds(pos, miniScaleGate, 0);
     const insideLoose = isInsideMiniScaleBounds(pos, miniScaleGate, ZONE_EPS);
 
-    if (!isSmallScale && inside) {
-        isSmallScale = true;
-        animateToScale(PLAYER_SCALE_MINI, SCALE_ANIM_DURATION);
+    if (zoneScale === 1 && inside) {
+        animateToZone(MINI_SCALE);
         return;
     }
-    if (isSmallScale && !insideLoose) {
-        isSmallScale = false;
-        animateToScale(PLAYER_SCALE_NORMAL, SCALE_ANIM_DURATION);
+    if (zoneScale === MINI_SCALE && !insideLoose) {
+        animateToZone(1);
+        return;
     }
+
+    // 当前范围内尚未对齐的对象补齐缩放
+    if (playerNeedsZoneScale()) {
+        animateToZone(zoneScale);
+        return;
+    }
+    const pending = pickVehiclesForZone(zoneScale);
+    if (pending.length) animateToZone(zoneScale);
 }
 
 // 半埋圆柱 + 半埋长方体
@@ -815,7 +922,7 @@ async function spawnShowcaseVehicles(gltfLoader) {
         await player.loadVehicleModel({
             model,
             animations: gltf.animations,
-            scale: 0.5,
+            scale: VEHICLE_SCALE_NORMAL,
             position: spawnPos.clone(),
             wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
             driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
