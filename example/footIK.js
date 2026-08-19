@@ -205,10 +205,8 @@ function createDebugPanel() {
     const params = {
         // 是否启用 Foot IK
         footIKEnabled: options.enabled ?? true,
-        // 显示 IK 目标点与检测射线
+        // 显示统一 Foot IK 调试（IK 目标 / 最高命中 / 脚底四点）
         footIKDebug: options.debug ?? false,
-        // 显示脚底四个本地采样点
-        soleSampleDebug: options.soleSampleDebug ?? false,
         // 是否把左右脚相位文字刷到面板
         footPhaseDebug: false,
         // 左脚相位调试文本（只读）
@@ -237,7 +235,6 @@ function createDebugPanel() {
 
     player?.setColliderDebug(params.playerDebug);
     footIK?.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
-    footIK?.setSoleSampleDebugEnabled(params.soleSampleDebug);
     sunDebugHelper.visible = params.sunDebug;
     sunShadowCameraHelper.visible = params.sunDebug;
 
@@ -265,11 +262,8 @@ function createDebugPanel() {
             footIK?.setDebugEnabled(params.footIKDebug);
         }
     });
-    debugFolder.add(params, "footIKDebug").name("IK Targets").onChange(value => {
+    debugFolder.add(params, "footIKDebug").name("Debug Markers").onChange(value => {
         footIK?.setDebugEnabled(value && params.footIKEnabled);
-    });
-    debugFolder.add(params, "soleSampleDebug").name("Sole Samples").onChange(value => {
-        footIK?.setSoleSampleDebugEnabled(value);
     });
     debugFolder.add(params, "footPhaseDebug").name("Phase Debug");
     debugFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();

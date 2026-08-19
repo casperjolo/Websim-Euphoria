@@ -25,7 +25,6 @@ export function findHips(bones: readonly Bone[]): Bone | null {
 export function createLeg(
     side: FootIKSide,
     bones: readonly Bone[],
-    color: number,
     skeletonConfig: FootIKSkeletonConfig | null = null,
 ): FootIKLeg {
     const legConfig = skeletonConfig?.legs?.[side] ?? null;
@@ -44,7 +43,6 @@ export function createLeg(
         lower,
         foot,
         toe,
-        color,
         ready: !!(upper && lower && foot),
 
         // IK 运行时目标和地面命中信息。
@@ -62,6 +60,7 @@ export function createLeg(
             rayLine: null,
             footMarker: null,
         })),
+        bestGroundSampleIndex: -1,
 
         // 本帧脚部目标对动画脚位的修正量。
         offsetY: 0,
@@ -77,6 +76,7 @@ export function createLeg(
         hasLastPole: false,
 
         marker: null,
+        hitMarker: null,
         rayLine: null,
     };
 }

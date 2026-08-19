@@ -24,12 +24,9 @@ import {
 } from "./internal/skeleton";
 import {
     createDebugObjects,
-    createSoleSampleDebugObjects,
     getFootPhaseDebugText,
     setDebugVisible,
-    setSoleSampleDebugVisible,
     updateFootDebug,
-    updateSoleSampleDebugObjects,
     disposeDebugObjects,
 } from "./internal/debug";
 import type {
@@ -60,7 +57,6 @@ export class FootIK {
     private enabled: boolean;
     private disposed = false;
     private debug: boolean;
-    private soleSampleDebug: boolean;
 
     // IK 距离、角度和脚掌贴合配置。
     private maxPelvisDrop = 20;
@@ -138,8 +134,7 @@ export class FootIK {
     /** 创建 FootIK 插件。 */
     constructor(options: FootIKOptions = {}) {
         this.enabled = options.enabled ?? true;
-        this.debug = options.debug ?? false; // 是否显示脚底 IK 调试对象，默认 false
-        this.soleSampleDebug = options.soleSampleDebug ?? false; // 是否显示始终跟随 foot 骨骼的脚底采样点
+        this.debug = options.debug ?? false;
 
         // 距离类参数先写入 scale=1 基准值，挂载后按 playerModelConfig.scale 连乘。
         this.maxPelvisDrop = Math.max(0, options.maxPelvisDrop ?? this.maxPelvisDrop);
@@ -214,7 +209,6 @@ export class FootIK {
         if (!this.enabled || this.disposed) return;
         this.syncDistanceScale();
         this.update(delta);
-        this.updateSoleSampleDebug();
     }
 
     /** 玩家模型切换后重新绑定骨骼和脚步相位数据。 */
@@ -306,7 +300,6 @@ export class FootIK {
             this.resetMeshStepOffsetImmediately();
             this.pelvisOffset = 0;
             this.setDebugVisible(false);
-            this.setSoleSampleDebugVisible(false);
         } else if (this.debug) {
             this.setDebugEnabled(true);
         }
@@ -343,8 +336,8 @@ export class FootIK {
     // 创建尚未绑定骨骼的左右腿占位状态。
     private createEmptyLegs(): FootIKLegs {
         return {
-            left: createLeg("left", [], 0x2dd4bf),
-            right: createLeg("right", [], 0xf97316),
+            left: createLeg("left", []),
+            right: createLeg("right", []),
         };
     }
 
@@ -354,8 +347,8 @@ export class FootIK {
         this.hips = resolveConfiguredBone(this.skeletonConfig?.hips, bones, "hips")
             ?? findHips(bones);
         this.legs = {
-            left: createLeg("left", bones, 0x2dd4bf, this.skeletonConfig),
-            right: createLeg("right", bones, 0xf97316, this.skeletonConfig),
+            left: createLeg("left", bones, this.skeletonConfig),
+            right: createLeg("right", bones, this.skeletonConfig),
         };
 
         if (!this.hips || !isReadyLeg(this.legs.left) || !isReadyLeg(this.legs.right)) {
@@ -367,7 +360,6 @@ export class FootIK {
         this.initSoleLocalSamples(this.legs.right);
         this.buildFootPhaseDatabase();
         this.createDebugObjects();
-        this.createSoleSampleDebugObjects();
     }
 
     // 恢复上一帧 IK 修改前的骨骼姿态
@@ -478,6 +470,7 @@ export class FootIK {
             leg.movePenetrating = false;
             leg.weight = 0;
             leg.offsetY = 0;
+            this.updateFootDebug(leg, footWorld);
             return;
         }
 
@@ -492,7 +485,7 @@ export class FootIK {
             leg.offsetY = 0;
             leg.movePenetrating = false;
             leg.smoothedTarget.copy(footWorld);
-            this.updateFootDebug(leg, leg.footSamplePoint, hit.point);
+            this.updateFootDebug(leg, hit.point);
             return;
         }
 
@@ -527,10 +520,11 @@ export class FootIK {
         // 摆动脚且没有穿透时，目标回到动画脚位，避免移动中被地面锁脚。
         leg.smoothedTarget.copy((leg.planted || leg.movePenetrating) ? target : footWorld);
 
-        this.updateFootDebug(leg, leg.footSamplePoint, hit.point);
+        this.updateFootDebug(leg, hit.point);
     }
 
     // 对一只脚的四个虚拟脚底点分别向下射线，选择命中高度最高的点作为本帧调试/法线参考。
+    // 平地浮点抖动时用滞回。
     private castBestFootGround(
         leg: ReadyFootIKLeg,
         footWorld: Vector3,
@@ -539,19 +533,48 @@ export class FootIK {
     ): Intersection<Object3D> | null {
         this.updateSoleSamples(leg, footWorld, samples, footSamplePoint);
 
-        let bestHit: Intersection<Object3D> | null = null;
-        for (const sample of samples) {
+        const stickToLeg = samples === leg.soleSamples;
+        // 设计尺度约 1 个单位。
+        const stickEpsilon = Math.max(1e-6, this.appliedScale);
+
+        let maxY = -Infinity;
+        let maxIndex = -1;
+        let maxHit: Intersection<Object3D> | null = null;
+        const hits: Array<Intersection<Object3D> | null> = new Array(samples.length).fill(null);
+
+        for (let i = 0; i < samples.length; i++) {
+            const sample = samples[i];
             sample.hasHit = false;
             const hit = this.castGroundAtSample(sample.point);
             if (!hit) continue;
             sample.hasHit = true;
             sample.hitPoint.copy(hit.point);
-            if (!bestHit || hit.point.y > bestHit.point.y) {
-                bestHit = hit;
-                footSamplePoint?.copy(sample.point);
+            hits[i] = hit;
+            if (hit.point.y > maxY) {
+                maxY = hit.point.y;
+                maxIndex = i;
+                maxHit = hit;
             }
         }
 
+        if (maxIndex < 0 || !maxHit) {
+            if (stickToLeg) leg.bestGroundSampleIndex = -1;
+            return null;
+        }
+
+        let bestIndex = maxIndex;
+        let bestHit = maxHit;
+        const prev = stickToLeg ? leg.bestGroundSampleIndex : -1;
+        if (prev >= 0 && prev < samples.length) {
+            const prevHit = hits[prev];
+            if (prevHit && prevHit.point.y >= maxY - stickEpsilon) {
+                bestIndex = prev;
+                bestHit = prevHit;
+            }
+        }
+
+        if (stickToLeg) leg.bestGroundSampleIndex = bestIndex;
+        footSamplePoint?.copy(samples[bestIndex].point);
         return bestHit;
     }
 
@@ -643,11 +666,11 @@ export class FootIK {
 
     // 任意脚底采样交点高过胶囊支撑高度时，本帧这条腿不做脚 IK。
     private hasFootHitAboveCapsuleBottom(leg: ReadyFootIKLeg): boolean {
-        const capsuleSupportY = this.getCapsuleSupportY();
-        if (!Number.isFinite(capsuleSupportY)) return false;
+        const capsuleBottomY = this.getCapsuleSupportY();
+        if (!Number.isFinite(capsuleBottomY)) return false;
 
         for (const sample of leg.soleSamples) {
-            if (sample.hasHit && sample.hitPoint.y > capsuleSupportY) return true;
+            if (sample.hasHit && sample.hitPoint.y > capsuleBottomY) return true;
         }
         return false;
     }
@@ -919,8 +942,9 @@ export class FootIK {
         const footWorld = leg.foot.getWorldPosition(this.tmpV1);
         this.updateSoleSamples(leg, footWorld);
 
+        const capsuleBottomY = this.getCapsuleSupportY();
         let contactOffset = -Infinity;
-        let anyHit = false;
+        let anyContactHit = false;
         for (const sample of leg.soleSamples) {
             sample.hasHit = false;
             const hit = this.castGroundAtSample(sample.point);
@@ -928,12 +952,14 @@ export class FootIK {
 
             sample.hasHit = true;
             sample.hitPoint.copy(hit.point);
-            anyHit = true;
-            const offset = hit.point.y - sample.point.y;
-            contactOffset = Math.max(contactOffset, offset);
+            // 高于胶囊支撑面的点不参与二次抬脚。
+            if (Number.isFinite(capsuleBottomY) && hit.point.y > capsuleBottomY) continue;
+
+            anyContactHit = true;
+            contactOffset = Math.max(contactOffset, hit.point.y - sample.point.y);
         }
 
-        if (!anyHit) return;
+        if (!anyContactHit) return;
         if (Math.abs(contactOffset) <= this.snapEpsilon) return;
 
         this.savedAlignedFootWorldQ.copy(leg.foot.getWorldQuaternion(this.tmpQ1));
@@ -984,45 +1010,22 @@ export class FootIK {
         this.adjusted.add(bone);
     }
 
-    // 创建调试用的脚目标标记和射线线段。
+    // 创建统一调试对象：IK 目标、最高命中、脚底四点。
     private createDebugObjects(): void {
         createDebugObjects(this.player?.scene ?? null, this.legs, this.debug);
     }
 
-    // 更新单只脚的调试标记和检测线位置。
-    private updateFootDebug(leg: FootIKLeg, footWorld: Vector3, hitPoint: Vector3): void {
-        updateFootDebug(this.debug, leg, footWorld, hitPoint);
+    // 更新单脚调试标记（含脚底四点）；高于胶囊下端球心的线框命中球标红。
+    private updateFootDebug(leg: FootIKLeg, hitPoint: Vector3): void {
+        updateFootDebug(this.debug, leg, hitPoint, this.appliedScale, this.getCapsuleSupportY());
     }
 
-    // 统一切换腿部 IK 调试对象的显示状态。
+    // 统一切换全部 Foot IK 调试对象的显示状态。
     private setDebugVisible(visible: boolean): void {
         setDebugVisible(this.legs, visible);
     }
 
-    // 按需创建跟随 foot 骨骼的脚底本地采样点调试对象。
-    private createSoleSampleDebugObjects(): void {
-        createSoleSampleDebugObjects(this.player?.scene ?? null, this.legs, this.soleSampleDebug);
-    }
-
-    // 更新左右脚采样点和对应射线的调试显示。
-    private updateSoleSampleDebug(): void {
-        updateSoleSampleDebugObjects(
-            this.soleSampleDebug,
-            this.player?.scene ?? null,
-            this.legs,
-            (leg, footWorld, samples, footSamplePoint) => {
-                this.updateSoleSamples(leg, footWorld, samples, footSamplePoint);
-            },
-            this.tmpV1,
-        );
-    }
-
-    // 统一切换脚底本地采样调试对象的显示状态。
-    private setSoleSampleDebugVisible(visible: boolean): void {
-        setSoleSampleDebugVisible(this.legs, visible);
-    }
-
-    /** 控制脚部 IK 目标和检测射线等调试对象的显隐。 */
+    /** 控制 Foot IK 调试对象显隐（IK 目标、最高命中、脚底四点）。 */
     setDebugEnabled(enabled: boolean): void {
         if (this.disposed) return;
         this.debug = enabled;
@@ -1032,22 +1035,11 @@ export class FootIK {
         this.setDebugVisible(enabled);
     }
 
-    /** 控制四个 foot-local 脚底采样点调试对象的显隐。 */
-    setSoleSampleDebugEnabled(enabled: boolean): void {
-        if (this.disposed) return;
-        this.soleSampleDebug = enabled;
-        if (enabled) {
-            this.createSoleSampleDebugObjects();
-        }
-        this.setSoleSampleDebugVisible(enabled);
-    }
-
     /** 读取当前可调配置（不含 skeleton）。距离类参数返回 scale=1 基准值。 */
     getOptions(): Required<Omit<FootIKOptions, "skeleton">> {
         return {
             enabled: this.enabled,
             debug: this.debug,
-            soleSampleDebug: this.soleSampleDebug,
             maxPelvisDrop: this.toBaseDistance(this.maxPelvisDrop),
             soleHalfWidth: this.toBaseDistance(this.soleHalfWidth),
             soleToeExtend: this.toBaseDistance(this.soleToeExtend),
@@ -1078,7 +1070,6 @@ export class FootIK {
 
         if (options.enabled !== undefined) this.setEnabled(options.enabled);
         if (options.debug !== undefined) this.setDebugEnabled(options.debug);
-        if (options.soleSampleDebug !== undefined) this.setSoleSampleDebugEnabled(options.soleSampleDebug);
 
         let soleDirty = false;
         let phaseDirty = false;

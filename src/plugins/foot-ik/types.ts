@@ -75,10 +75,11 @@ export type FootIKSkeletonConfig = {
 export type FootIKOptions = {
     /** 腿部骨骼绑定；未传时根据骨骼名自动匹配。 */
     skeleton?: FootIKSkeletonConfig;
-    /** 是否显示 IK 目标和射线，默认 false。 */
+    /**
+     * 是否显示统一调试对象，默认 false。
+     * 包含：IK 目标、最高地面命中、脚底四点（采样原点 + 命中 + 射线）。
+     */
     debug?: boolean;
-    /** 是否显示 foot-local 脚底采样点，默认 false。 */
-    soleSampleDebug?: boolean;
     /** 是否启用插件，默认 true。 */
     enabled?: boolean;
     /** 骨盆最大下沉距离基准值（按 scale 缩放），默认 20。 */
@@ -128,11 +129,14 @@ export type FootIKProbeSample = {
     hasHit: boolean;
 };
 
-// 固定在 foot 本地空间中的脚底采样点。
+// 固定在 foot 本地空间中的脚底采样点
 export type FootIKSoleSample = FootIKProbeSample & {
     local: Vector3;
+    /** 地面命中调试球（线框）。 */
     marker: Mesh | null;
+    /** 采样原点 → 命中点。 */
     rayLine: Line | null;
+    /** 脚底采样原点调试球（实心）。 */
     footMarker: Mesh | null;
 };
 
@@ -143,13 +147,13 @@ export type FootIKLeg = {
     lower: Bone | null;
     foot: Bone | null;
     toe: Bone | null;
-    color: number;
     ready: boolean;
     smoothedTarget: Vector3;
     hitPoint: Vector3;
     hitNormal: Vector3;
     footSamplePoint: Vector3;
     soleSamples: FootIKSoleSample[];
+    bestGroundSampleIndex: number;
     offsetY: number;
     movePenetrating: boolean;
     weight: number;
@@ -158,6 +162,7 @@ export type FootIKLeg = {
     lastPole: Vector3;
     hasLastPole: boolean;
     marker: Mesh | null;
+    hitMarker: Mesh | null;
     rayLine: Line | null;
 };
 

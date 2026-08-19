@@ -1447,6 +1447,7 @@ function createDebugPanel() {
         dynamicBodyDebug: false,
         vehiclePhysicsDebug: false,
         footIKEnabled: true,
+        footIKDebug: false,
         maxSteerDeg: VEHICLE_TUNING.steering.maxSteerAngle * 180 / Math.PI,
         resetVehicle() {
             player?.resetVehicle();
@@ -1478,6 +1479,9 @@ function createDebugPanel() {
     });
     sceneFolder.add(params, "footIKEnabled").name("Foot IK").onChange((value) => {
         footIK?.setEnabled(value);
+    });
+    sceneFolder.add(params, "footIKDebug").name("Foot IK 调试").onChange((value) => {
+        footIK?.setDebugEnabled(value);
     });
     sceneFolder.add(params, "resetVehicle").name("Reset Vehicle");
     sceneFolder.open();
