@@ -308,6 +308,8 @@ export type VehicleOptions = VehicleModelSource & {
         showWheelRays?: boolean;
         /** 是否显示车轮 Y 向活动范围，默认 false。 */
         showWheelTravel?: boolean;
+        /** 是否显示车轮动态碰撞球，默认 false。 */
+        showWheelSpheres?: boolean;
     };
     /** 底盘碰撞盒与阻尼。 */
     chassis?: VehicleChassisOptions;
@@ -384,10 +386,23 @@ export type VehicleInstance = {
     wheelRayDebug?: THREE.Group;
     /** 车轮 Y 向活动范围调试。 */
     wheelTravelDebug?: THREE.Group;
+    /** 车轮动态碰撞球线框调试。 */
+    wheelSphereDebug?: THREE.Group;
     /** CollisionWorld 中底盘动态碰撞体 id。 */
     chassisColliderId?: number;
     /** CollisionWorld 中车模运动学网格 id。 */
     meshColliderId?: number;
+    /**
+     * 仅与动态刚体碰撞的车轮球 collider id（与车轮一一对应）。
+     * 运动学登记，无独立质量；冲量回写到底盘。
+     */
+    wheelColliderIds?: number[];
+};
+
+/** 车轮球在 CollisionWorld.userData 上的挂载数据。 */
+export type VehicleWheelColliderUserData = {
+    vehicle: VehicleInstance;
+    wheelIndex: number;
 };
 
 /** 运动学碰撞体的 BVH 与帧间变换数据。 */

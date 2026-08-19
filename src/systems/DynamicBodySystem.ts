@@ -21,7 +21,7 @@ import {
     isBoxBody,
 } from "../collision/DynamicBox";
 import { DYNAMIC_BODY_DEFAULTS, type DynamicColliderDesc } from "../collision/ColliderDesc";
-import type { VehicleInstance } from "../types";
+import type { VehicleInstance, VehicleWheelColliderUserData } from "../types";
 import { capsuleSphereOverlap, createCollisionTemps } from "../utils/capsuleCollision";
 import { VehicleCollision } from "../utils/vehiclePhysics/VehicleCollision";
 import { createObbObbTemps, resolveObbObb } from "../collision/ObbObb";
@@ -68,6 +68,9 @@ export class DynamicBodySystem {
     private boxMeshCollision = new VehicleCollision();
     private obbTemps = createObbObbTemps();
     private contactPoint = new THREE.Vector3();
+    private wheelCenter = new THREE.Vector3();
+    private wheelDir = new THREE.Vector3();
+    private wheelPosBefore = new THREE.Vector3();
 
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
@@ -268,10 +271,12 @@ export class DynamicBodySystem {
             if (isSphereBody(body)) {
                 this.collideSphereMeshes(body, dt);
                 this.collideSphereBoxes(body);
+                this.collideSphereVehicleWheels(body);
                 this.resolveBodyVsKinematicCapsule(body); // 胶囊=运动学：只推刚体
             } else if (isBoxBody(body)) {
                 this.collideBoxMeshes(body, dt);
                 this.collideBoxVehicleBoxes(body);
+                this.collideBoxVehicleWheels(body);
                 this.resolveBodyVsKinematicCapsule(body);
             }
             body.applyDamping(dt);
@@ -284,10 +289,15 @@ export class DynamicBodySystem {
         }
     }
 
-    /** 休眠刚体与车辆底盘接触检测。 */
+    /** 休眠刚体与车辆底盘 / 车轮球接触检测。 */
     private collideSleepingBodyWithVehicles(body: DynamicBody): void {
-        if (isBoxBody(body)) this.collideBoxVehicleBoxes(body);
-        else if (isSphereBody(body)) this.collideSphereVehicleBoxes(body);
+        if (isBoxBody(body)) {
+            this.collideBoxVehicleBoxes(body);
+            this.collideBoxVehicleWheels(body);
+        } else if (isSphereBody(body)) {
+            this.collideSphereVehicleBoxes(body);
+            this.collideSphereVehicleWheels(body);
+        }
     }
 
     /** 按速度阈值累计 / 清除休眠计时。 */
@@ -555,6 +565,155 @@ export class DynamicBodySystem {
             if (!chassis) continue;
             if (resolveObbObb(body, chassis, this.obbTemps)) body.wakeUp();
         }
+    }
+
+    /** 动态球 vs 车轮运动学球。 */
+    private collideSphereVehicleWheels(body: DynamicSphereBody): void {
+        const worldCol = this.ctrl.collisionWorld.get(body.colliderId);
+        if (!worldCol) return;
+        const spheres = this.ctrl.collisionWorld.query(worldCol, {
+            kinds: ["sphere"],
+            motion: ["kinematic", "static"],
+        });
+        for (const col of spheres) {
+            if (col.shape.kind !== "sphere") continue;
+            const wheel = this.asVehicleWheel(col.userData);
+            if (!wheel) continue;
+            if (this.resolveSphereVsVehicleWheel(
+                body, wheel.vehicle, wheel.wheelIndex, col.shape.radius,
+            )) {
+                body.wakeUp();
+            }
+        }
+    }
+
+    /** 动态盒 vs 车轮运动学球。 */
+    private collideBoxVehicleWheels(body: DynamicBoxBody): void {
+        const worldCol = this.ctrl.collisionWorld.get(body.colliderId);
+        if (!worldCol) return;
+        const spheres = this.ctrl.collisionWorld.query(worldCol, {
+            kinds: ["sphere"],
+            motion: ["kinematic", "static"],
+        });
+        for (const col of spheres) {
+            if (col.shape.kind !== "sphere") continue;
+            const wheel = this.asVehicleWheel(col.userData);
+            if (!wheel) continue;
+            if (this.resolveBoxVsVehicleWheel(
+                body, wheel.vehicle, wheel.wheelIndex, col.shape.radius,
+            )) {
+                body.wakeUp();
+            }
+        }
+    }
+
+    /** 识别车轮球 userData。 */
+    private asVehicleWheel(userData: unknown): VehicleWheelColliderUserData | null {
+        if (!userData || typeof userData !== "object") return null;
+        const data = userData as VehicleWheelColliderUserData;
+        if (!data.vehicle?.chassisBody || typeof data.wheelIndex !== "number") return null;
+        return data;
+    }
+
+    /**
+     * 由底盘位姿 + 悬挂长度推算轮心。
+     * 成功时写入 wheelCenter，返回实际使用的半径。
+     */
+    private getWheelCenterWS(
+        vehicle: VehicleInstance,
+        wheelIndex: number,
+        registeredRadius: number,
+    ): number | null {
+        const chassis = vehicle.chassisBody;
+        const wheel = vehicle.vehicleController.wheelAt(wheelIndex);
+        if (!wheel) return null;
+        this.wheelCenter.copy(wheel.connectionPoint).applyQuaternion(chassis.quaternion).add(chassis.position);
+        this.wheelDir.copy(wheel.direction).applyQuaternion(chassis.quaternion);
+        const dirLen = this.wheelDir.length();
+        if (dirLen > 1e-8) this.wheelCenter.addScaledVector(this.wheelDir, wheel.suspensionLength / dirLen);
+        return Math.max(1e-4, registeredRadius > 0 ? registeredRadius : wheel.radius);
+    }
+
+    /**
+     * 动态球 vs 单轮：只推开球，冲量回写底盘。
+     * 法线由轮心指向球。
+     */
+    private resolveSphereVsVehicleWheel(
+        body: DynamicSphereBody,
+        vehicle: VehicleInstance,
+        wheelIndex: number,
+        registeredRadius: number,
+    ): boolean {
+        const chassis = vehicle.chassisBody;
+        const radius = this.getWheelCenterWS(vehicle, wheelIndex, registeredRadius);
+        if (radius == null) return false;
+
+        this.temps.offset.subVectors(body.position, this.wheelCenter);
+        const dist = this.temps.offset.length();
+        const minDist = body.radius + radius;
+        if (dist >= minDist) return false;
+        if (dist > 1e-8) this.temps.normal.copy(this.temps.offset).multiplyScalar(1 / dist);
+        else this.temps.normal.set(0, 1, 0);
+
+        const depth = minDist - dist;
+        body.position.addScaledVector(this.temps.normal, depth);
+        this.temps.contact.copy(this.wheelCenter).addScaledVector(this.temps.normal, radius);
+
+        body.getVelocityAtPoint(this.temps.contact, this.bodyVel);
+        chassis.getVelocityAtPoint(this.temps.contact, this.temps.boxVel);
+        this.temps.offset.copy(this.bodyVel).sub(this.temps.boxVel);
+        const vn = this.temps.offset.dot(this.temps.normal);
+        if (vn >= 0) return true;
+        const deltaVn = -vn * (1 + body.restitution);
+        this.temps.impulse.copy(this.temps.normal).multiplyScalar(deltaVn * body.mass);
+        body.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
+        this.temps.impulse.multiplyScalar(-1);
+        chassis.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
+        return true;
+    }
+
+    /**
+     * 动态盒 vs 单轮：用球-OBB 测重叠，将本应推开轮球的位移反加到盒上，冲量回写底盘。
+     * collideSphereVsObb 的法线由盒指向轮。
+     */
+    private resolveBoxVsVehicleWheel(
+        body: DynamicBoxBody,
+        vehicle: VehicleInstance,
+        wheelIndex: number,
+        registeredRadius: number,
+    ): boolean {
+        const chassis = vehicle.chassisBody;
+        const radius = this.getWheelCenterWS(vehicle, wheelIndex, registeredRadius);
+        if (radius == null) return false;
+
+        this.wheelPosBefore.copy(this.wheelCenter);
+        if (!collideSphereVsObb(
+            this.wheelCenter, radius,
+            body.position, body.quaternion, body.halfExtents,
+            this.temps,
+        )) {
+            this.wheelCenter.copy(this.wheelPosBefore);
+            return false;
+        }
+
+        // 轮球被推出的位移改为推开动态盒
+        this.temps.offset.subVectors(this.wheelCenter, this.wheelPosBefore);
+        body.position.sub(this.temps.offset);
+        this.wheelCenter.copy(this.wheelPosBefore);
+
+        body.getVelocityAtPoint(this.temps.contact, this.bodyVel);
+        chassis.getVelocityAtPoint(this.temps.contact, this.temps.boxVel);
+        // 将轮视为「球」、盒视为 OBB：相对速度 = 轮速 - 盒速
+        this.temps.offset.copy(this.temps.boxVel).sub(this.bodyVel);
+        const vn = this.temps.offset.dot(this.temps.normal);
+        if (vn >= 0) return true;
+        const deltaVn = -vn * (1 + body.restitution);
+        this.temps.impulse.copy(this.temps.normal).multiplyScalar(deltaVn * body.mass);
+        // 法线由盒→轮：冲量加到底盘（轮侧），反向加到盒
+        chassis.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
+        this.temps.impulse.multiplyScalar(-1);
+        body.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
+        return true;
     }
 
     /** 球与球两两求解（每对一次）。 */

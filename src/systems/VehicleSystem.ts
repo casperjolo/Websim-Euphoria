@@ -3,7 +3,7 @@ import type { playerController } from "../playerController";
 import { loadVehicleModel as loadVehicleModelUtil } from "../utils/vehicleLoader";
 import { DEFAULT_MAX_SUSPENSION_TRAVEL, DEFAULT_WHEEL_PHYSICS } from "../utils/vehicleController";
 import { applyCapsuleCollision, createCollisionTemps } from "../utils/capsuleCollision";
-import type { VehicleInstance, VehicleOptions, KinematicColliderEntry } from "../types";
+import type { VehicleInstance, VehicleOptions, KinematicColliderEntry, VehicleWheelColliderUserData } from "../types";
 import { CollisionGroup } from "../collision/groups";
 import { createObbObbTemps, resolveObbObb } from "../collision/ObbObb";
 
@@ -15,7 +15,7 @@ export class VehicleSystem {
     meshSkipIds: number[] = []; // 全部车辆外观 collider id，网格查询时跳过
     vehicleLength = 6; // 车辆模型归一化后的最大边长度
     params = {
-        debug: { showPhysicsBox: false, showWheelRays: false, showWheelTravel: false }, // 调试显示
+        debug: { showPhysicsBox: false, showWheelRays: false, showWheelTravel: false, showWheelSpheres: false }, // 调试显示
         chassis: { density: 1, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
         power: { acceleration: 5, deceleration: 5, maxSpeed: 300 }, // 动力参数
@@ -53,6 +53,7 @@ export class VehicleSystem {
     private scratchUp = new THREE.Vector3();
     private scratchQuat = new THREE.Quaternion();
     private scratchDown = new THREE.Vector3(0, -1, 0);
+    private wheelSphereDir = new THREE.Vector3();
     private carryPrevInv = new THREE.Matrix4();
     private carryYaw = new THREE.Quaternion();
     private carryUp = new THREE.Vector3(0, 1, 0);
@@ -113,6 +114,8 @@ export class VehicleSystem {
                 simulate: false, // 默认会建 DynamicBoxBody；底盘改由 VehicleRigidBody 推进，此处只登记
             });
             instance.chassisColliderId = chassis.id;
+            instance.wheelColliderIds = this.registerWheelSpheres(instance);
+            this.attachWheelSphereDebug(instance);
             this.setTransition();
             return instance;
         } catch (e) {
@@ -411,6 +414,10 @@ export class VehicleSystem {
         v.vehicleGroup.quaternion.set(r.x, r.y, r.z, r.w);
         if (v.wheelRayDebug) v.wheelRayDebug.visible = this.params.debug.showWheelRays;
         if (v.wheelTravelDebug) v.wheelTravelDebug.visible = this.params.debug.showWheelTravel;
+        if (v.wheelSphereDebug) {
+            v.wheelSphereDebug.visible = this.params.debug.showWheelSpheres;
+            if (v.wheelSphereDebug.visible) this.syncWheelSphereDebug(v);
+        }
         v.updateWheelVisuals?.(delta);
     }
 
@@ -434,11 +441,103 @@ export class VehicleSystem {
         return out.set(0, 1, 0).transformDirection(v.vehicleGroup.matrixWorld).normalize();
     }
 
+    /**
+     * 为每只车轮登记只碰 DEBRIS 的运动学球。
+     * 球心每帧由底盘位姿 + 悬挂长度推算，不在此写位置。
+     */
+    private registerWheelSpheres(v: VehicleInstance): number[] {
+        const ids: number[] = [];
+        const n = v.vehicleController.numWheels();
+        for (let i = 0; i < n; i++) {
+            const wheel = v.vehicleController.wheelAt(i);
+            if (!wheel) continue;
+            const userData: VehicleWheelColliderUserData = { vehicle: v, wheelIndex: i };
+            const handle = this.ctrl.addCollider({
+                motion: "kinematic",
+                shape: { kind: "sphere", radius: Math.max(1e-4, wheel.radius) },
+                groups: CollisionGroup.VEHICLE,
+                mask: CollisionGroup.DEBRIS,
+                userData,
+            });
+            ids.push(handle.id);
+        }
+        return ids;
+    }
+
+    /** 创建车轮碰撞球线框，挂在 vehicleGroup 下（底盘局部坐标）。 */
+    private attachWheelSphereDebug(v: VehicleInstance): void {
+        const group = new THREE.Group();
+        group.name = "wheelSphereDebug";
+        const geo = new THREE.SphereGeometry(1, 16, 12);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0x00e8a0,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.45,
+        });
+        const n = v.vehicleController.numWheels();
+        for (let i = 0; i < n; i++) {
+            const wheel = v.vehicleController.wheelAt(i);
+            if (!wheel) continue;
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.name = `wheelSphereDebug_${i}`;
+            mesh.frustumCulled = false;
+            mesh.renderOrder = 22;
+            mesh.scale.setScalar(Math.max(1e-4, wheel.radius));
+            group.add(mesh);
+        }
+        group.visible = this.params.debug.showWheelSpheres;
+        v.vehicleGroup.add(group);
+        v.wheelSphereDebug = group;
+        this.syncWheelSphereDebug(v);
+    }
+
+    /** 按悬挂长度把轮球线框对齐到轮心（底盘局部）。 */
+    private syncWheelSphereDebug(v: VehicleInstance): void {
+        const group = v.wheelSphereDebug;
+        if (!group) return;
+        let meshIndex = 0;
+        const n = v.vehicleController.numWheels();
+        for (let i = 0; i < n; i++) {
+            const wheel = v.vehicleController.wheelAt(i);
+            const mesh = group.children[meshIndex] as THREE.Mesh | undefined;
+            if (!wheel || !mesh) continue;
+            meshIndex++;
+            this.wheelSphereDir.copy(wheel.direction);
+            const dirLen = this.wheelSphereDir.length();
+            if (dirLen > 1e-8) this.wheelSphereDir.multiplyScalar(1 / dirLen);
+            else this.wheelSphereDir.set(0, -1, 0);
+            mesh.position.copy(wheel.connectionPoint).addScaledVector(this.wheelSphereDir, wheel.suspensionLength);
+            mesh.scale.setScalar(Math.max(1e-4, wheel.radius));
+        }
+    }
+
+    /** 移除车轮碰撞球调试线框并释放几何 / 材质。 */
+    private disposeWheelSphereDebug(v: VehicleInstance): void {
+        const group = v.wheelSphereDebug;
+        if (!group) return;
+        group.removeFromParent();
+        const geos = new Set<THREE.BufferGeometry>();
+        const mats = new Set<THREE.Material>();
+        for (const child of group.children) {
+            const mesh = child as THREE.Mesh;
+            if (mesh.geometry) geos.add(mesh.geometry);
+            const mat = mesh.material;
+            if (Array.isArray(mat)) for (const m of mat) mats.add(m);
+            else if (mat) mats.add(mat);
+        }
+        for (const g of geos) g.dispose();
+        for (const m of mats) m.dispose();
+        v.wheelSphereDebug = undefined;
+    }
+
     // 销毁全部车辆
     destroy() {
         for (const v of this.list) {
             if (v.meshColliderId != null) this.ctrl.removeCollider(v.meshColliderId);
             if (v.chassisColliderId != null) this.ctrl.removeCollider(v.chassisColliderId);
+            for (const id of v.wheelColliderIds ?? []) this.ctrl.removeCollider(id);
+            this.disposeWheelSphereDebug(v);
             this.ctrl.scene.remove(v.vehicleGroup);
             v.destroyVehicleController?.();
         }
@@ -511,7 +610,7 @@ export class VehicleSystem {
         if (!Number.isFinite(localBottom)) localBottom = -v.halfExtents.y;
 
         for (const child of v.vehicleGroup.children) {
-            if (child === v.wheelRayDebug || child === v.wheelTravelDebug) continue;
+            if (child === v.wheelRayDebug || child === v.wheelTravelDebug || child === v.wheelSphereDebug) continue;
             child.position.multiplyScalar(ratio);
             child.scale.multiplyScalar(ratio);
         }
@@ -547,6 +646,16 @@ export class VehicleSystem {
         if (chassisCol?.shape.kind === "box") {
             chassisCol.shape.halfExtents.copy(v.halfExtents);
         }
+
+        for (const id of v.wheelColliderIds ?? []) {
+            const col = this.ctrl.collisionWorld.get(id);
+            if (col?.shape.kind !== "sphere") continue;
+            const data = col.userData as VehicleWheelColliderUserData | undefined;
+            const wheel = data != null ? v.vehicleController.wheelAt(data.wheelIndex) : undefined;
+            if (wheel) col.shape.radius = Math.max(1e-4, wheel.radius);
+        }
+
+        if (v.wheelSphereDebug) this.syncWheelSphereDebug(v);
 
         // 外观 mesh 碰撞在加载时烘焙，用 contentScale 对齐子节点缩放
         this.ctrl.scaleKinematicColliderContent(v.vehicleGroup, ratio);

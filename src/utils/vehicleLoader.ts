@@ -9,7 +9,7 @@ export type VehicleLoaderContext = {
     loader: GLTFLoader;
     scene: THREE.Scene;
     vehicleParams: {
-        debug: { showPhysicsBox: boolean; showWheelRays: boolean; showWheelTravel: boolean };
+        debug: { showPhysicsBox: boolean; showWheelRays: boolean; showWheelTravel: boolean; showWheelSpheres: boolean };
         chassis: { density: number; linearDamping: number; angularDamping: number; sizeScale?: { x?: number; y?: number; z?: number } };
         model: { rotation: number };
         power: { acceleration: number; deceleration: number; maxSpeed: number };

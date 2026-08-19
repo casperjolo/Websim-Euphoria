@@ -21,6 +21,7 @@ export type {
     VehicleSteeringOptions,
     VehicleGripOptions,
     VehiclePowerOptions,
+    VehicleWheelColliderUserData,
     KinematicColliderEntry,
 } from "./types";
 export type { PlayerPlugin } from "./plugins/types";
