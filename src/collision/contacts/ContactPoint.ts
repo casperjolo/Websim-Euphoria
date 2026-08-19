@@ -1,6 +1,15 @@
 import * as THREE from "three";
 
+/** 标定用特征半尺寸；skin/slop 按 extent 相对此值缩放。 */
+export const CONTACT_REF_EXTENT = 0.2;
+
 export const CONTACT_SKIN = 0.002;
+
+/** 按刚体特征尺寸缩放接触皮肤，避免小物体相对厚度过大。 */
+export function contactSkinForExtent(extent: number): number {
+    const s = Math.max(1e-4, extent) / CONTACT_REF_EXTENT;
+    return CONTACT_SKIN * s;
+}
 
 export type RawContact = {
     point: THREE.Vector3;

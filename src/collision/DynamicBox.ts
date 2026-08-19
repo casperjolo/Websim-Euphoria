@@ -60,14 +60,10 @@ export class DynamicBoxBody extends DynamicBody {
         const w = this.halfExtents.x * 2;
         const h = this.halfExtents.y * 2;
         const d = this.halfExtents.z * 2;
-        const ix = m / 12 * (h * h + d * d);
-        const iy = m / 12 * (w * w + d * d);
-        const iz = m / 12 * (w * w + h * h);
-        this.invInertia.set(
-            ix > 1e-8 ? 1 / ix : 0,
-            iy > 1e-8 ? 1 / iy : 0,
-            iz > 1e-8 ? 1 / iz : 0,
-        );
+        const ix = Math.max(1e-12, m / 12 * (h * h + d * d));
+        const iy = Math.max(1e-12, m / 12 * (w * w + d * d));
+        const iz = Math.max(1e-12, m / 12 * (w * w + h * h));
+        this.invInertia.set(1 / ix, 1 / iy, 1 / iz);
     }
 }
 

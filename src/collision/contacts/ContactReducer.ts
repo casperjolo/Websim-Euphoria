@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { ImpulseBody } from "../solver/ImpulseBody";
 import { ContactManifold } from "./ContactManifold";
-import { ContactPoint, CONTACT_SKIN, type RawContact } from "./ContactPoint";
+import { ContactPoint, CONTACT_REF_EXTENT, contactSkinForExtent, type RawContact } from "./ContactPoint";
 
 const NORMAL_MERGE = 0.98; // 法线点积高于此值并入同一流形
 const MAX_POINTS = 4; // 单流形最多保留的接触点
@@ -28,9 +28,10 @@ export function reduceContacts(
     let manifoldCount = 0;
 
     // 按法线合并进流形，并累计 normalSum
+    const skin = contactSkinForExtent(body.characteristicExtent?.() ?? CONTACT_REF_EXTENT);
     for (let r = 0; r < count; r++) {
         const contact = raw[r];
-        if (contact.penetration < -CONTACT_SKIN || contact.normal.lengthSq() < 1e-8) continue;
+        if (contact.penetration < -skin || contact.normal.lengthSq() < 1e-8) continue;
         _n.copy(contact.normal).normalize();
         let cluster = -1;
         for (let i = 0; i < manifoldCount; i++) {

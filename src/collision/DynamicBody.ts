@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { integrateQuaternion } from "../utils/vehiclePhysics/VehicleMath";
 
+/** 冲量唤醒：质心线速度增量 ‖Δv‖ = ‖J‖·invMass 超过该值则醒（世界单位/秒）。 */
+const WAKE_DELTA_V = 1e-4;
+const WAKE_DELTA_V_SQ = WAKE_DELTA_V * WAKE_DELTA_V;
+
 /** 动态刚体形状判别。 */
 export type DynamicBodyKind = "sphere" | "box";
 
@@ -133,15 +137,24 @@ export abstract class DynamicBody {
         return out.copy(this.velocity).add(this._world.copy(this.angularVelocity).cross(this._r));
     }
 
+    /**
+     * 休眠唤醒：速度增量 ‖J‖·invMass 超过阈值则醒。
+     */
+    private wakeIfImpulseMeaningful(impulse: THREE.Vector3): void {
+        if (!this.sleeping) return;
+        const inv = this.invMass;
+        if (impulse.lengthSq() * inv * inv > WAKE_DELTA_V_SQ) this.wakeUp();
+    }
+
     /** 在质心施加冲量。 */
     applyImpulse(impulse: THREE.Vector3): void {
-        if (this.sleeping && impulse.lengthSq() > 1e-4) this.wakeUp();
+        this.wakeIfImpulseMeaningful(impulse);
         this.velocity.addScaledVector(impulse, this.invMass);
     }
 
     /** 在世界点施加冲量，同时产生角速度。 */
     applyImpulseAtPoint(impulse: THREE.Vector3, contactPoint: THREE.Vector3): void {
-        if (this.sleeping && impulse.lengthSq() > 1e-4) this.wakeUp();
+        this.wakeIfImpulseMeaningful(impulse);
         this.velocity.addScaledVector(impulse, this.invMass);
         this._r.subVectors(contactPoint, this.position);
         this.angularVelocity.add(this.angularDeltaFromImpulse(impulse, this._r));

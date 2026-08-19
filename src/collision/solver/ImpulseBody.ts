@@ -16,6 +16,11 @@ export type ImpulseBody = {
     friction?: number;
     /** 弹性，0 不反弹，1 完全弹；缺省 0。 */
     restitution?: number;
+    /**
+     * 特征半尺寸（用于缩放接触 skin / 穿透 slop）。
+     * 缺省按 CONTACT_REF_EXTENT，不缩放。
+     */
+    characteristicExtent?: () => number;
     /** 读取世界点处速度：v + ω × r。 */
     getVelocityAtPoint(point: THREE.Vector3, out: THREE.Vector3): THREE.Vector3;
     /** 在世界点施加冲量（线速度 + 角速度）。 */

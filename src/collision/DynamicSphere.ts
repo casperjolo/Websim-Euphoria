@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { CONTACT_SKIN, type RawContact } from "./contacts/ContactPoint";
+import { contactSkinForExtent, type RawContact } from "./contacts/ContactPoint";
 import { DynamicBody } from "./DynamicBody";
 
 /**
@@ -51,8 +51,9 @@ export class DynamicSphereBody extends DynamicBody {
 
     /** 实心球惯量 I = ⅖ m r²（对角），并写 invInertia。 */
     setSphereInertia(): void {
-        const i = 0.4 * this.mass * this.radius * this.radius;
-        const inv = i > 1e-8 ? 1 / i : 0;
+        // 小尺度物体 I 可低于旧地板 1e-8；置 0 会导致无法滚动、地面摩擦过粘
+        const i = Math.max(1e-12, 0.4 * this.mass * this.radius * this.radius);
+        const inv = 1 / i;
         this.invInertia.set(inv, inv, inv);
     }
 }
@@ -130,8 +131,9 @@ export function collectSphereVsMeshContacts(
             temps.offset.subVectors(temps.localSphere.center, temps.closest);
             const dist = temps.offset.length();
             const penetration = temps.localSphere.radius - dist;
-            // 允许轻微皮肤重叠；再远则不是接触
-            if (penetration < -CONTACT_SKIN) return;
+            // 允许轻微皮肤重叠（按球半径缩放，本地空间与 mesh.scale 对齐）
+            const localSkin = contactSkinForExtent(radius) / Math.max(scale, 1e-8);
+            if (penetration < -localSkin) return;
 
             if (dist > 1e-8) temps.normal.copy(temps.offset).multiplyScalar(1 / dist);
             else temps.normal.set(0, 1, 0); // 球心几乎落在面上时给默认上法线

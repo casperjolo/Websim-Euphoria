@@ -3,7 +3,7 @@ import type { playerController } from "../playerController";
 import { CollisionGroup } from "../collision/groups";
 import { ContactCache } from "../collision/contacts/ContactCache";
 import { ContactManifold } from "../collision/contacts/ContactManifold";
-import { CONTACT_SKIN, type RawContact } from "../collision/contacts/ContactPoint";
+import { contactSkinForExtent, type RawContact } from "../collision/contacts/ContactPoint";
 import { reduceContacts } from "../collision/contacts/ContactReducer";
 import { ContactImpulseSolver } from "../collision/solver/ContactImpulseSolver";
 import { DynamicBody } from "../collision/DynamicBody";
@@ -30,8 +30,7 @@ const TARGET_SUB_DT = 1 / 1200; // 目标子步时长（秒）
 const MAX_SUBSTEPS = 20; // 单帧最多子步数
 const MAX_PUSH_RATIO = 2; // 单次位置修正不超过特征尺寸的倍数
 const MAX_SPEED_GRAVITY = 2; // 速度上限相对 |gravity| 的倍数
-/** 推动态体时用的人物质量。 */
-const CHARACTER_PUSH_MASS = 10;
+const CHARACTER_PUSH_MASS = 10; // 推动态体时用的人物假质量（scale = 1 时）。
 const MAX_RAW = 64; // 单体单帧原始接触上限
 const POS_CORRECT = 0.4; // 求解后残留穿透的位置修正比例
 const ROLL_BLEND = 0.45; // 支撑面上向无滑滚动收敛的插值比例
@@ -73,6 +72,12 @@ export class DynamicBodySystem {
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
         this.contactSolver.velocityIterations = 12;
+    }
+
+    /** 当前人物推动假质量：CHARACTER_PUSH_MASS × scale。 */
+    private characterPushMass(): number {
+        const s = this.ctrl.playerModelConfig.scale;
+        return CHARACTER_PUSH_MASS * s;
     }
 
     /** 添加动态球。 */
@@ -431,7 +436,8 @@ export class DynamicBodySystem {
         cache?.save(this.manifolds);
         for (const manifold of this.manifolds) {
             for (const point of manifold.contacts) {
-                const corr = (point.penetration - CONTACT_SKIN) * POS_CORRECT;
+                const skin = contactSkinForExtent(body.characteristicExtent());
+                const corr = (point.penetration - skin) * POS_CORRECT;
                 if (corr > 0) body.position.addScaledVector(manifold.normal, corr);
             }
         }
@@ -448,7 +454,8 @@ export class DynamicBodySystem {
 
         for (const manifold of this.manifolds) {
             for (const point of manifold.contacts) {
-                const corr = (point.penetration - CONTACT_SKIN) * POS_CORRECT;
+                const skin = contactSkinForExtent(body.characteristicExtent());
+                const corr = (point.penetration - skin) * POS_CORRECT;
                 if (corr > 0) body.position.addScaledVector(manifold.normal, corr);
             }
         }
@@ -590,7 +597,7 @@ export class DynamicBodySystem {
 
         const maxSep = info.radius * CHAR_SEP_MAX_RADIUS;
         const playerVel = this.ctrl.playerVelocity;
-        const charMass = CHARACTER_PUSH_MASS;
+        const charMass = this.characterPushMass();
 
         for (const body of this.list) {
             const hit = this.queryCapsuleBodyOverlap(cap, info, body);

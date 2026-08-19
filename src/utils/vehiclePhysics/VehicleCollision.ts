@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { ContactManifold } from "../../collision/contacts/ContactManifold";
-import { CONTACT_SKIN, type RawContact } from "../../collision/contacts/ContactPoint";
+import { CONTACT_SKIN, contactSkinForExtent, type RawContact } from "../../collision/contacts/ContactPoint";
 import { reduceContacts } from "../../collision/contacts/ContactReducer";
 import { closestPointOnTriangle } from "./VehicleMath";
 import type { ImpulseBody } from "../../collision/solver/ImpulseBody";
@@ -59,6 +59,8 @@ export class VehicleCollision {
     private support = new THREE.Vector3();
     private bodyHalf = new THREE.Vector3();
     private raycaster = new THREE.Raycaster();
+    /** 当前 detect 按刚体尺寸缩放后的接触皮肤。 */
+    private contactSkin = CONTACT_SKIN;
 
     /** 配置射线只取最近命中。 */
     constructor() {
@@ -72,6 +74,8 @@ export class VehicleCollision {
     ): ContactManifold[] {
         this.rawCount = 0;
         this.manifolds.length = 0;
+        const extent = Math.max(body.halfExtents.x, body.halfExtents.y, body.halfExtents.z);
+        this.contactSkin = contactSkinForExtent(extent);
         for (const collider of this.toList(colliders)) {
             const tree = (collider.geometry as any)?.boundsTree;
             if (!tree) continue;
@@ -230,7 +234,7 @@ export class VehicleCollision {
             this.bodyHalf.z * Math.abs(this.triN.dot(this.localAxisZ));
         const plane = a.dot(this.triN);
         const depth = plane - (this.localCenter.dot(this.triN) - radius);
-        if (depth <= -CONTACT_SKIN) return;
+        if (depth <= -this.contactSkin) return;
 
         // 沿法线取盒子支撑点，再投影到三角得到接触
         this.support.copy(this.localCenter)
@@ -276,7 +280,7 @@ export class VehicleCollision {
         const p2 = c.dot(this.testAxis);
         this.rangeB.min = Math.min(p0, p1, p2);
         const triMax = Math.max(p0, p1, p2);
-        if (this.rangeA.max + CONTACT_SKIN < this.rangeB.min || this.rangeA.min - CONTACT_SKIN > triMax) return false;
+        if (this.rangeA.max + this.contactSkin < this.rangeB.min || this.rangeA.min - this.contactSkin > triMax) return false;
         this.rangeB.max = Math.min(this.rangeA.max, triMax) - Math.max(this.rangeA.min, this.rangeB.min);
         return true;
     }

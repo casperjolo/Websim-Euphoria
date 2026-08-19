@@ -972,6 +972,7 @@ function spawnLayoutPropBodies(baseMat, layout, worldOffset) {
     const ox = worldOffset.x;
     const oz = worldOffset.z ?? 0;
 
+    const gravity = player.gravity * s;
     spawnSphereGridAt({
         mat: propMat,
         center: new Vector3(ox + xMid, 0, oz + VEHICLE_SPAWNS[0].z * s),
@@ -979,6 +980,7 @@ function spawnLayoutPropBodies(baseMat, layout, worldOffset) {
         right,
         radius: PROP_SPHERE_R * s,
         deckTop,
+        gravity,
     });
     spawnBoxWallAt({
         mat: propMat,
@@ -986,6 +988,7 @@ function spawnLayoutPropBodies(baseMat, layout, worldOffset) {
         right,
         boxSize: PROP_BOX_SIZE * s,
         deckTop,
+        gravity,
     });
 }
 
@@ -1019,7 +1022,7 @@ function spawnSphereGrid(vehicle, mat, layout) {
 }
 
 // 4×4 贴地球阵
-function spawnSphereGridAt({ mat, center, forward, right, radius, deckTop }) {
+function spawnSphereGridAt({ mat, center, forward, right, radius, deckTop, gravity }) {
     const spacing = radius * 2;
     const start = center.clone().addScaledVector(forward, -(PROP_GRID - 1) * spacing * 0.5);
     const geo = new SphereGeometry(1, 24, 16);
@@ -1041,6 +1044,7 @@ function spawnSphereGridAt({ mat, center, forward, right, radius, deckTop }) {
                 mesh,
                 restitution: 0.35,
                 friction: 0.55,
+                ...(gravity != null ? { gravity } : null),
             });
         }
     }
@@ -1059,7 +1063,7 @@ function spawnBoxWall(vehicle, mat, layout) {
 }
 
 // 4×4 箱墙
-function spawnBoxWallAt({ mat, center, right, boxSize, deckTop }) {
+function spawnBoxWallAt({ mat, center, right, boxSize, deckTop, gravity }) {
     const half = boxSize * 0.5;
     const start = center.clone();
     const geo = new BoxGeometry(1, 1, 1);
@@ -1086,6 +1090,7 @@ function spawnBoxWallAt({ mat, center, right, boxSize, deckTop }) {
                 restitution: 0.12,
                 friction: 0.7,
                 density: 1.2,
+                ...(gravity != null ? { gravity } : null),
             });
         }
     }

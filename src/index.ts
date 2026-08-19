@@ -47,7 +47,7 @@ export type { DynamicBodyKind, DynamicBodyMaterialOptions } from "./collision/Dy
 export { ContactImpulseSolver } from "./collision/solver/ContactImpulseSolver";
 export type { ImpulseBody } from "./collision/solver/ImpulseBody";
 export { ContactManifold } from "./collision/contacts/ContactManifold";
-export { ContactPoint, CONTACT_SKIN } from "./collision/contacts/ContactPoint";
+export { ContactPoint, CONTACT_SKIN, CONTACT_REF_EXTENT, contactSkinForExtent } from "./collision/contacts/ContactPoint";
 
 // 载具底层
 export { BVHVehicleController } from "./utils/vehiclePhysics/BVHVehicleController";
