@@ -56,7 +56,7 @@ const VEHICLE_TUNING = {
         clearance: 0.55,
     },
     suspension: {
-        restLength: 0.25,
+        restLength: 0.2,
         maxTravel: 0.2,
         stiffness: 18,
         compression: 2.1,

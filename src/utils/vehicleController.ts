@@ -38,6 +38,9 @@ export const DEFAULT_WHEEL_PHYSICS: WheelPhysicsParams = {
 /** 悬挂最大行程默认值（米，scale 1）。 */
 export const DEFAULT_MAX_SUSPENSION_TRAVEL = 0.35;
 
+/** 视觉悬挂跟随速度（越大越贴射线）。 */
+const VISUAL_FOLLOW = 14;
+
 /** 创建 BVH 车辆控制器并同步轮子视觉。 */
 export function createVehicleController(
     chassisBody: VehicleRigidBody,
@@ -72,20 +75,25 @@ export function createVehicleController(
     const up = new THREE.Vector3(0, 1, 0);
     const wheelSteeringQuat = new THREE.Quaternion();
     const wheelRotationQuat = new THREE.Quaternion();
+    const visualLengthSmooth: number[] = new Array(wheels.length).fill(Number.NaN);
 
-    // 同步轮子视觉旋转
-    function updateWheelVisuals() {
+    // 同步轮子视觉：高度按指数跟随射线，转向与自转直接写入
+    function updateWheelVisuals(delta = 1 / 60) {
+        const follow = 1 - Math.exp(-VISUAL_FOLLOW * Math.max(0, delta));
         for (const [index, wheelObj] of wheels.entries()) {
             if (!wheelObj) continue;
             const wheelAxleCs = vehicle.wheelAxleCs(index) ?? new THREE.Vector3(1, 0, 0);
             const connection = vehicle.wheelChassisConnectionPointCs(index)?.y ?? 0;
-            const suspension = vehicle.wheelSuspensionLength(index) ?? 0;
+            const target = vehicle.wheelVisualLength(index) ?? vehicle.wheelSuspensionLength(index) ?? 0;
             const steering = vehicle.wheelSteering(index) ?? 0;
             const rotationRad = vehicle.wheelRotation(index) ?? 0;
 
-            // 悬挂压缩偏移
-            wheelObj.position.y = connection - suspension;
-            // 转向 * 自转
+            let length = target;
+            if (Number.isFinite(visualLengthSmooth[index])) {
+                length = visualLengthSmooth[index] + (target - visualLengthSmooth[index]) * follow;
+            }
+            visualLengthSmooth[index] = length;
+            wheelObj.position.y = connection - length;
             wheelSteeringQuat.setFromAxisAngle(up, steering);
             wheelRotationQuat.setFromAxisAngle(wheelAxleCs, rotationRad);
             wheelObj.quaternion.copy(wheelSteeringQuat).multiply(wheelRotationQuat);

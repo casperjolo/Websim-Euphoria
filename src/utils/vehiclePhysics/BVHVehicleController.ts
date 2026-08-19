@@ -68,6 +68,7 @@ export class BVHVehicleController {
         wheel.axle.copy(axleCs);
         wheel.restLength = suspensionRestLength;
         wheel.suspensionLength = suspensionRestLength;
+        wheel.visualLength = suspensionRestLength;
         wheel.maxSuspensionTravel = suspensionRestLength;
         wheel.radius = radius;
         this.wheels.push(wheel);
@@ -192,6 +193,11 @@ export class BVHVehicleController {
         return this.wheelAt(i)?.suspensionLength ?? null;
     }
 
+    /** 读取视觉悬挂长度。 */
+    wheelVisualLength(i: number): number | null {
+        return this.wheelAt(i)?.visualLength ?? null;
+    }
+
     /** 读取车轮自转角。 */
     wheelRotation(i: number): number | null {
         return this.wheelAt(i)?.rotation ?? null;
@@ -308,11 +314,12 @@ export class BVHVehicleController {
             }
             if (wheel.contactNormal.dot(wheel.directionWS) > 0) wheel.contactNormal.negate();
 
-            // 夹紧悬挂长度，并投影相对速度
-            let suspensionLength = hit.distance - wheel.radius;
+            // 物理长度夹在行程内；视觉长度跟射线
+            const rawLength = hit.distance - wheel.radius;
             const minLen = Math.max(0, wheel.restLength - wheel.maxSuspensionTravel);
             const maxLen = wheel.restLength + wheel.maxSuspensionTravel;
-            wheel.suspensionLength = Math.min(maxLen, Math.max(minLen, suspensionLength));
+            wheel.visualLength = rawLength;
+            wheel.suspensionLength = Math.min(maxLen, Math.max(minLen, rawLength));
 
             const denom = wheel.contactNormal.dot(wheel.directionWS);
             this.chassis.getVelocityAtPoint(wheel.contactPoint, this.vel);
@@ -334,6 +341,7 @@ export class BVHVehicleController {
         wheel.isInContact = false;
         wheel.contactMesh = null;
         wheel.suspensionLength = wheel.restLength;
+        wheel.visualLength = wheel.restLength;
         wheel.suspensionRelativeVelocity = 0;
         wheel.contactNormal.copy(wheel.directionWS).negate().normalize();
         wheel.clippedInvContactDotSuspension = 1;

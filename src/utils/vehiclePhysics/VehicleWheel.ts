@@ -8,7 +8,8 @@ export class VehicleWheel {
 
     radius = 0.3; // 轮胎半径
     restLength = 0.1; // 悬挂静止长度
-    suspensionLength = 0.1; // 当前悬挂长度
+    suspensionLength = 0.1; // 当前悬挂长度（夹在行程内）
+    visualLength = 0.1; // 视觉悬挂长度，跟射线
     maxSuspensionTravel = 0.1; // 最大行程
 
     stiffness = 18; // 悬挂刚度（质量归一化）

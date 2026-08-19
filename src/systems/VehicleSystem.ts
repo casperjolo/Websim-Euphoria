@@ -203,7 +203,7 @@ export class VehicleSystem {
                 }
                 if (hasWheelContact) v.chassisBody.setLinvel({ x: 0, y: vel.y, z: 0 });
             }
-            this.syncVehicleVisual(v);
+            this.syncVehicleVisual(v, delta);
         }
         if (this.ctrl.controllerMode === 1 && this.active) this.ctrl.syncMountedPlayer(this.active);
     }
@@ -404,12 +404,12 @@ export class VehicleSystem {
     }
 
     // 同步单辆车的模型、车轮和调试盒
-    private syncVehicleVisual(v: VehicleInstance) {
+    private syncVehicleVisual(v: VehicleInstance, delta = 1 / 60) {
         const t = v.chassisBody.translation();
         const r = v.chassisBody.rotation();
         v.vehicleGroup.position.set(t.x, t.y, t.z);
         v.vehicleGroup.quaternion.set(r.x, r.y, r.z, r.w);
-        v.updateWheelVisuals?.();
+        v.updateWheelVisuals?.(delta);
     }
 
     /** 取车辆世界前向。 */

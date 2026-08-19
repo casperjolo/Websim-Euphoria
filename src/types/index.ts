@@ -317,7 +317,7 @@ export type VehicleInstance = {
     /** BVH 车辆控制器。 */
     vehicleController: BVHVehicleController;
     /** 同步车轮视觉的回调。 */
-    updateWheelVisuals: () => void;
+    updateWheelVisuals: (delta?: number) => void;
     /** 销毁车辆控制器的回调。 */
     destroyVehicleController: () => void;
     /** 车辆缩放。 */
