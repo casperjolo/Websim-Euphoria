@@ -438,13 +438,13 @@ export class BVHVehicleController {
             }
         }
 
-        // 把轮胎冲量打到接触点；侧向力略降作用点以减弱侧倾
+        // 纵向冲量作用在轮心；侧向冲量作用在触地点，rollInfluence 收短侧倾力臂
         this.upWS.set(0, 1, 0).applyQuaternion(this.chassis.quaternion);
         for (const wheel of this.wheels) {
             if (!wheel.isInContact) continue;
             if (wheel.forwardImpulse !== 0) {
                 this.impulse.copy(wheel.forwardWS).multiplyScalar(wheel.forwardImpulse);
-                this.chassis.applyImpulseAtPoint(this.impulse, wheel.contactPoint);
+                this.chassis.applyImpulseAtPoint(this.impulse, wheel.hardPointWS);
             }
             if (wheel.sideImpulse !== 0) {
                 this.impulse.copy(wheel.sideWS).multiplyScalar(wheel.sideImpulse);
