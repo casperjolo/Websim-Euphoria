@@ -207,6 +207,15 @@ export type VehicleChassisOptions = {
     angularDamping?: number;
     /** 盒底相对轮胎触地点的高度（随 scale 缩放）；不传则盒底至少罩到轮心。 */
     clearance?: number;
+    /**
+     * 相对自动 AABB 的尺寸比例，默认 1。
+     * X/Z 绕水平中心缩放；Y 从盒底向上缩放，不改变底盘离地高度。
+     */
+    sizeScale?: {
+        x?: number;
+        y?: number;
+        z?: number;
+    };
 };
 
 /** 悬挂与轮胎。 */
@@ -241,7 +250,7 @@ export type VehicleSteeringOptions = {
     steerReturnTimeSlow?: number;
     /** 高速回正时间（秒），默认 0.4。 */
     steerReturnTimeFast?: number;
-    /** 最高车速时转向角相对满舵的比例，默认 0.5。 */
+    /** 最高车速时转向角相对满舵的比例，默认 0.3。 */
     highSpeedSteerScale?: number;
 };
 
@@ -269,9 +278,9 @@ export type VehicleGripOptions = {
 export type VehiclePowerOptions = {
     /** 最高速度基准（km/h，按 scale 缩放），默认 300。 */
     maxSpeed?: number;
-    /** 加速度基准（m/s²，按 scale 缩放），默认 8。 */
+    /** 加速度基准（m/s²，按 scale 缩放），默认 5。 */
     acceleration?: number;
-    /** 制动减速度基准（m/s²，按 scale 缩放），默认 8。 */
+    /** 制动减速度基准（m/s²，按 scale 缩放），默认 5。 */
     deceleration?: number;
 };
 

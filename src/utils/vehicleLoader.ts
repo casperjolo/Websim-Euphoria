@@ -10,7 +10,7 @@ export type VehicleLoaderContext = {
     scene: THREE.Scene;
     vehicleParams: {
         debug: { showPhysicsBox: boolean; showWheelRays: boolean; showWheelTravel: boolean };
-        chassis: { density: number; linearDamping: number; angularDamping: number };
+        chassis: { density: number; linearDamping: number; angularDamping: number; sizeScale?: { x?: number; y?: number; z?: number } };
         model: { rotation: number };
         power: { acceleration: number; deceleration: number; maxSpeed: number };
         steering: { maxSteerAngle: number; steerTime: number; steerReturnTimeSlow: number; steerReturnTimeFast: number; highSpeedSteerScale: number };
@@ -185,7 +185,7 @@ export async function loadVehicleModel(
         minTireBottom = Math.min(minTireBottom, wrapper.position.y - wheelRadius);
     }
 
-    const boxTop = localMax.y;
+    let boxTop = localMax.y;
     // 默认盒底罩到轮心，弹簧压死后由盒子托住，避免只靠轮网格撑地
     let boxBottom = Math.min(localMin.y, minHubY);
     if (opts.chassis?.clearance != null) {
@@ -193,6 +193,14 @@ export async function loadVehicleModel(
         boxBottom = Math.max(boxBottom, minTireBottom);
     }
     if (boxBottom > boxTop - MIN_BOX_HEIGHT) boxBottom = boxTop - MIN_BOX_HEIGHT;
+
+    // X/Z 绕水平中心；Y 从盒底向上缩，离地间隙不变
+    const sizeScale = chassis.sizeScale;
+    const sx = Math.max(1e-3, sizeScale?.x ?? 1);
+    const sy = Math.max(1e-3, sizeScale?.y ?? 1);
+    const sz = Math.max(1e-3, sizeScale?.z ?? 1);
+    const boxHeight = Math.max(MIN_BOX_HEIGHT, (boxTop - boxBottom) * sy);
+    boxTop = boxBottom + boxHeight;
 
     const boxCenterY = (boxTop + boxBottom) * 0.5;
     if (Math.abs(boxCenterY) > 1e-8) {
@@ -225,9 +233,9 @@ export async function loadVehicleModel(
     else forwardLocal.normalize();
 
     const halfExtents = new THREE.Vector3(
-        bodySize.x * 0.5 * 0.95,
-        (boxTop - boxBottom) * 0.5,
-        bodySize.z * 0.5 * 0.95,
+        bodySize.x * 0.5 * sx,
+        boxHeight * 0.5,
+        bodySize.z * 0.5 * sz,
     );
     const volume = 8 * halfExtents.x * halfExtents.y * halfExtents.z;
     const mass = volume * density;

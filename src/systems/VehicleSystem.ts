@@ -18,8 +18,8 @@ export class VehicleSystem {
         debug: { showPhysicsBox: false, showWheelRays: false, showWheelTravel: false }, // 调试显示
         chassis: { density: 1, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
-        power: { acceleration: 8, deceleration: 8, maxSpeed: 300 }, // 动力参数
-        steering: { maxSteerAngle: Math.PI / 5, steerTime: 0.45, steerReturnTimeSlow: 0.55, steerReturnTimeFast: 0.4, highSpeedSteerScale: 0.5 }, // 转向：打满/回正时间（秒），高速收舵
+        power: { acceleration: 5, deceleration: 5, maxSpeed: 300 }, // 动力参数
+        steering: { maxSteerAngle: Math.PI / 5, steerTime: 0.45, steerReturnTimeSlow: 0.55, steerReturnTimeFast: 0.4, highSpeedSteerScale: 0.3 }, // 转向：打满/回正时间（秒），高速收舵
         grip: {
             maxG: 1.2,
             sideFrictionIdle: 1,
@@ -240,7 +240,7 @@ export class VehicleSystem {
         const speed01 = Math.min(1, Math.hypot(linv.x, linv.z) / Math.max(0.01, v.maxSpeed / 3.6));
 
         // 转向：参数为走完满舵行程的时间（秒）；车速越高可用转角越小
-        const { maxSteerAngle, steerTime, steerReturnTimeSlow, steerReturnTimeFast, highSpeedSteerScale = 0.5 } = v.steering;
+        const { maxSteerAngle, steerTime, steerReturnTimeSlow, steerReturnTimeFast, highSpeedSteerScale = 0.3 } = v.steering;
         const currentSteering = vehicleController.wheelSteering(0) || 0;
         const steerDir = Number(c.input.lft) - Number(c.input.rgt);
         const speedSteer = 1 - (1 - highSpeedSteerScale) * speed01 * speed01;

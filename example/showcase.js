@@ -10,6 +10,7 @@ import {
     DoubleSide,
     Float32BufferAttribute,
     Group,
+    LatheGeometry,
     Mesh,
     MeshStandardMaterial,
     PerspectiveCamera,
@@ -21,6 +22,7 @@ import {
     Scene,
     TextureLoader,
     VSMShadowMap,
+    Vector2,
     Vector3,
     WebGLRenderer,
 } from "three";
@@ -52,12 +54,13 @@ const VEHICLE_TUNING = {
         density: 1,
         linearDamping: 0.05,
         angularDamping: 0.5,
-        clearance: 0.55,
+        clearance: 0.8,
+        sizeScale: { x: 0.9, y: 0.55, z: 0.9 },
     },
     suspension: {
-        restLength: 0.2,
-        maxTravel: 0.2,
-        stiffness: 18,
+        restLength: 0.15,
+        maxTravel: 0.15,
+        stiffness: 25,
         compression: 2.1,
         relaxation: 2.5,
         maxForce: 6000,
@@ -70,7 +73,7 @@ const VEHICLE_TUNING = {
         steerTime: 0.45,
         steerReturnTimeSlow: 0.55,
         steerReturnTimeFast: 0.4,
-        highSpeedSteerScale: 0.5,
+        highSpeedSteerScale: 0.3,
     },
     grip: {
         maxG: 1.2,
@@ -84,8 +87,8 @@ const VEHICLE_TUNING = {
     },
     power: {
         maxSpeed: 100,
-        acceleration: 8,
-        deceleration: 8,
+        acceleration: 5,
+        deceleration: 5,
     },
 };
 
@@ -111,6 +114,8 @@ const PLAYER_SCALE_NORMAL = 0.005;
 const PLAYER_SCALE_MINI = PLAYER_SCALE_NORMAL * MINI_SCALE;
 const SCALE_ANIM_DURATION = 1;
 const ZONE_EPS = 0.05;
+// 圆形场地半径相对矩形平台长边的倍数
+const CIRCLE_RADIUS_SCALE = 1.5;
 
 // 按比例生成场景布局
 function createShowcaseLayout(scale = 1) {
@@ -193,13 +198,13 @@ async function init() {
     document.body.appendChild(stats.dom);
 
     // 相机
-    camera = new PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.01, 500);
+    camera = new PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.01, 800);
     camera.position.set(14, 10, 10);
 
     // 控制器
     controls = new MapControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.maxDistance = 160;
+    controls.maxDistance = 260;
     controls.maxPolarAngle = Math.PI / 2.05;
     controls.target.set(0, 1, 0);
 
@@ -208,15 +213,15 @@ async function init() {
 
     // 平行光
     const sun = new DirectionalLight(0xffffff, 2);
-    sun.position.set(16, 36, 24);
+    sun.position.set(16, 48, 24);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = 120;
-    sun.shadow.camera.left = -32;
-    sun.shadow.camera.right = 18;
-    sun.shadow.camera.top = 24;
-    sun.shadow.camera.bottom = -24;
+    sun.shadow.camera.far = 220;
+    sun.shadow.camera.left = -90;
+    sun.shadow.camera.right = 24;
+    sun.shadow.camera.top = 70;
+    sun.shadow.camera.bottom = -70;
     sun.shadow.bias = -0.0005;
     scene.add(sun);
 
@@ -230,35 +235,77 @@ async function init() {
     skyUniforms["mieDirectionalG"].value = 0.99;
     skyUniforms["sunPosition"].value.copy(sun.position.clone().normalize());
 
-    // 测试场景：大场景西墙留豁口 + 嵌套小场景
+    // 测试场景
     const prototypeMat = await loadTiledMaterial("./textures/showcase/prototype.png");
     mainLayout = createShowcaseLayout(1);
     const miniLayout = createShowcaseLayout(MINI_SCALE);
-    // 豁口贴合小场景南北墙外缘，避免接缝空隙
-    const westGap = {
+    // 矩形西墙全开，开口贴合南北墙外缘，与圆东侧相接
+    const mainWestOpening = {
+        zCenter: 0,
+        width: mainLayout.platform.sizeZ + 2 * mainLayout.wallT,
+    };
+    // 小场景南北墙外缘宽度：大圆西豁口 / 小矩形西墙 / 小圆东豁口共用
+    const miniOpening = {
         zCenter: 0,
         width: miniLayout.platform.sizeZ + 2 * miniLayout.wallT,
     };
 
     const world = new Group();
     world.name = "ShowcaseWorld";
-    const mainWorld = buildShowcaseWorld(prototypeMat, mainLayout, { westGap });
+    const mainWorld = buildShowcaseWorld(prototypeMat, mainLayout, { westGap: mainWestOpening });
     mainWorld.name = "MainWorld";
     world.add(mainWorld);
 
-    const miniWorld = buildShowcaseWorld(prototypeMat, miniLayout, { omitEast: true });
-    miniWorld.name = "MiniWorld";
     const mainWestX = mainLayout.platform.x - mainLayout.platform.sizeX * 0.5;
+    const circleRadius = Math.max(mainLayout.platform.sizeX, mainLayout.platform.sizeZ) * CIRCLE_RADIUS_SCALE;
+    const circleCenter = {
+        x: mainWestX - chordOffset(circleRadius, mainWestOpening.width),
+        z: 0,
+    };
+    const circleWestX = circleCenter.x - chordOffset(circleRadius, miniOpening.width);
+
+    const circleWorld = buildCircularArena(prototypeMat, mainLayout, {
+        radius: circleRadius,
+        center: circleCenter,
+        eastGap: { angle: Math.PI * 0.5, width: mainWestOpening.width },
+        westGap: { angle: Math.PI * 1.5, width: miniOpening.width },
+    });
+    circleWorld.name = "CircleWorld";
+    world.add(circleWorld);
+
+    const miniWorld = buildShowcaseWorld(prototypeMat, miniLayout, {
+        omitEast: true,
+        westGap: miniOpening,
+    });
+    miniWorld.name = "MiniWorld";
     const miniLocalEast = miniLayout.platform.x + miniLayout.platform.sizeX * 0.5;
-    // 台面东缘对齐大平台西缘；南北墙东端略伸入豁口与西墙咬合
-    miniWorld.position.set(mainWestX - miniLocalEast, 0, 0);
+    // 小场景台面东缘对齐大圆西侧豁口弦；南北墙东端略伸入豁口与圆墙咬合
+    miniWorld.position.set(circleWestX - miniLocalEast, 0, 0);
+
+    const miniCircleRadius = Math.max(miniLayout.platform.sizeX, miniLayout.platform.sizeZ) * CIRCLE_RADIUS_SCALE;
+    const miniWestX = miniLayout.platform.x - miniLayout.platform.sizeX * 0.5;
+    const miniCircleCenter = {
+        x: miniWestX - chordOffset(miniCircleRadius, miniOpening.width),
+        z: 0,
+    };
+    const miniCircleWorld = buildCircularArena(prototypeMat, miniLayout, {
+        radius: miniCircleRadius,
+        center: miniCircleCenter,
+        eastGap: { angle: Math.PI * 0.5, width: miniOpening.width },
+    });
+    miniCircleWorld.name = "MiniCircleWorld";
+    miniWorld.add(miniCircleWorld);
     world.add(miniWorld);
     scene.add(world);
 
-    // 豁口发光门帘
-    glowPortal = createGlowGapPortal(mainLayout, westGap, mainWestX);
+    // 豁口发光门帘（大圆西侧，进入小场景处）
+    glowPortal = createGlowGapPortal(mainLayout, miniOpening, circleWestX);
     scene.add(glowPortal);
-    miniScaleGate = createMiniScaleBounds(miniLayout, miniWorld.position);
+    miniScaleGate = createMiniScaleBounds(miniLayout, miniWorld.position, {
+        radius: miniCircleRadius,
+        center: miniCircleCenter,
+        wallT: miniLayout.wallT,
+    });
 
     // 加载玩家模型
 
@@ -488,6 +535,98 @@ function createPlatformWalls(root, baseMat, layout, options = {}) {
     }
 }
 
+// 圆心到豁口弦的水平距离
+function chordOffset(radius, gapWidth) {
+    const half = gapWidth * 0.5;
+    return Math.sqrt(Math.max(0, radius * radius - half * half));
+}
+
+// 豁口半角（相对圆心）
+function gapHalfAngle(radius, gapWidth) {
+    return Math.atan2(gapWidth * 0.5, chordOffset(radius, gapWidth));
+}
+
+// 圆形场地：圆盘地面 + 东/西豁口围墙
+function buildCircularArena(baseMat, layout, { radius, center, eastGap, westGap }) {
+    const root = new Group();
+    const { deckY, deckThick, tileSize } = layout;
+    const floorPos = new Vector3(center.x, deckY, center.z);
+    const floorGeo = applyWorldTileUV(
+        new CylinderGeometry(radius, radius, deckThick, 96),
+        floorPos,
+        tileSize,
+    );
+    const floor = new Mesh(floorGeo, baseMat);
+    floor.name = "CircleFloor";
+    floor.position.copy(floorPos);
+    floor.castShadow = true;
+    floor.receiveShadow = true;
+    root.add(floor);
+
+    addCircularWalls(root, baseMat, layout, radius, center, eastGap, westGap);
+    return root;
+}
+
+// Lathe 绕 Y：phi=0 为 +Z，phi=π/2 为 +X，phi=3π/2 为 -X
+function addCircularWalls(root, baseMat, layout, radius, center, eastGap, westGap) {
+    const alphaE = gapHalfAngle(radius, eastGap.width);
+
+    if (!westGap || westGap.width <= 0) {
+        addArcWall(root, baseMat, layout, radius, center, eastGap.angle + alphaE, Math.PI * 2 - 2 * alphaE);
+        addGapCap(root, baseMat, layout, radius, center, eastGap.angle - alphaE);
+        addGapCap(root, baseMat, layout, radius, center, eastGap.angle + alphaE);
+        return;
+    }
+
+    const alphaW = gapHalfAngle(radius, westGap.width);
+
+    addArcWall(root, baseMat, layout, radius, center, eastGap.angle + alphaE, Math.PI - alphaE - alphaW);
+    addArcWall(root, baseMat, layout, radius, center, westGap.angle + alphaW, Math.PI - alphaE - alphaW);
+
+    addGapCap(root, baseMat, layout, radius, center, eastGap.angle - alphaE);
+    addGapCap(root, baseMat, layout, radius, center, eastGap.angle + alphaE);
+    addGapCap(root, baseMat, layout, radius, center, westGap.angle - alphaW);
+    addGapCap(root, baseMat, layout, radius, center, westGap.angle + alphaW);
+}
+
+// 一段有厚度的圆弧墙
+function addArcWall(root, baseMat, layout, radius, center, phiStart, phiLength) {
+    const { wallH, wallT, tileSize } = layout;
+    const points = [
+        new Vector2(radius, 0),
+        new Vector2(radius + wallT, 0),
+        new Vector2(radius + wallT, wallH),
+        new Vector2(radius, wallH),
+        new Vector2(radius, 0),
+    ];
+    const segs = Math.max(12, Math.ceil(96 * Math.abs(phiLength) / (Math.PI * 2)));
+    const geo = applyWorldTileUV(
+        new LatheGeometry(points, segs, phiStart, phiLength),
+        { x: center.x, y: 0, z: center.z },
+        tileSize,
+    );
+    const mesh = new Mesh(geo, baseMat);
+    mesh.position.set(center.x, 0, center.z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    root.add(mesh);
+    return mesh;
+}
+
+// 豁口端面，封住墙体厚度
+function addGapCap(root, baseMat, layout, radius, center, phi) {
+    const { wallH, wallT, tileSize } = layout;
+    const rMid = radius + wallT * 0.5;
+    const pos = new Vector3(
+        center.x + rMid * Math.sin(phi),
+        wallH * 0.5,
+        center.z + rMid * Math.cos(phi),
+    );
+    const mesh = addBox(root, pos, new Vector3(wallT, wallH, wallT), baseMat, tileSize);
+    mesh.rotation.y = phi - Math.PI * 0.5;
+    return mesh;
+}
+
 // 创建豁口半透明发光门帘
 function createGlowGapPortal(layout, westGap, doorX) {
     const group = new Group();
@@ -549,18 +688,28 @@ function updateGlowPortal(t) {
 }
 
 // 小场景世界范围
-function createMiniScaleBounds(layout, worldOffset) {
+function createMiniScaleBounds(layout, worldOffset, circle) {
     const { platform, wallT } = layout;
     const ox = worldOffset.x + platform.x;
     const oz = (worldOffset.z ?? 0) + platform.z;
     const halfX = platform.sizeX * 0.5;
     const halfZ = platform.sizeZ * 0.5;
-    return {
+    const bounds = {
         minX: ox - halfX - wallT,
         maxX: ox + halfX,
         minZ: oz - halfZ - wallT,
         maxZ: oz + halfZ + wallT,
     };
+    if (!circle) return bounds;
+
+    const cx = worldOffset.x + circle.center.x;
+    const cz = (worldOffset.z ?? 0) + (circle.center.z ?? 0);
+    const r = circle.radius + (circle.wallT ?? wallT);
+    bounds.minX = Math.min(bounds.minX, cx - r);
+    bounds.maxX = Math.max(bounds.maxX, cx + r);
+    bounds.minZ = Math.min(bounds.minZ, cz - r);
+    bounds.maxZ = Math.max(bounds.maxZ, cz + r);
+    return bounds;
 }
 
 // 点是否落在小场景范围内
