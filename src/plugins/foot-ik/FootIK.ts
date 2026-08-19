@@ -263,9 +263,6 @@ export class FootIK {
         const scale = this.getPlayerScale();
         if (scale === this.appliedScale) return;
         this.rescaleDistances(scale);
-        this.initSoleLocalSamples(this.legs.left);
-        this.initSoleLocalSamples(this.legs.right);
-        this.buildFootPhaseDatabase();
     }
 
     /** 将距离字段从 appliedScale 换算到 newScale。 */
@@ -293,6 +290,8 @@ export class FootIK {
         this.sampleRayOriginY *= ratio;
         this.raycastFar *= ratio;
         this.snapEpsilon *= ratio;
+        this.meshStepOffsetY *= ratio;
+        this.pelvisOffset *= ratio;
         this.raycaster.far = this.raycastFar;
         this.footPhaseOptions.groundThreshold = this.footPhaseGroundThreshold;
         this.appliedScale = next;
@@ -566,7 +565,8 @@ export class FootIK {
             : this.tmpV2.copy(footWorld).add(this.tmpV3.set(0, 0, 1).applyQuaternion(leg.foot.getWorldQuaternion(this.tmpQ1)).setY(0).normalize().multiplyScalar(this.fakeToeExtend));
 
         const forward = this.tmpV3.copy(toeWorld).sub(footWorld).setY(0);
-        if (forward.lengthSq() < 0.0001) {
+        const minFwdSq = Math.max(1e-8, 1e-4 * this.appliedScale * this.appliedScale);
+        if (forward.lengthSq() < minFwdSq) {
             forward.set(0, 0, 1).applyQuaternion(leg.foot.getWorldQuaternion(this.tmpQ1)).setY(0);
         }
         forward.normalize();
@@ -584,7 +584,9 @@ export class FootIK {
         samples[2].point.copy(toeCenter).addScaledVector(side, this.soleHalfWidth);
         samples[3].point.copy(toeCenter).addScaledVector(side, -this.soleHalfWidth);
 
+        // 把脚骨→鞋底厚度打进 foot-local，之后随骨骼世界缩放。
         for (const sample of samples) {
+            sample.point.y -= this.soleSkinThickness;
             sample.local.copy(sample.point);
             leg.foot.worldToLocal(sample.local);
         }
@@ -750,11 +752,12 @@ export class FootIK {
         if (!model) return;
 
         const speed = 10;
+        const parentScale = model.parent?.getWorldScale(this.tmpV1).y || 1;
 
         this.meshStepOffsetY = MathUtils.damp(this.meshStepOffsetY, wantedOffset, speed, delta);
         if (Math.abs(this.meshStepOffsetY) < this.snapEpsilon) this.meshStepOffsetY = 0;
 
-        model.position.y = this.meshBaseY + this.meshStepOffsetY;
+        model.position.y = this.meshBaseY + this.meshStepOffsetY / parentScale;
         model.updateMatrixWorld(true);
     }
 
@@ -931,10 +934,6 @@ export class FootIK {
         }
 
         if (!anyHit) return;
-
-        // 补偿脚骨到鞋底蒙皮的厚度；平地接近满值，斜坡按法线衰减以免抬得过高。
-        const slopeContactWeight = MathUtils.clamp(leg.hitNormal.y, 0, 1);
-        contactOffset += this.soleSkinThickness * slopeContactWeight;
         if (Math.abs(contactOffset) <= this.snapEpsilon) return;
 
         this.savedAlignedFootWorldQ.copy(leg.foot.getWorldQuaternion(this.tmpQ1));
@@ -1101,6 +1100,7 @@ export class FootIK {
         }
         if (options.soleSkinThickness !== undefined) {
             this.soleSkinThickness = this.scaleDistance(options.soleSkinThickness);
+            soleDirty = true;
         }
         if (options.footAlignWeight !== undefined) {
             this.footAlignWeight = MathUtils.clamp(options.footAlignWeight, 0, 1);

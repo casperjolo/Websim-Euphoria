@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -145,10 +144,14 @@ export class playerController {
     isNearVehicle = false;
 
     // ==================== 调试 ====================
-    /** 显示场景碰撞体。 */
+    /** 显示静态 / 运动学 mesh 碰撞线框。 */
     private displayCollider = false;
-    /** 显示玩家胶囊线框，默认 true。 */
-    private displayPlayerCapsule = true;
+    /** 显示玩家胶囊线框。 */
+    private displayPlayerCapsule = false;
+    /** 显示动态刚体碰撞线框。 */
+    private displayDynamicBody = false;
+    /** 显示车辆底盘物理盒。 */
+    private displayVehiclePhysics = false;
 
     // ==================== 方向常量 & 复用向量 ====================
     /** 朝向旋转速度。 */
@@ -443,18 +446,21 @@ export class playerController {
             const rideHeightScaled = this.rideHeight * s;   // 当前缩放下的实际悬空高度
             const colliderHeight = h - rideHeightScaled;    // 缩短后胶囊总高
 
-            // 创建胶囊体网格
+            const segmentLength = colliderHeight - 2 * r;
+
+            // 创建胶囊体网格（原点对齐 segment 上端；depthTest 与其它调试线框一致）
             this.playerCapsule = new THREE.Mesh(
-                new RoundedBoxGeometry(r * 2, colliderHeight, r * 2, 1, 75),
-                new THREE.MeshStandardMaterial({
+                new THREE.CapsuleGeometry(r, Math.max(segmentLength, 1e-6), 4, 8),
+                new THREE.MeshBasicMaterial({
                     color: new THREE.Color(1, 0, 0),
-                    shadowSide: THREE.DoubleSide,
-                    depthTest: false,
                     wireframe: true,
+                    transparent: true,
+                    opacity: 0.9,
+                    depthTest: true,
                     depthWrite: false,
+                    side: THREE.DoubleSide,
                 }),
             );
-            const segmentLength = colliderHeight - 2 * r;
             this.playerCapsule.geometry.translate(0, -segmentLength / 2, 0);
             this.playerCapsule.capsuleInfo = {
                 radius: r,
@@ -556,8 +562,10 @@ export class playerController {
 
     /** @internal BVH worker。 */
     getBvhWorkerPool() { return this.bvhWorkerPool; }
-    /** @internal 调试线框开关。 */
+    /** @internal 静态 / 运动学 mesh 线框开关。 */
     getDisplayCollider() { return this.displayCollider; }
+    /** @internal 动态刚体线框开关。 */
+    getDisplayDynamicBody() { return this.displayDynamicBody; }
 
     /** 统一创建碰撞体。 */
     addCollider(desc: ColliderDesc): ColliderHandle {
@@ -651,30 +659,44 @@ export class playerController {
 
     // ==================== 内部辅助 ====================
 
-    /** 同步 debug 可见性。 */
+    /** 同步全部 debug 可见性。 */
     syncDebugVisibility() {
+        this.syncPlayerCapsuleDebug();
+        this.syncMeshColliderDebug();
+        this.syncDynamicBodyDebug();
+        this.syncVehiclePhysicsDebug();
+    }
+
+    /** 同步玩家胶囊线框。 */
+    private syncPlayerCapsuleDebug() {
         if (!this.playerCapsule) return;
+        (this.playerCapsule.material as THREE.Material).visible = this.displayPlayerCapsule;
+    }
+
+    /** 同步静态 / 运动学 mesh 碰撞线框。 */
+    private syncMeshColliderDebug() {
         const dbg = this.displayCollider;
-
-        // 玩家胶囊线框
-        (this.playerCapsule.material as THREE.Material).visible = dbg && this.displayPlayerCapsule;
-
-        // 全部已登记的查询用 mesh 线框（static / kinematic）
         for (const mesh of this.getColliderMeshes()) {
             if (dbg && (mesh.geometry as any).boundsTree) {
                 if (!this.scene.children.includes(mesh)) this.scene.add(mesh);
             } else this.scene.remove(mesh);
         }
+    }
 
-        // 动态刚体碰撞线框
+    /** 同步动态刚体碰撞线框。 */
+    private syncDynamicBodyDebug() {
+        const dbg = this.displayDynamicBody;
         for (const body of this.dynamics.list) {
             const mesh = body.debugMesh;
             if (dbg) {
                 if (!this.scene.children.includes(mesh)) this.scene.add(mesh);
             } else this.scene.remove(mesh);
         }
+    }
 
-        // 车辆底盘物理盒（dynamic + box）
+    /** 同步车辆底盘物理盒。 */
+    private syncVehiclePhysicsDebug() {
+        const dbg = this.displayVehiclePhysics;
         this.vehicle.params.debug.showPhysicsBox = dbg;
         for (const v of this.vehicle.list) {
             if (!v.physicsBoxMesh) continue;
@@ -728,6 +750,7 @@ export class playerController {
         this.playerRunSpeed *= ratio;
         this.playerFlySpeed *= ratio;
         this.curPlayerSpeed *= ratio;
+        this.decelBase *= ratio;
         this.cam.epsilon *= ratio;
         this.cam.minDist *= ratio;
         this.cam.maxDist *= ratio;
@@ -739,9 +762,9 @@ export class playerController {
     private recomputeGroundThresholds() {
         const info = this.playerCapsule?.capsuleInfo;
         if (!info) return;
+        const sy = this.playerCapsule.scale.y || 1;
         const rideHeightScaled = this.rideHeight * this.playerModelConfig.scale;
-        // 悬空胶囊：snapH 补偿 rideHeight
-        this.snapH = -info.segment.end.y + info.radius + rideHeightScaled;
+        this.snapH = (-info.segment.end.y) * sy + info.radius + rideHeightScaled;
         this.maxH = this.snapH + rideHeightScaled;
     }
 
@@ -758,11 +781,7 @@ export class playerController {
         this.playerCapsule?.scale.multiplyScalar(ratio);
         if (this.playerCapsule?.capsuleInfo) {
             this.playerCapsule.capsuleInfo.radius *= ratio;
-            this.playerCapsule.capsuleInfo.segment.end.y *= ratio;
-            if (this.playerCapsule.capsuleInfo.dynamicsSegment) {
-                this.playerCapsule.capsuleInfo.dynamicsSegment.end.y *= ratio;
-            }
-            this.recomputeGroundThresholds(); // 几何随缩放变化，重算站立/落地阈值
+            this.recomputeGroundThresholds();
         }
         if (this.isFirstPerson) this.cam.setFirstPerson();
     }
@@ -882,15 +901,25 @@ export class playerController {
     setEnableZoom(enable: boolean) { this.cam.zoomEnabled = enable; this.controls.enableZoom = enable; }
 
     // --- 调试 ---
-    /** 切换碰撞体调试显示。 */
+    /** 切换静态碰撞线框。 */
     setColliderDebug(debug: boolean) {
         this.displayCollider = debug;
-        this.syncDebugVisibility();
+        this.syncMeshColliderDebug();
     }
-    /** 切换玩家胶囊线框调试显示。 */
+    /** 切换玩家胶囊线框。 */
     setPlayerCapsuleDebug(debug: boolean) {
         this.displayPlayerCapsule = debug;
-        this.syncDebugVisibility();
+        this.syncPlayerCapsuleDebug();
+    }
+    /** 切换动态刚体碰撞线框。 */
+    setDynamicBodyDebug(debug: boolean) {
+        this.displayDynamicBody = debug;
+        this.syncDynamicBodyDebug();
+    }
+    /** 切换车辆底盘物理盒。 */
+    setVehiclePhysicsDebug(debug: boolean) {
+        this.displayVehiclePhysics = debug;
+        this.syncVehiclePhysicsDebug();
     }
     /** 临时跳过玩家胶囊碰撞检测。 */
     setSkipCapsuleCollision(skip: boolean) { this.skipCapsuleCollision = skip; }

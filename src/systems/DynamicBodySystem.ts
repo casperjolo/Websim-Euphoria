@@ -39,6 +39,10 @@ const DYNAMIC_MASK = CollisionGroup.DEFAULT | CollisionGroup.VEHICLE | Collision
 const KIN_CAPSULE_BAUMGARTE = 0.8; // 动态体撞运动学胶囊时的位置修正比例
 /** 人物单次相对动态体的最大位置修正（相对胶囊半径）。 */
 const CHAR_SEP_MAX_RADIUS = 1.25;
+const SLEEP_LINEAR = 0.3; // 线速度低于该值可累计休眠
+const SLEEP_ANGULAR = 0.7; // 角速度低于该值可累计休眠
+const SLEEP_TIME = 0.35; // 连续满足阈值后进入休眠（秒）
+const SLEEP_WAKE_FACTOR = 3; // 超过阈值该倍数才清零休眠计时（迟滞）
 
 /**
  * 动态刚体推进：按 kind 分派形状窄相（球 / 盒）。
@@ -123,7 +127,7 @@ export class DynamicBodySystem {
         body.colliderId = col.id;
         this.list.push(body);
         this.contactCaches.set(body, new ContactCache());
-        if (this.ctrl.getDisplayCollider()) this.ctrl.scene.add(debugMesh);
+        if (this.ctrl.getDisplayDynamicBody()) this.ctrl.scene.add(debugMesh);
         return body;
     }
 
@@ -186,7 +190,7 @@ export class DynamicBodySystem {
         body.colliderId = col.id;
         this.list.push(body);
         this.contactCaches.set(body, new ContactCache());
-        if (this.ctrl.getDisplayCollider()) this.ctrl.scene.add(debugMesh);
+        if (this.ctrl.getDisplayDynamicBody()) this.ctrl.scene.add(debugMesh);
         return body;
     }
 
@@ -212,7 +216,7 @@ export class DynamicBodySystem {
         while (this.list.length) this.remove(this.list[this.list.length - 1]);
     }
 
-    /** 推进全部动态刚体：子步求解 → 平台带走 → 同步视觉。 */
+    /** 推进全部动态刚体：子步求解 → 平台带走 → 休眠判定 → 同步视觉。 */
     step(delta: number): void {
         if (!this.list.length) return;
         this.skipVehicleMeshes.length = 0;
@@ -222,6 +226,7 @@ export class DynamicBodySystem {
         const sub = delta / SUBSTEPS;
         for (let i = 0; i < SUBSTEPS; i++) this.stepSub(sub);
         for (const body of this.list) this.applyKinematicCarry(body);
+        for (const body of this.list) this.updateSleep(body, delta);
         for (const body of this.list) {
             body.mesh.position.copy(body.position);
             body.mesh.quaternion.copy(body.quaternion);
@@ -241,6 +246,11 @@ export class DynamicBodySystem {
     /** 单次子步：重力积分 → 按形状窄相 → 阻尼与限速。 */
     private stepSub(dt: number): void {
         for (const body of this.list) {
+            if (body.sleeping) {
+                // 休眠体仍检测车辆接触，命中则唤醒并解算
+                this.collideSleepingBodyWithVehicles(body);
+                continue;
+            }
             const col = this.ctrl.collisionWorld.get(body.colliderId);
             if (!col) continue;
 
@@ -262,7 +272,53 @@ export class DynamicBodySystem {
         }
         this.collideSpherePairs();
         this.collideBoxPairs();
-        for (const body of this.list) this.clampSpeed(body);
+        for (const body of this.list) {
+            if (!body.sleeping) this.clampSpeed(body);
+        }
+    }
+
+    /** 休眠刚体与车辆底盘接触检测。 */
+    private collideSleepingBodyWithVehicles(body: DynamicBody): void {
+        if (isBoxBody(body)) this.collideBoxVehicleBoxes(body);
+        else if (isSphereBody(body)) this.collideSphereVehicleBoxes(body);
+    }
+
+    /** 按速度阈值累计 / 清除休眠计时。 */
+    private updateSleep(body: DynamicBody, dt: number): void {
+        if (!body.canSleep) {
+            if (body.sleeping) body.wakeUp();
+            return;
+        }
+        if (body.sleeping) return;
+
+        const linSq = body.velocity.lengthSq();
+        const angSq = body.angularVelocity.lengthSq();
+        const linMax = SLEEP_LINEAR * SLEEP_LINEAR;
+        const angMax = SLEEP_ANGULAR * SLEEP_ANGULAR;
+        const wakeLin = linMax * SLEEP_WAKE_FACTOR * SLEEP_WAKE_FACTOR;
+        const wakeAng = angMax * SLEEP_WAKE_FACTOR * SLEEP_WAKE_FACTOR;
+
+        if (linSq > wakeLin || angSq > wakeAng) {
+            body.sleepTimer = 0;
+            return;
+        }
+        if (linSq <= linMax && angSq <= angMax) {
+            body.sleepTimer += dt;
+            if (body.sleepTimer >= SLEEP_TIME) body.putToSleep();
+        }
+    }
+
+    /** 双方都休眠则跳过；一方休眠时按需唤醒后再解算。 */
+    private shouldSolveDynamicPair(a: DynamicBody, b: DynamicBody): boolean {
+        if (a.sleeping && b.sleeping) return false;
+        if (a.sleeping || b.sleeping) {
+            const awake = a.sleeping ? b : a;
+            const sleeper = a.sleeping ? a : b;
+            if (awake.isRestingCandidate(SLEEP_LINEAR, SLEEP_ANGULAR)) return false;
+            sleeper.wakeUp();
+            return true;
+        }
+        return true;
     }
 
     /**
@@ -437,7 +493,20 @@ export class DynamicBodySystem {
         }
     }
 
-    /** 球与单个 OBB 刚体：推出球并双方在接触点施冲量。 */
+    /** 球 vs 车辆底盘（休眠体专用，不测其它动态盒）。 */
+    private collideSphereVehicleBoxes(body: DynamicSphereBody): void {
+        const worldCol = this.ctrl.collisionWorld.get(body.colliderId);
+        if (!worldCol) return;
+        const boxes = this.ctrl.collisionWorld.query(worldCol, { kinds: ["box"] });
+        for (const box of boxes) {
+            const vehicle = box.userData as VehicleInstance | undefined;
+            const chassis = vehicle?.chassisBody;
+            if (!chassis) continue;
+            if (this.resolveSphereVsObbBody(body, chassis)) body.wakeUp();
+        }
+    }
+
+    /** 球与单个 OBB 刚体：推出球并双方在接触点施冲量；有接触返回 true。 */
     private resolveSphereVsObbBody(
         body: DynamicSphereBody,
         other: {
@@ -445,26 +514,27 @@ export class DynamicBodySystem {
             getVelocityAtPoint(p: THREE.Vector3, o: THREE.Vector3): THREE.Vector3;
             applyImpulseAtPoint(i: THREE.Vector3, p: THREE.Vector3): void
         },
-    ): void {
+    ): boolean {
         if (!collideSphereVsObb(
             body.position, body.radius,
             other.position, other.quaternion, other.halfExtents,
             this.temps,
-        )) return;
+        )) return false;
 
         body.getVelocityAtPoint(this.temps.contact, this.bodyVel);
         other.getVelocityAtPoint(this.temps.contact, this.temps.boxVel);
         this.temps.offset.copy(this.bodyVel).sub(this.temps.boxVel);
         const vn = this.temps.offset.dot(this.temps.normal);
-        if (vn >= 0) return;
+        if (vn >= 0) return true;
         const deltaVn = -vn * (1 + body.restitution);
         this.temps.impulse.copy(this.temps.normal).multiplyScalar(deltaVn * body.mass);
         body.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
         this.temps.impulse.multiplyScalar(-1);
         other.applyImpulseAtPoint(this.temps.impulse, this.temps.contact);
+        return true;
     }
 
-    /** 动态盒 vs 车辆底盘 OBB。 */
+    /** 动态盒 vs 车辆底盘 OBB；有接触时唤醒休眠盒。 */
     private collideBoxVehicleBoxes(body: DynamicBoxBody): void {
         const worldCol = this.ctrl.collisionWorld.get(body.colliderId);
         if (!worldCol) return;
@@ -474,7 +544,7 @@ export class DynamicBodySystem {
             const vehicle = box.userData as VehicleInstance | undefined;
             const chassis = vehicle?.chassisBody;
             if (!chassis) continue;
-            resolveObbObb(body, chassis, this.obbTemps);
+            if (resolveObbObb(body, chassis, this.obbTemps)) body.wakeUp();
         }
     }
 
@@ -486,6 +556,7 @@ export class DynamicBodySystem {
             for (let j = i + 1; j < this.list.length; j++) {
                 const b = this.list[j];
                 if (!isSphereBody(b)) continue;
+                if (!this.shouldSolveDynamicPair(a, b)) continue;
                 resolveSphereSphere(a, b, this.temps, 0.5 * (a.restitution + b.restitution));
             }
         }
@@ -499,6 +570,7 @@ export class DynamicBodySystem {
             for (let j = i + 1; j < this.list.length; j++) {
                 const b = this.list[j];
                 if (!isBoxBody(b)) continue;
+                if (!this.shouldSolveDynamicPair(a, b)) continue;
                 resolveObbObb(a, b, this.obbTemps);
             }
         }
@@ -639,7 +711,7 @@ export class DynamicBodySystem {
 
     /** 刚体停在运动学网格上时按平台 prev→current 矩阵带走；位移过大则回退。 */
     private applyKinematicCarry(body: DynamicBody): void {
-        if (!body.contactMesh) return;
+        if (body.sleeping || !body.contactMesh) return;
         const entry = this.ctrl.getKinematicColliderEntries().find(e => e.mesh === body.contactMesh);
         if (!entry) return;
         this.carryPrevInv.copy(entry.prevWorldMatrix).invert();

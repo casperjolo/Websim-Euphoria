@@ -4,14 +4,18 @@ import {
     BoxGeometry,
     BufferGeometry,
     Clock,
+    Color,
     CylinderGeometry,
     DirectionalLight,
+    DoubleSide,
     Float32BufferAttribute,
     Group,
     Mesh,
     MeshStandardMaterial,
     PerspectiveCamera,
+    PlaneGeometry,
     RepeatWrapping,
+    ShaderMaterial,
     SphereGeometry,
     SRGBColorSpace,
     Scene,
@@ -30,16 +34,11 @@ import { FootIK } from "../src/foot-ik";
 
 const TILE_SIZE = 1;
 const SLOPE_ANGLES = [20, 30, 40];
-const L1_TOP = 1.2;
 
-// 矩形主平台
-const PLATFORM = { x: -18, z: 0, sizeX: 52, sizeZ: 36 };
-const WALL_H = 2.0;
-const WALL_T = 0.35;
 const DECK_Y = -0.06;
 const DECK_THICK = 0.12;
 
-// 车辆停放
+// 车辆停放（仅大场景）
 const VEHICLE_SPAWNS = [
     new Vector3(-1, 0, -11),
     new Vector3(-1, 0, 11),
@@ -100,8 +99,44 @@ const ZONE_PROP = { x: -34, z: -9, size: 12, drop: 0.25 };
 const ZONE_KINE = { x: -34, z: 9 };
 const PROP_SPHERE_R = 0.2;
 const ACCENT_GRAY = 0xc8c8c8;
-const KINE_ACCENT_COLOR = 0x7ec8e3;
-const KINE_ACCENT_EMISSIVE = 0x123040;
+const PROP_GRID = 4;
+const PROP_BOX_SIZE = 0.38;
+const PROP_ACCENT_COLOR = 0x7eb0d4;
+
+const KINE_SHUTTLE_SPEED = 0.9;
+const KINE_SPIN_SPEED = 0.35;
+
+const MINI_SCALE = 0.1;
+const PLAYER_SCALE_NORMAL = 0.005;
+const PLAYER_SCALE_MINI = PLAYER_SCALE_NORMAL * MINI_SCALE;
+const SCALE_ANIM_DURATION = 1;
+const ZONE_EPS = 0.05;
+
+// 按比例生成场景布局
+function createShowcaseLayout(scale = 1) {
+    const s = scale;
+    return {
+        scale: s,
+        platform: { x: -5 * s, z: 0, sizeX: 30 * s, sizeZ: 28 * s },
+        wallH: 2.0 * s,
+        wallT: 0.35 * s,
+        deckY: DECK_Y * s,
+        deckThick: DECK_THICK * s,
+        l1Top: 1.2 * s,
+        obstacleX0: -9 * s,
+        obstacleCount: 6,
+        obstacleSpacing: 1.8 * s,
+        obstacleZ: 3.2 * s,
+        obstacleCylR: 0.15 * s,
+        obstacleCylLen: 2.5 * s,
+        obstacleBoxSize: new Vector3(0.25 * s, 0.275 * s, 2.5 * s),
+        stairWidth: 1 * s,
+        rampWidth: 1 * s,
+        kineThickness: 0.12 * s,
+        kineTopOffset: 0.4 * s,
+        tileSize: TILE_SIZE * s,
+    };
+}
 
 // 染色材质
 function tintMaterial(baseMat, hex) {
@@ -109,32 +144,6 @@ function tintMaterial(baseMat, hex) {
     mat.color?.setHex?.(hex);
     return mat;
 }
-
-// 运动学平台强调材质
-function createKineAccentMaterial(baseMat) {
-    const mat = baseMat.clone();
-    mat.color?.setHex?.(KINE_ACCENT_COLOR);
-    mat.emissive?.setHex?.(KINE_ACCENT_EMISSIVE);
-    mat.emissiveIntensity = 0.15;
-    return mat;
-}
-const KINE_LIFT_POS = new Vector3(ZONE_KINE.x + 2, 0.2, ZONE_KINE.z);
-const KINE_SHUTTLE_A = new Vector3(ZONE_KINE.x - 2, 0.2, ZONE_KINE.z - 4);
-const KINE_SHUTTLE_B = new Vector3(ZONE_KINE.x - 2, 0.2, ZONE_KINE.z + 4);
-const KINE_SHUTTLE_HI_A = new Vector3(ZONE_KINE.x - 2, 0.8, ZONE_KINE.z - 4);
-const KINE_SHUTTLE_HI_B = new Vector3(ZONE_KINE.x - 2, 0.8, ZONE_KINE.z + 4);
-
-// 六棱柱顶圆形载人平台
-const HEX_RIDE_RADIUS = 1.15;
-const HEX_RIDE_THICKNESS = 0.1;
-const HEX_RIDE_Y = L1_TOP + HEX_RIDE_THICKNESS * 0.5;
-const HEX_RIDE_FROM = new Vector3(0, HEX_RIDE_Y, 0);
-const HEX_RIDE_TO = new Vector3(
-    PLATFORM.x - PLATFORM.sizeX * 0.5 + HEX_RIDE_RADIUS + 0.5,
-    HEX_RIDE_Y,
-    0,
-);
-const HEX_RIDE_SPEED = 2;
 
 const scene = new Scene();
 const animClock = new Clock();
@@ -146,8 +155,13 @@ let player;
 let footIK;
 let gui;
 let stats;
-let prototypeMat;
 let kinematicPlatforms = [];
+let mainLayout;
+let miniScaleGate = null;
+let glowPortal = null;
+let isSmallScale = false;
+let isScaling = false;
+let scaleAnimFrame = null;
 
 init();
 
@@ -180,14 +194,14 @@ async function init() {
 
     // 相机
     camera = new PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.01, 500);
-    camera.position.set(16, 12, 8);
+    camera.position.set(14, 10, 10);
 
     // 控制器
     controls = new MapControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.maxDistance = 160;
     controls.maxPolarAngle = Math.PI / 2.05;
-    controls.target.set(-12, 1, 0);
+    controls.target.set(0, 1, 0);
 
     // 环境光
     scene.add(new AmbientLight(0xffffff, 1.5));
@@ -198,11 +212,11 @@ async function init() {
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = 140;
-    sun.shadow.camera.left = -50;
-    sun.shadow.camera.right = 30;
-    sun.shadow.camera.top = 40;
-    sun.shadow.camera.bottom = -40;
+    sun.shadow.camera.far = 120;
+    sun.shadow.camera.left = -32;
+    sun.shadow.camera.right = 18;
+    sun.shadow.camera.top = 24;
+    sun.shadow.camera.bottom = -24;
     sun.shadow.bias = -0.0005;
     scene.add(sun);
 
@@ -216,10 +230,35 @@ async function init() {
     skyUniforms["mieDirectionalG"].value = 0.99;
     skyUniforms["sunPosition"].value.copy(sun.position.clone().normalize());
 
-    // 测试场景
-    prototypeMat = await loadTiledMaterial("./textures/showcase/prototype.png");
-    const world = buildShowcaseWorld(prototypeMat);
+    // 测试场景：大场景西墙留豁口 + 嵌套小场景
+    const prototypeMat = await loadTiledMaterial("./textures/showcase/prototype.png");
+    mainLayout = createShowcaseLayout(1);
+    const miniLayout = createShowcaseLayout(MINI_SCALE);
+    // 豁口贴合小场景南北墙外缘，避免接缝空隙
+    const westGap = {
+        zCenter: 0,
+        width: miniLayout.platform.sizeZ + 2 * miniLayout.wallT,
+    };
+
+    const world = new Group();
+    world.name = "ShowcaseWorld";
+    const mainWorld = buildShowcaseWorld(prototypeMat, mainLayout, { westGap });
+    mainWorld.name = "MainWorld";
+    world.add(mainWorld);
+
+    const miniWorld = buildShowcaseWorld(prototypeMat, miniLayout, { omitEast: true });
+    miniWorld.name = "MiniWorld";
+    const mainWestX = mainLayout.platform.x - mainLayout.platform.sizeX * 0.5;
+    const miniLocalEast = miniLayout.platform.x + miniLayout.platform.sizeX * 0.5;
+    // 台面东缘对齐大平台西缘；南北墙东端略伸入豁口与西墙咬合
+    miniWorld.position.set(mainWestX - miniLocalEast, 0, 0);
+    world.add(miniWorld);
     scene.add(world);
+
+    // 豁口发光门帘
+    glowPortal = createGlowGapPortal(mainLayout, westGap, mainWestX);
+    scene.add(glowPortal);
+    miniScaleGate = createMiniScaleBounds(miniLayout, miniWorld.position);
 
     // 加载玩家模型
 
@@ -244,7 +283,7 @@ async function init() {
         playerModelConfig: {
             model: playerGltf.scene,
             animations: playerGltf.animations,
-            scale: 0.005,
+            scale: PLAYER_SCALE_NORMAL,
             idleAnim: "Idle_Loop",
             walkAnim: "Walk_Loop",
             runAnim: "Sprint_Loop",
@@ -291,10 +330,11 @@ async function init() {
     });
     player.use(footIK);
 
-    createKinematicZone(prototypeMat);
-    createHexRidePlatform(prototypeMat);
-    spawnPropBodies();
     await spawnShowcaseVehicles(gltfLoader);
+    spawnVehiclePropBodies(prototypeMat);
+    spawnLayoutPropBodies(prototypeMat, miniLayout, miniWorld.position);
+    createKinematicPlatforms(prototypeMat, mainLayout, scene);
+    createKinematicPlatforms(prototypeMat, miniLayout, miniWorld);
 
     createDebugPanel();
 
@@ -322,10 +362,11 @@ async function loadTiledMaterial(url) {
 }
 
 // 按世界尺度写入 UV
-function applyWorldTileUV(geometry, origin = { x: 0, y: 0, z: 0 }) {
+function applyWorldTileUV(geometry, origin = { x: 0, y: 0, z: 0 }, tileSize = TILE_SIZE) {
     const flat = geometry.index ? geometry.toNonIndexed() : geometry;
     const pos = flat.getAttribute("position");
     const uv = new Float32BufferAttribute(new Float32Array(pos.count * 2), 2);
+    const tile = Math.max(tileSize, 1e-6);
 
     for (let t = 0; t < pos.count; t += 3) {
         const ax = pos.getX(t);
@@ -365,7 +406,7 @@ function applyWorldTileUV(geometry, origin = { x: 0, y: 0, z: 0 }) {
                 u = x;
                 v = y;
             }
-            uv.setXY(idx, u / TILE_SIZE, v / TILE_SIZE);
+            uv.setXY(idx, u / tile, v / tile);
         }
     }
 
@@ -375,60 +416,236 @@ function applyWorldTileUV(geometry, origin = { x: 0, y: 0, z: 0 }) {
 }
 
 // 创建展示场景
-function buildShowcaseWorld(baseMat) {
+function buildShowcaseWorld(baseMat, layout, options = {}) {
     const root = new Group();
-    root.name = "ShowcaseWorld";
+    const { platform, deckY, deckThick, tileSize } = layout;
 
-    // 矩形主平台 + 围墙
     addBox(
         root,
-        new Vector3(PLATFORM.x, DECK_Y, PLATFORM.z),
-        new Vector3(PLATFORM.sizeX, DECK_THICK, PLATFORM.sizeZ),
+        new Vector3(platform.x, deckY, platform.z),
+        new Vector3(platform.sizeX, deckThick, platform.sizeZ),
         baseMat,
+        tileSize,
     );
-    createPlatformWalls(root, baseMat);
-    createClimbGroups(root, baseMat);
-
-    // 半埋横向圆柱 + 半埋长方体
-    createHalfBuriedObstacles(root, baseMat);
-
-    // 远端左：装饰地板 + 静态方块
-    createPropPit(root, baseMat);
+    createPlatformWalls(root, baseMat, layout, options);
+    createClimbGroups(root, baseMat, layout);
+    createHalfBuriedObstacles(root, baseMat, layout);
 
     return root;
 }
 
 // 平台围墙
-function createPlatformWalls(root, baseMat) {
-    const { x, z, sizeX, sizeZ } = PLATFORM;
+function createPlatformWalls(root, baseMat, layout, options = {}) {
+    const { platform, wallH, wallT, tileSize } = layout;
+    const { x, z, sizeX, sizeZ } = platform;
     const halfX = sizeX * 0.5;
     const halfZ = sizeZ * 0.5;
-    const y = WALL_H * 0.5;
+    const y = wallH * 0.5;
+    const westX = x - halfX - wallT * 0.5;
+    const westGap = options.westGap;
 
-    // 北 / 南 / 西 / 东
-    addBox(root, new Vector3(x, y, z + halfZ + WALL_T * 0.5), new Vector3(sizeX + WALL_T * 2, WALL_H, WALL_T), baseMat);
-    addBox(root, new Vector3(x, y, z - halfZ - WALL_T * 0.5), new Vector3(sizeX + WALL_T * 2, WALL_H, WALL_T), baseMat);
-    addBox(root, new Vector3(x - halfX - WALL_T * 0.5, y, z), new Vector3(WALL_T, WALL_H, sizeZ), baseMat);
-    addBox(root, new Vector3(x + halfX + WALL_T * 0.5, y, z), new Vector3(WALL_T, WALL_H, sizeZ), baseMat);
+    // 北 / 南
+    addBox(root, new Vector3(x, y, z + halfZ + wallT * 0.5), new Vector3(sizeX + wallT * 2, wallH, wallT), baseMat, tileSize);
+    addBox(root, new Vector3(x, y, z - halfZ - wallT * 0.5), new Vector3(sizeX + wallT * 2, wallH, wallT), baseMat, tileSize);
+
+    // 东墙
+    if (!options.omitEast) {
+        addBox(root, new Vector3(x + halfX + wallT * 0.5, y, z), new Vector3(wallT, wallH, sizeZ), baseMat, tileSize);
+    }
+
+    // 西墙：可选中部豁口
+    if (!westGap || westGap.width <= 0) {
+        addBox(root, new Vector3(westX, y, z), new Vector3(wallT, wallH, sizeZ), baseMat, tileSize);
+        return;
+    }
+
+    const gapHalf = westGap.width * 0.5;
+    const gapCenter = westGap.zCenter;
+    const southEnd = z - halfZ;
+    const northEnd = z + halfZ;
+    const gapSouth = gapCenter - gapHalf;
+    const gapNorth = gapCenter + gapHalf;
+
+    const southLen = gapSouth - southEnd;
+    if (southLen > 1e-4) {
+        addBox(
+            root,
+            new Vector3(westX, y, southEnd + southLen * 0.5),
+            new Vector3(wallT, wallH, southLen),
+            baseMat,
+            tileSize,
+        );
+    }
+    const northLen = northEnd - gapNorth;
+    if (northLen > 1e-4) {
+        addBox(
+            root,
+            new Vector3(westX, y, gapNorth + northLen * 0.5),
+            new Vector3(wallT, wallH, northLen),
+            baseMat,
+            tileSize,
+        );
+    }
+}
+
+// 创建豁口半透明发光门帘
+function createGlowGapPortal(layout, westGap, doorX) {
+    const group = new Group();
+    group.name = "GlowGapPortal";
+
+    const mat = new ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: DoubleSide,
+        uniforms: {
+            uTime: { value: 0 },
+            uColor: { value: new Color(0x66e0ff) },
+            uIntensity: { value: 1.35 },
+        },
+        vertexShader: /* glsl */ `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform vec3 uColor;
+            uniform float uIntensity;
+            varying vec2 vUv;
+
+            void main() {
+                float edgeX = smoothstep(0.0, 0.12, vUv.x) * smoothstep(0.0, 0.12, 1.0 - vUv.x);
+                float edgeY = smoothstep(0.0, 0.08, vUv.y) * smoothstep(0.0, 0.1, 1.0 - vUv.y);
+                float veil = edgeX * edgeY;
+                float wave = 0.55 + 0.45 * sin(vUv.y * 14.0 - uTime * 2.4);
+                float scan = 0.35 + 0.65 * pow(abs(sin(vUv.x * 3.14159 + uTime * 1.6)), 2.0);
+                float alpha = veil * (0.22 + 0.38 * wave * scan);
+                vec3 col = uColor * (uIntensity + 0.55 * wave);
+                gl_FragColor = vec4(col, alpha);
+            }
+        `,
+    });
+
+    const mesh = new Mesh(
+        new PlaneGeometry(westGap.width, layout.wallH),
+        mat,
+    );
+    mesh.name = "GlowGapCurtain";
+    mesh.rotation.y = Math.PI * 0.5;
+    mesh.position.set(doorX, layout.wallH * 0.5, westGap.zCenter);
+    mesh.renderOrder = 2;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    group.userData.material = mat;
+    return group;
+}
+
+// 更新发光门帘时间
+function updateGlowPortal(t) {
+    const mat = glowPortal?.userData?.material;
+    if (mat?.uniforms?.uTime) mat.uniforms.uTime.value = t;
+}
+
+// 小场景世界范围
+function createMiniScaleBounds(layout, worldOffset) {
+    const { platform, wallT } = layout;
+    const ox = worldOffset.x + platform.x;
+    const oz = (worldOffset.z ?? 0) + platform.z;
+    const halfX = platform.sizeX * 0.5;
+    const halfZ = platform.sizeZ * 0.5;
+    return {
+        minX: ox - halfX - wallT,
+        maxX: ox + halfX,
+        minZ: oz - halfZ - wallT,
+        maxZ: oz + halfZ + wallT,
+    };
+}
+
+// 点是否落在小场景范围内
+function isInsideMiniScaleBounds(pos, bounds, pad = 0) {
+    return (
+        pos.x >= bounds.minX - pad
+        && pos.x <= bounds.maxX + pad
+        && pos.z >= bounds.minZ - pad
+        && pos.z <= bounds.maxZ + pad
+    );
+}
+
+// 插值缩放到目标尺寸
+function animateToScale(targetScale, duration = SCALE_ANIM_DURATION) {
+    if (!player?.setPlayerScale) return;
+    if (scaleAnimFrame !== null) {
+        cancelAnimationFrame(scaleAnimFrame);
+        scaleAnimFrame = null;
+    }
+
+    isScaling = true;
+    const fromScale = player.playerModelConfig?.scale ?? (isSmallScale ? PLAYER_SCALE_MINI : PLAYER_SCALE_NORMAL);
+    const startTime = performance.now();
+
+    const tick = (now) => {
+        const t = Math.min((now - startTime) / (duration * 1000), 1);
+        const current = fromScale + (targetScale - fromScale) * t;
+        player.setPlayerScale(current);
+
+        if (t < 1) {
+            scaleAnimFrame = requestAnimationFrame(tick);
+        } else {
+            scaleAnimFrame = null;
+            isScaling = false;
+        }
+    };
+
+    scaleAnimFrame = requestAnimationFrame(tick);
+}
+
+// 进入 / 离开小场景范围时切换缩放
+function updateMiniScaleGate() {
+    if (!player || !miniScaleGate || isScaling) return;
+    const pos = player.getPosition?.();
+    if (!pos) return;
+
+    const inside = isInsideMiniScaleBounds(pos, miniScaleGate, 0);
+    const insideLoose = isInsideMiniScaleBounds(pos, miniScaleGate, ZONE_EPS);
+
+    if (!isSmallScale && inside) {
+        isSmallScale = true;
+        animateToScale(PLAYER_SCALE_MINI, SCALE_ANIM_DURATION);
+        return;
+    }
+    if (isSmallScale && !insideLoose) {
+        isSmallScale = false;
+        animateToScale(PLAYER_SCALE_NORMAL, SCALE_ANIM_DURATION);
+    }
 }
 
 // 半埋圆柱 + 半埋长方体
-function createHalfBuriedObstacles(root, baseMat) {
+function createHalfBuriedObstacles(root, baseMat, layout) {
     const accentMat = tintMaterial(baseMat, ACCENT_GRAY);
-    const cylR = 0.15;
-    const cylLen = 2.5;
-    const boxSize = new Vector3(0.25, 0.275, 2.5);
-    // 主平台顶面
-    const deckTop = DECK_Y + DECK_THICK * 0.5;
+    const {
+        obstacleX0,
+        obstacleCount,
+        obstacleSpacing,
+        obstacleZ,
+        obstacleCylR,
+        obstacleCylLen,
+        obstacleBoxSize,
+        deckY,
+        deckThick,
+        tileSize,
+    } = layout;
+    const deckTop = deckY + deckThick * 0.5;
 
-    for (let i = 0; i < OBSTACLE_COUNT; i++) {
-        const x = OBSTACLE_X0 - i * OBSTACLE_SPACING;
+    for (let i = 0; i < obstacleCount; i++) {
+        const x = obstacleX0 - i * obstacleSpacing;
 
-        // 横向半埋圆柱
-        const cylPos = new Vector3(x, deckTop, -3.2);
+        const cylPos = new Vector3(x, deckTop, -obstacleZ);
         const cylGeo = applyWorldTileUV(
-            new CylinderGeometry(cylR, cylR, cylLen, 24),
+            new CylinderGeometry(obstacleCylR, obstacleCylR, obstacleCylLen, 24),
             cylPos,
+            tileSize,
         );
         cylGeo.rotateX(Math.PI / 2);
         const cyl = new Mesh(cylGeo, accentMat);
@@ -437,215 +654,7 @@ function createHalfBuriedObstacles(root, baseMat) {
         cyl.receiveShadow = true;
         root.add(cyl);
 
-        // 半埋长方体
-        addBox(root, new Vector3(x, deckTop, 3.2), boxSize, accentMat);
-    }
-}
-
-// 远端左：略低装饰地板
-function createPropPit(root, baseMat) {
-    const { x, z, size, drop } = ZONE_PROP;
-    const floorY = DECK_Y - drop;
-    addBox(root, new Vector3(x, floorY, z), new Vector3(size, DECK_THICK, size), baseMat);
-}
-
-// 远端右：升降 + 平移运动学平台
-function createKinematicZone(baseMat) {
-    const platformMat = createKineAccentMaterial(baseMat);
-
-    const liftSize = new Vector3(2.7, 0.1, 2.7);
-    const liftPos = KINE_LIFT_POS.clone();
-    const liftMesh = addBox(scene, liftPos, liftSize, platformMat);
-    liftMesh.name = "KineLift";
-    player.addCollider({
-        motion: "kinematic",
-        shape: { kind: "mesh", source: liftMesh },
-        follow: liftMesh,
-    });
-    kinematicPlatforms.push({
-        mesh: liftMesh,
-        kind: "lift",
-        baseY: liftPos.y,
-        distance: 3.2,
-        speed: 0.55,
-    });
-
-    const shuttleSize = new Vector3(2.2, 0.1, 2.2);
-    const shuttleMesh = addBox(scene, KINE_SHUTTLE_A.clone(), shuttleSize, platformMat);
-    shuttleMesh.name = "KineShuttle";
-    player.addCollider({
-        motion: "kinematic",
-        shape: { kind: "mesh", source: shuttleMesh },
-        follow: shuttleMesh,
-    });
-    kinematicPlatforms.push({
-        mesh: shuttleMesh,
-        kind: "shuttle",
-        from: KINE_SHUTTLE_A.clone(),
-        to: KINE_SHUTTLE_B.clone(),
-        speed: 0.35,
-        invert: false,
-    });
-
-    // y=0.8 反向平移平台
-    const shuttleHiMesh = addBox(scene, KINE_SHUTTLE_HI_B.clone(), shuttleSize, platformMat);
-    shuttleHiMesh.name = "KineShuttleHi";
-    player.addCollider({
-        motion: "kinematic",
-        shape: { kind: "mesh", source: shuttleHiMesh },
-        follow: shuttleHiMesh,
-    });
-    kinematicPlatforms.push({
-        mesh: shuttleHiMesh,
-        kind: "shuttle",
-        from: KINE_SHUTTLE_HI_A.clone(),
-        to: KINE_SHUTTLE_HI_B.clone(),
-        speed: 0.35,
-        invert: true,
-        spinSpeed: 0.8,
-    });
-}
-
-// 六棱柱顶圆形载人平台
-function createHexRidePlatform(baseMat) {
-    const platformMat = createKineAccentMaterial(baseMat);
-    const pos = HEX_RIDE_FROM.clone();
-    const geo = applyWorldTileUV(
-        new CylinderGeometry(HEX_RIDE_RADIUS, HEX_RIDE_RADIUS, HEX_RIDE_THICKNESS, 32),
-        pos,
-    );
-    const mesh = new Mesh(geo, platformMat);
-    mesh.position.copy(pos);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.name = "HexRidePlatform";
-    scene.add(mesh);
-    player.addCollider({
-        motion: "kinematic",
-        shape: { kind: "mesh", source: mesh },
-        follow: mesh,
-    });
-
-    const travelDist = HEX_RIDE_FROM.distanceTo(HEX_RIDE_TO);
-    kinematicPlatforms.push({
-        mesh,
-        kind: "ride",
-        from: HEX_RIDE_FROM.clone(),
-        to: HEX_RIDE_TO.clone(),
-        progress: 0,
-        dir: 1,
-        progressSpeed: travelDist > 1e-4 ? HEX_RIDE_SPEED / travelDist : 0,
-    });
-}
-
-// 两端缓入缓出
-function easeEndsLinearMiddle(progress, easeRatio = 0.18) {
-    const ease = Math.min(Math.max(easeRatio, 0.001), 0.49);
-    const maxSpeed = 1 / (1 - ease);
-    if (progress < ease) return (maxSpeed * progress * progress) / (2 * ease);
-    if (progress > 1 - ease) return 1 - (maxSpeed * (1 - progress) * (1 - progress)) / (2 * ease);
-    return maxSpeed * (progress - ease / 2);
-}
-
-// 是否站在指定运动学平台上
-function isPlayerRidingPlatform(mesh) {
-    return (
-        player?.getActiveKinematicCollider()?.source === mesh
-        && player.getIsOnGround()
-    );
-}
-
-// 更新运动学平台
-function updateKinematicZone(t) {
-    const dt = player?.getCurrentDelta?.() || 1 / 60;
-
-    for (const entry of kinematicPlatforms) {
-        if (entry.kind === "lift") {
-            const amount = Math.sin(t * entry.speed) * entry.distance;
-            entry.mesh.position.y = entry.baseY + amount + entry.distance;
-        } else if (entry.kind === "shuttle") {
-            const phase = (t * entry.speed / Math.PI) % 2;
-            const raw = phase <= 1 ? phase : 2 - phase;
-            let p = easeEndsLinearMiddle(raw);
-            if (entry.invert) p = 1 - p;
-            entry.mesh.position.lerpVectors(entry.from, entry.to, p);
-            if (entry.spinSpeed) entry.mesh.rotation.y = t * entry.spinSpeed;
-        } else if (entry.kind === "ride") {
-            // 站上才移动，离开则停
-            if (isPlayerRidingPlatform(entry.mesh) && entry.progressSpeed > 0) {
-                entry.progress += entry.dir * entry.progressSpeed * dt;
-                if (entry.progress >= 1) {
-                    entry.progress = 1;
-                    entry.dir = -1;
-                } else if (entry.progress <= 0) {
-                    entry.progress = 0;
-                    entry.dir = 1;
-                }
-            }
-            entry.mesh.position.lerpVectors(entry.from, entry.to, entry.progress);
-        }
-    }
-}
-
-// 左侧动态球 / 盒
-function spawnPropBodies() {
-    const { x, z, size } = ZONE_PROP;
-    const deckTop = DECK_Y + DECK_THICK * 0.5;
-    const inset = size * 0.5 - 1.2;
-    const sphereY = deckTop + PROP_SPHERE_R + 0.05;
-    const sphereSpots = [
-        new Vector3(x - inset, sphereY, z - inset),
-        new Vector3(x, sphereY, z - inset * 0.5),
-        new Vector3(x + inset, sphereY, z - inset),
-        new Vector3(x - inset * 0.5, sphereY, z + inset * 0.3),
-        new Vector3(x + inset * 0.5, sphereY, z + inset),
-    ];
-    const propMat = createKineAccentMaterial(prototypeMat);
-
-    for (const pos of sphereSpots) {
-        const mesh = new Mesh(new SphereGeometry(1, 24, 16), propMat.clone());
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        scene.add(mesh);
-        player.addCollider({
-            motion: "dynamic",
-            shape: { kind: "sphere", radius: PROP_SPHERE_R, position: pos.clone() },
-            mesh,
-            restitution: 0.35,
-            friction: 0.55,
-        });
-    }
-
-    const boxH = 0.35;
-    const boxHalf = new Vector3(0.2125, boxH * 0.5, 0.2125);
-    const boxY = deckTop + boxHalf.y + 0.05;
-    const boxSpots = [
-        new Vector3(x - inset, boxY, z),
-        new Vector3(x + inset, boxY, z),
-        new Vector3(x, boxY, z + inset * 0.2),
-        new Vector3(x - inset * 0.4, boxY, z - inset * 0.7),
-        new Vector3(x + inset * 0.4, boxY, z + inset * 0.6),
-        new Vector3(x - inset * 0.4, boxY, z - inset * 0.2),
-        new Vector3(x + inset * 0.35, boxY, z + inset * 0.15),
-        new Vector3(x, boxY + boxHalf.y * 2.2, z),
-    ];
-    for (const pos of boxSpots) {
-        const mesh = new Mesh(new BoxGeometry(1, 1, 1), propMat.clone());
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        scene.add(mesh);
-        player.addCollider({
-            motion: "dynamic",
-            shape: {
-                kind: "box",
-                halfExtents: boxHalf.clone(),
-                position: pos.clone(),
-            },
-            mesh,
-            restitution: 0.2,
-            friction: 0.65,
-            density: 1.2,
-        });
+        addBox(root, new Vector3(x, deckTop, obstacleZ), obstacleBoxSize.clone(), accentMat, tileSize);
     }
 }
 
@@ -653,7 +662,6 @@ function spawnPropBodies() {
 async function spawnShowcaseVehicles(gltfLoader) {
     const gltf = await gltfLoader.loadAsync("./glb/suv.glb");
     for (const spawnPos of VEHICLE_SPAWNS) {
-        // 每辆车需要独立模型实例
         const model = gltf.scene.clone(true);
         await player.loadVehicleModel({
             model,
@@ -688,23 +696,264 @@ async function spawnShowcaseVehicles(gltfLoader) {
     }
 }
 
-// 创建攀爬组与中心平台
-function createClimbGroups(root, baseMat) {
-    const topHeight = L1_TOP;
-    const stepCount = 7;
-    const stepHeight = topHeight / stepCount;
-    const stairWidth = 1;
-    const rampWidth = 1;
+// 车辆前方动态刚体
+function spawnVehiclePropBodies(baseMat) {
+    const vehicles = player?.getAllVehicles?.() ?? [];
+    if (vehicles.length < 2) return;
+    const propMat = tintMaterial(baseMat, PROP_ACCENT_COLOR);
+    spawnSphereGrid(vehicles[0], propMat, mainLayout);
+    spawnBoxWall(vehicles[1], propMat, mainLayout);
+}
+
+// 按布局生成动态球阵与箱墙
+function spawnLayoutPropBodies(baseMat, layout, worldOffset) {
+    const propMat = tintMaterial(baseMat, PROP_ACCENT_COLOR);
+    const s = layout.scale;
+    const forward = new Vector3(-1, 0, 0);
+    const right = new Vector3(0, 0, 1);
+    const xMid = layout.obstacleX0 - (layout.obstacleCount - 1) * layout.obstacleSpacing * 0.5;
+    const deckTop = (worldOffset.y ?? 0) + layout.deckY + layout.deckThick * 0.5;
+    const ox = worldOffset.x;
+    const oz = worldOffset.z ?? 0;
+
+    spawnSphereGridAt({
+        mat: propMat,
+        center: new Vector3(ox + xMid, 0, oz + VEHICLE_SPAWNS[0].z * s),
+        forward,
+        right,
+        radius: PROP_SPHERE_R * s,
+        deckTop,
+    });
+    spawnBoxWallAt({
+        mat: propMat,
+        center: new Vector3(ox + xMid, 0, oz + VEHICLE_SPAWNS[1].z * s),
+        right,
+        boxSize: PROP_BOX_SIZE * s,
+        deckTop,
+    });
+}
+
+// 车辆前向 / 右向轴
+function getVehicleAxes(vehicle) {
+    vehicle.vehicleGroup.updateMatrixWorld(true);
+    const forward = vehicle.forwardLocal.clone().transformDirection(vehicle.vehicleGroup.matrixWorld).normalize();
+    const right = new Vector3(0, 1, 0).cross(forward).normalize();
+    return { origin: vehicle.vehicleGroup.position, forward, right };
+}
+
+// 障碍带中线处的放置中心
+function getPropCenter(vehicle, layout) {
+    const { origin, forward, right } = getVehicleAxes(vehicle);
+    const center = origin.clone();
+    center.x = layout.obstacleX0 - (layout.obstacleCount - 1) * layout.obstacleSpacing * 0.5;
+    return { forward, right, center };
+}
+
+// 4×4 贴地球阵（相对车辆）
+function spawnSphereGrid(vehicle, mat, layout) {
+    const { forward, right, center } = getPropCenter(vehicle, layout);
+    spawnSphereGridAt({
+        mat,
+        center,
+        forward,
+        right,
+        radius: PROP_SPHERE_R * layout.scale,
+        deckTop: layout.deckY + layout.deckThick * 0.5,
+    });
+}
+
+// 4×4 贴地球阵
+function spawnSphereGridAt({ mat, center, forward, right, radius, deckTop }) {
+    const spacing = radius * 2;
+    const start = center.clone().addScaledVector(forward, -(PROP_GRID - 1) * spacing * 0.5);
+    const geo = new SphereGeometry(1, 24, 16);
+
+    for (let row = 0; row < PROP_GRID; row++) {
+        for (let col = 0; col < PROP_GRID; col++) {
+            const pos = start.clone()
+                .addScaledVector(forward, row * spacing)
+                .addScaledVector(right, (col - (PROP_GRID - 1) * 0.5) * spacing);
+            pos.y = deckTop + radius;
+            const mesh = new Mesh(geo, mat);
+            mesh.scale.setScalar(radius);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            player.addCollider({
+                motion: "dynamic",
+                shape: { kind: "sphere", radius, position: pos },
+                mesh,
+                restitution: 0.35,
+                friction: 0.55,
+            });
+        }
+    }
+}
+
+// 4×4 箱墙（相对车辆）
+function spawnBoxWall(vehicle, mat, layout) {
+    const { right, center } = getPropCenter(vehicle, layout);
+    spawnBoxWallAt({
+        mat,
+        center,
+        right,
+        boxSize: PROP_BOX_SIZE * layout.scale,
+        deckTop: layout.deckY + layout.deckThick * 0.5,
+    });
+}
+
+// 4×4 箱墙
+function spawnBoxWallAt({ mat, center, right, boxSize, deckTop }) {
+    const half = boxSize * 0.5;
+    const start = center.clone();
+    const geo = new BoxGeometry(1, 1, 1);
+    const halfExtents = new Vector3(half, half, half);
+
+    for (let row = 0; row < PROP_GRID; row++) {
+        for (let col = 0; col < PROP_GRID; col++) {
+            const pos = start.clone()
+                .addScaledVector(right, (col - (PROP_GRID - 1) * 0.5) * boxSize);
+            pos.y = deckTop + boxSize * (row + 0.5);
+            const mesh = new Mesh(geo, mat);
+            mesh.scale.setScalar(boxSize);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            player.addCollider({
+                motion: "dynamic",
+                shape: {
+                    kind: "box",
+                    halfExtents: halfExtents.clone(),
+                    position: pos,
+                },
+                mesh,
+                restitution: 0.12,
+                friction: 0.7,
+                density: 1.2,
+            });
+        }
+    }
+}
+
+// 六棱柱攀爬尺寸
+function getHexClimbMetrics(layout) {
+    const stairWidth = layout.stairWidth;
+    const rampWidth = layout.rampWidth;
     const armSpan = stairWidth + rampWidth;
     const platformSides = 6;
     const platformApothem = armSpan / (2 * Math.tan(Math.PI / platformSides));
     const platformCircumRadius = platformApothem / Math.cos(Math.PI / platformSides);
+    const sideLength = 2 * platformApothem * Math.tan(Math.PI / platformSides);
+    return {
+        stairWidth,
+        rampWidth,
+        armSpan,
+        platformSides,
+        platformApothem,
+        platformCircumRadius,
+        sideLength,
+        topHeight: layout.l1Top,
+    };
+}
 
-    // 中心六棱柱
+// 运动学往返平台
+function createKinematicPlatforms(baseMat, layout, parent) {
+    const { sideLength, topHeight, platformApothem } = getHexClimbMetrics(layout);
+    const size = new Vector3(sideLength, layout.kineThickness, sideLength);
+    const y = topHeight + layout.kineTopOffset - layout.kineThickness * 0.5;
+    const half = sideLength * 0.5;
+    const mat = tintMaterial(baseMat, PROP_ACCENT_COLOR);
+    const prefix = layout.scale === 1 ? "Kine" : "MiniKine";
+
+    const farEastX = -platformApothem - half;
+    const deckWestX = layout.platform.x - layout.platform.sizeX * 0.5;
+    const farWestX = deckWestX + half;
+    const midX = (farEastX + farWestX) * 0.5;
+
+    const farEast = new Vector3(farEastX, y, 0);
+    const meetEast = new Vector3(midX + half, y, 0);
+    const farWest = new Vector3(farWestX, y, 0);
+    const meetWest = new Vector3(midX - half, y, 0);
+
+    addKinematicShuttle({
+        parent,
+        name: `${prefix}Shuttle`,
+        from: farEast,
+        to: meetEast,
+        size,
+        mat,
+        spinSpeed: 0,
+        tileSize: layout.tileSize,
+    });
+    addKinematicShuttle({
+        parent,
+        name: `${prefix}ShuttleSpin`,
+        from: farWest,
+        to: meetWest,
+        size,
+        mat,
+        spinSpeed: KINE_SPIN_SPEED,
+        tileSize: layout.tileSize,
+    });
+}
+
+// 创建单个往返平台
+function addKinematicShuttle({ parent, name, from, to, size, mat, spinSpeed, tileSize }) {
+    const mesh = addBox(parent, from.clone(), size, mat, tileSize);
+    mesh.name = name;
+    player.addCollider({
+        motion: "kinematic",
+        shape: { kind: "mesh", source: mesh },
+        follow: mesh,
+    });
+    kinematicPlatforms.push({
+        mesh,
+        from: from.clone(),
+        to: to.clone(),
+        spinSpeed,
+    });
+}
+
+// 两端缓入缓出
+function easeEndsLinearMiddle(progress, easeRatio = 0.18) {
+    const ease = Math.min(Math.max(easeRatio, 0.001), 0.49);
+    const maxSpeed = 1 / (1 - ease);
+    if (progress < ease) return (maxSpeed * progress * progress) / (2 * ease);
+    if (progress > 1 - ease) return 1 - (maxSpeed * (1 - progress) * (1 - progress)) / (2 * ease);
+    return maxSpeed * (progress - ease / 2);
+}
+
+// 更新运动学平台
+function updateKinematicPlatforms(t) {
+    const phase = (t * KINE_SHUTTLE_SPEED / Math.PI) % 2;
+    const raw = phase <= 1 ? phase : 2 - phase;
+    const p = easeEndsLinearMiddle(raw);
+
+    for (const entry of kinematicPlatforms) {
+        entry.mesh.position.lerpVectors(entry.from, entry.to, p);
+        if (entry.spinSpeed) entry.mesh.rotation.y = t * entry.spinSpeed;
+    }
+}
+
+// 创建攀爬组与中心平台
+function createClimbGroups(root, baseMat, layout) {
+    const {
+        topHeight,
+        stairWidth,
+        rampWidth,
+        platformSides,
+        platformApothem,
+        platformCircumRadius,
+    } = getHexClimbMetrics(layout);
+    const stepCount = 7;
+    const stepHeight = topHeight / stepCount;
+    const tileSize = layout.tileSize;
+
     const platformPos = new Vector3(0, topHeight * 0.5, 0);
     const platformGeo = applyWorldTileUV(
         new CylinderGeometry(platformCircumRadius, platformCircumRadius, topHeight, platformSides),
         platformPos,
+        tileSize,
     );
     const platform = new Mesh(platformGeo, baseMat);
     platform.position.copy(platformPos);
@@ -731,6 +980,7 @@ function createClimbGroups(root, baseMat) {
             width: stairWidth,
             z: stairZ,
             baseMat,
+            tileSize,
         });
 
         createRampToPlatform(arm, {
@@ -740,12 +990,13 @@ function createClimbGroups(root, baseMat) {
             width: rampWidth,
             z: rampZ,
             baseMat,
+            tileSize,
         });
     }
 }
 
 // 创建一组楼梯
-function createStairsToPlatform(root, { platformRadius, stepHeight, stepCount, stepDepth, width, z, baseMat }) {
+function createStairsToPlatform(root, { platformRadius, stepHeight, stepCount, stepDepth, width, z, baseMat, tileSize }) {
     const stairRun = stepCount * stepDepth;
     const outer = platformRadius + stairRun;
 
@@ -757,16 +1008,17 @@ function createStairsToPlatform(root, { platformRadius, stepHeight, stepCount, s
             new Vector3(x, height / 2, z),
             new Vector3(stepDepth, height, width),
             baseMat,
+            tileSize,
         );
     }
 }
 
 // 创建一个斜坡
-function createRampToPlatform(root, { platformRadius, angleDeg, length, width, z, baseMat }) {
+function createRampToPlatform(root, { platformRadius, angleDeg, length, width, z, baseMat, tileSize }) {
     const height = Math.tan(angleDeg * Math.PI / 180) * length;
     const origin = new Vector3(platformRadius + length * 0.5, 0, z);
     const rotY = Math.PI;
-    const ramp = new Mesh(createRampGeometry(length, height, width, origin, rotY), baseMat);
+    const ramp = new Mesh(createRampGeometry(length, height, width, origin, rotY, tileSize), baseMat);
     ramp.position.copy(origin);
     ramp.rotation.y = rotY;
     ramp.castShadow = true;
@@ -776,11 +1028,12 @@ function createRampToPlatform(root, { platformRadius, angleDeg, length, width, z
 }
 
 // 创建斜坡几何体。
-function createRampGeometry(length, height, width, origin = { x: 0, y: 0, z: 0 }, rotY = 0) {
+function createRampGeometry(length, height, width, origin = { x: 0, y: 0, z: 0 }, rotY = 0, tileSize = TILE_SIZE) {
     const halfLength = length / 2;
     const halfWidth = width / 2;
     const cosY = Math.cos(rotY);
     const sinY = Math.sin(rotY);
+    const tile = Math.max(tileSize, 1e-6);
     const vertices = [
         -halfLength, 0, -halfWidth,
         halfLength, 0, -halfWidth,
@@ -852,7 +1105,7 @@ function createRampGeometry(length, height, width, origin = { x: 0, y: 0, z: 0 }
                 u = Math.hypot(lx + halfLength, ly);
                 v = z;
             }
-            uv.setXY(idx, u / TILE_SIZE, v / TILE_SIZE);
+            uv.setXY(idx, u / tile, v / tile);
         }
     }
 
@@ -862,8 +1115,8 @@ function createRampGeometry(length, height, width, origin = { x: 0, y: 0, z: 0 }
 }
 
 // 添加盒子
-function addBox(root, position, size, material) {
-    const geo = applyWorldTileUV(new BoxGeometry(size.x, size.y, size.z), position);
+function addBox(root, position, size, material, tileSize = TILE_SIZE) {
+    const geo = applyWorldTileUV(new BoxGeometry(size.x, size.y, size.z), position, tileSize);
     const mesh = new Mesh(geo, material);
     mesh.position.copy(position);
     mesh.castShadow = true;
@@ -930,13 +1183,12 @@ function createDebugPanel() {
     const params = {
         colliderDebug: false,
         playerCapsuleDebug: false,
+        dynamicBodyDebug: false,
+        vehiclePhysicsDebug: false,
         footIKEnabled: true,
         maxSteerDeg: VEHICLE_TUNING.steering.maxSteerAngle * 180 / Math.PI,
         resetVehicle() {
             player?.resetVehicle();
-        },
-        clearSpheres() {
-            player?.clearDynamicBodies();
         },
     };
 
@@ -950,18 +1202,23 @@ function createDebugPanel() {
     });
     gui.domElement.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-    const sceneFolder = gui.addFolder("场景");
-    sceneFolder.add(params, "colliderDebug").name("碰撞体调试").onChange((value) => {
+    const sceneFolder = gui.addFolder("Scene");
+    sceneFolder.add(params, "colliderDebug").name("Mesh Collider").onChange((value) => {
         player?.setColliderDebug(value);
     });
     sceneFolder.add(params, "playerCapsuleDebug").name("角色胶囊").onChange((value) => {
         player?.setPlayerCapsuleDebug?.(value);
     });
-    sceneFolder.add(params, "footIKEnabled").name("脚部 IK").onChange((value) => {
+    sceneFolder.add(params, "dynamicBodyDebug").name("Dynamic Body").onChange((value) => {
+        player?.setDynamicBodyDebug?.(value);
+    });
+    sceneFolder.add(params, "vehiclePhysicsDebug").name("Vehicle Physics").onChange((value) => {
+        player?.setVehiclePhysicsDebug?.(value);
+    });
+    sceneFolder.add(params, "footIKEnabled").name("Foot IK").onChange((value) => {
         footIK?.setEnabled(value);
     });
-    sceneFolder.add(params, "resetVehicle").name("翻正车辆");
-    sceneFolder.add(params, "clearSpheres").name("清除动态球");
+    sceneFolder.add(params, "resetVehicle").name("Reset Vehicle");
     sceneFolder.open();
 
     const t = VEHICLE_TUNING;
@@ -1031,8 +1288,10 @@ function onResize() {
 // 每帧调用
 function animate() {
     const t = animClock.getElapsedTime();
+    updateGlowPortal(t);
     if (player) {
-        updateKinematicZone(t);
+        updateKinematicPlatforms(t);
+        updateMiniScaleGate();
         player.update();
     } else {
         controls?.update();

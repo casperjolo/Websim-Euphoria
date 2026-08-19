@@ -503,6 +503,7 @@ export class VehicleSystem {
     private capsuleHeight(): number {
         const info = this.ctrl.playerCapsule?.capsuleInfo;
         if (!info) return 0;
-        return -info.segment.end.y + 2 * info.radius;
+        const sy = this.ctrl.playerCapsule.scale.y || 1;
+        return (-info.segment.end.y) * sy + 2 * info.radius;
     }
 }

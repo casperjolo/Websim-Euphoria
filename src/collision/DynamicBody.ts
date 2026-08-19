@@ -65,10 +65,16 @@ export abstract class DynamicBody {
     angularDamping: number; // 角阻尼
     friction: number; // 碰撞摩擦
     mesh: THREE.Mesh; // 视觉网格
-    /** 碰撞形状线框，由 setColliderDebug 显隐。 */
+    /** 碰撞形状线框，由 setDynamicBodyDebug 显隐。 */
     debugMesh: THREE.Mesh;
     contactMesh: THREE.Mesh | null = null; // 本帧接触的网格（平台携带用）
     colliderId = 0; // CollisionWorld 登记 id
+    /** 休眠中则跳过积分与窄相。 */
+    sleeping = false;
+    /** 是否允许进入休眠。 */
+    canSleep = true;
+    /** 连续低于休眠阈值的累计时间（秒）。 */
+    sleepTimer = 0;
 
     private _r = new THREE.Vector3();
     private _torque = new THREE.Vector3();
@@ -96,6 +102,31 @@ export abstract class DynamicBody {
     /** 用于速度钳制 / 携带阈值的特征半尺寸。 */
     abstract characteristicExtent(): number;
 
+    /** 唤醒刚体。 */
+    wakeUp(): void {
+        if (!this.sleeping) return;
+        this.sleeping = false;
+        this.sleepTimer = 0;
+    }
+
+    /** 进入休眠并清零速度。 */
+    putToSleep(): void {
+        if (!this.canSleep) return;
+        this.sleeping = true;
+        this.sleepTimer = 0;
+        this.velocity.set(0, 0, 0);
+        this.angularVelocity.set(0, 0, 0);
+        this.contactMesh = null;
+    }
+
+    /** 线速度 / 角速度是否低于给定阈值。 */
+    isRestingCandidate(linearThreshold: number, angularThreshold: number): boolean {
+        return (
+            this.velocity.lengthSq() <= linearThreshold * linearThreshold
+            && this.angularVelocity.lengthSq() <= angularThreshold * angularThreshold
+        );
+    }
+
     /** 读取世界点处的刚体速度：v + ω × r。 */
     getVelocityAtPoint(point: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
         this._r.subVectors(point, this.position);
@@ -104,11 +135,13 @@ export abstract class DynamicBody {
 
     /** 在质心施加冲量。 */
     applyImpulse(impulse: THREE.Vector3): void {
+        if (this.sleeping && impulse.lengthSq() > 1e-4) this.wakeUp();
         this.velocity.addScaledVector(impulse, this.invMass);
     }
 
     /** 在世界点施加冲量，同时产生角速度。 */
     applyImpulseAtPoint(impulse: THREE.Vector3, contactPoint: THREE.Vector3): void {
+        if (this.sleeping && impulse.lengthSq() > 1e-4) this.wakeUp();
         this.velocity.addScaledVector(impulse, this.invMass);
         this._r.subVectors(contactPoint, this.position);
         this.angularVelocity.add(this.angularDeltaFromImpulse(impulse, this._r));
