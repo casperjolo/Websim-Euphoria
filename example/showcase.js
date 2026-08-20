@@ -33,7 +33,7 @@ import { MapControls } from "three/examples/jsm/Addons.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GUI } from "three/examples/jsm/libs/lil-gui.module.min.js";
 import Stats from "three/examples/jsm/libs/stats.module.js";
-import { playerController } from "../src/playerController";
+import { playerController } from "../src/PlayerController";
 import { FootIK } from "../src/foot-ik";
 
 const TILE_SIZE = 1;
@@ -1057,7 +1057,7 @@ function spawnBoxWallAt({ mat, center, right, boxSize, deckTop, gravity }) {
                 mesh,
                 restitution: 0.12,
                 friction: 0.7,
-                density: 1.2,
+                density: 10,
                 ...(gravity != null ? { gravity } : null),
             });
         }

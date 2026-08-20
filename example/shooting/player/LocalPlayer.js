@@ -1,5 +1,5 @@
 import { MathUtils, Quaternion, Vector3, AnimationMixer, AnimationClip, LoopOnce, LoopRepeat } from "three";
-import { playerController } from "../../../src/playerController";
+import { playerController } from "../../../src/PlayerController";
 import { SpineIK } from "./spineIK.js";
 
 const spineBoneNames = ["mixamorigSpine", "mixamorigSpine1", "mixamorigSpine2"];

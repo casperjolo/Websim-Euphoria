@@ -6,7 +6,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
-import { playerController } from "../src/playerController";
+import { playerController } from "../src/PlayerController";
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 let player = null;

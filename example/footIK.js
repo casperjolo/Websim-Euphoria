@@ -23,7 +23,7 @@ import { MapControls } from "three/examples/jsm/Addons.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GUI } from "three/examples/jsm/libs/lil-gui.module.min.js";
 import Stats from "three/examples/jsm/libs/stats.module.js";
-import { playerController } from "../src/playerController";
+import { playerController } from "../src/PlayerController";
 import { FootIK } from "../src/foot-ik";
 
 const scene = new Scene();
@@ -246,6 +246,7 @@ function createDebugPanel() {
     const sceneFolder = gui.addFolder("Scene");
     sceneFolder.add(params, "playerDebug").name("Player Collider").onChange(value => {
         player?.setColliderDebug(value);
+        player?.setPlayerCapsuleDebug(value);
     });
     sceneFolder.add(params, "sunDebug").name("Sun Debug").onChange(value => {
         sunDebugHelper.visible = value;
