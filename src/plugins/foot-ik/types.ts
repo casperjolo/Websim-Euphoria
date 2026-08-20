@@ -21,6 +21,11 @@ export type FootIKSide = "left" | "right";
 export type FootIKPlayer = {
     scene: Scene;
     getColliderMeshes: () => Mesh[];
+    getDynamicBodies?: () => unknown[];
+    raycastDynamicGround?: (origin: Vector3, minNormalY?: number) => {
+        point: Vector3;
+        normal: Vector3;
+    } | null;
     playerCapsule: Mesh & {
         capsuleInfo?: {
             radius: number;

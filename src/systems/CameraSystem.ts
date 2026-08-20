@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { playerController } from "../playerController";
+import type { playerController } from "../PlayerController";
 
 export class CameraSystem {
     private ctrl: playerController; // 主控制器引用

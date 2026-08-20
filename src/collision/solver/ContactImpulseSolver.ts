@@ -1,11 +1,11 @@
 import type { ContactManifold } from "../contacts/ContactManifold";
 import type { ImpulseBody } from "./ImpulseBody";
-import { solveFrictionConstraint, warmStartFriction } from "./FrictionConstraint";
+import { solveFrictionConstraint, warmStartFriction } from "./frictionConstraint";
 import {
     prepareNormalConstraint,
     solveNormalConstraint,
     warmStartNormal,
-} from "./NormalConstraint";
+} from "./normalConstraint";
 
 /**
  * 共享接触冲量求解器：法向 + 摩擦锥，可选热启动。

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { effectiveMass } from "../../utils/vehiclePhysics/VehicleMath";
+import { effectiveMass } from "../../utils/vehiclePhysics/vehicleMath";
 import { CONTACT_REF_EXTENT } from "../contacts/ContactPoint";
 import type { ContactManifold } from "../contacts/ContactManifold";
 import type { ContactPoint } from "../contacts/ContactPoint";

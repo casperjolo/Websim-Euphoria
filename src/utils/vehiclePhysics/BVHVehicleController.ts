@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { VehicleCollision } from "./VehicleCollision";
 import { ContactCache } from "../../collision/contacts/ContactCache";
 import { ContactImpulseSolver } from "../../collision/solver/ContactImpulseSolver";
-import { effectiveMass } from "./VehicleMath";
+import { effectiveMass } from "./vehicleMath";
 import type { VehicleRigidBody } from "./VehicleRigidBody";
 import { VehicleWheel } from "./VehicleWheel";
 

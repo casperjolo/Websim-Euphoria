@@ -1,5 +1,5 @@
 // 主入口
-export * from "./playerController";
+export * from "./PlayerController";
 export type {
     JumpButtonOptions,
     KeyAction,
@@ -37,8 +37,8 @@ export type {
     MeshShape,
     BoxShape,
     SphereShape,
-} from "./collision/ColliderDesc";
-export { DYNAMIC_BODY_DEFAULTS } from "./collision/ColliderDesc";
+} from "./collision/colliderDesc";
+export { DYNAMIC_BODY_DEFAULTS } from "./collision/colliderDesc";
 export { DynamicSphereBody, isSphereBody } from "./collision/DynamicSphere";
 export { DynamicBoxBody, isBoxBody } from "./collision/DynamicBox";
 export { DynamicBody } from "./collision/DynamicBody";

@@ -8,13 +8,13 @@ import {
     type Intersection,
     type Object3D,
 } from "three";
-import { createTwoBoneIKScratch, solveTwoBoneIK } from "./internal/two-bone-ik";
+import { createTwoBoneIKScratch, solveTwoBoneIK } from "./internal/twoBoneIK";
 import {
     buildFootPhaseDatabase,
     createFootPhaseOptions,
     createFootPhaseRuntimeState,
     sampleFootPhaseRuntime,
-} from "./internal/foot-phase";
+} from "./internal/footPhase";
 import {
     collectBones,
     createLeg,
@@ -43,7 +43,13 @@ import type {
     FootPhaseOptions,
     ReadyFootIKLeg,
 } from "./types";
-import type { TwoBoneIKScratch } from "./internal/two-bone-ik";
+import type { TwoBoneIKScratch } from "./internal/twoBoneIK";
+
+// 脚底查询统一使用世界空间命中点和法线。
+type FootIKGroundHit = {
+    point: Vector3;
+    normal: Vector3;
+};
 
 /** 根据角色动画和地面高度修正脚部姿态的控制器插件。 */
 export class FootIK {
@@ -382,7 +388,7 @@ export class FootIK {
 
         // 不在地面、飞行或载具模式时不做腿部贴地
         if (
-            !this.player?.getColliderMeshes().length
+            (!this.player?.getColliderMeshes().length && !this.player?.getDynamicBodies?.().length)
             || !this.player.playerCapsule
             || !this.player.playerIsOnGround
             || this.player.isFlying
@@ -411,7 +417,7 @@ export class FootIK {
         this.applyLeg("right", moving);
     }
 
-    // 构建脚步相位库。具体采样和过滤逻辑在 foot-phase.ts 中。
+    // 构建脚步相位库。具体采样和过滤逻辑在 footPhase.ts 中。
     private buildFootPhaseDatabase(): void {
         const model = this.player?.playerModel;
         const clips = this.player?.animation?.clips ?? [];
@@ -474,7 +480,7 @@ export class FootIK {
             return;
         }
 
-        this.getWorldHitNormal(hit, leg.hitNormal);
+        leg.hitNormal.copy(hit.normal);
         leg.hitPoint.copy(hit.point);
 
         // 命中点高过胶囊底部时，说明角色碰撞体已经把台阶/斜坡吃掉了。
@@ -530,7 +536,7 @@ export class FootIK {
         footWorld: Vector3,
         samples: FootIKProbeSample[] = leg.soleSamples,
         footSamplePoint: Vector3 | null = leg.footSamplePoint,
-    ): Intersection<Object3D> | null {
+    ): FootIKGroundHit | null {
         this.updateSoleSamples(leg, footWorld, samples, footSamplePoint);
 
         const stickToLeg = samples === leg.soleSamples;
@@ -539,8 +545,8 @@ export class FootIK {
 
         let maxY = -Infinity;
         let maxIndex = -1;
-        let maxHit: Intersection<Object3D> | null = null;
-        const hits: Array<Intersection<Object3D> | null> = new Array(samples.length).fill(null);
+        let maxHit: FootIKGroundHit | null = null;
+        const hits: Array<FootIKGroundHit | null> = new Array(samples.length).fill(null);
 
         for (let i = 0; i < samples.length; i++) {
             const sample = samples[i];
@@ -691,7 +697,7 @@ export class FootIK {
         }
 
         const capsuleGroundY = capsuleHit.point.y;
-        const capsuleNormalY = this.getWorldHitNormal(capsuleHit, this.tmpV3).y;
+        const capsuleNormalY = capsuleHit.normal.y;
         // 近水平用 max（认台面、忽略边缘垂下野点）；斜坡用平均（同一平面上 max 会虚高）。
         const useSlopeAverage = capsuleNormalY < this.meshStepRaiseMinNormalY;
 
@@ -819,28 +825,44 @@ export class FootIK {
     }
 
     // 从骨骼采样点上方发射射线。
-    private castGroundAtSample(sampleWorld: Vector3): Intersection<Object3D> | null {
+    private castGroundAtSample(sampleWorld: Vector3): FootIKGroundHit | null {
         return this.castGroundFrom(sampleWorld.x, sampleWorld.y + this.sampleRayOriginY, sampleWorld.z);
     }
 
     // 从胶囊中心向下检测当前碰撞体真正支撑在哪个地面高度。
-    private castCapsuleGround(): Intersection<Object3D> | null {
+    private castCapsuleGround(): FootIKGroundHit | null {
         const capsule = this.player?.playerCapsule;
         if (!capsule) return null;
         return this.castGroundFrom(capsule.position.x, capsule.position.y, capsule.position.z);
     }
 
     // 从指定世界坐标向下射线检测可踩踏地面。
-    private castGroundFrom(x: number, y: number, z: number): Intersection<Object3D> | null {
+    private castGroundFrom(x: number, y: number, z: number): FootIKGroundHit | null {
         const meshes = this.player?.getColliderMeshes() ?? [];
-        if (!meshes.length) return null;
         this.raycaster.ray.origin.set(x, y, z);
         const hits = this.raycaster.intersectObjects(meshes, false);
-        return hits.find(hit => this.getWorldHitNormal(hit, this.tmpV3).y > 0.18) ?? null;
+        const meshHit = hits.find(hit => this.getMeshWorldHitNormal(hit, this.tmpV3).y > 0.18);
+        let bestHit: FootIKGroundHit | null = null;
+        if (meshHit) {
+            bestHit = {
+                point: meshHit.point,
+                normal: this.getMeshWorldHitNormal(meshHit, this.tmpV3).clone(),
+            };
+        }
+
+        const dynamicHit = this.player?.raycastDynamicGround?.(this.raycaster.ray.origin, 0.18);
+        if (!dynamicHit) return bestHit;
+        const distance = y - dynamicHit.point.y;
+        if (distance < this.raycaster.near || distance > this.raycaster.far) return bestHit;
+        if (bestHit && bestHit.point.y >= dynamicHit.point.y) return bestHit;
+        return {
+            point: dynamicHit.point.clone(),
+            normal: dynamicHit.normal.clone(),
+        };
     }
 
-    // 将射线命中的局部法线转换为世界空间法线。
-    private getWorldHitNormal(hit: Intersection<Object3D>, target: Vector3): Vector3 {
+    // 将 mesh 射线命中的局部法线转换为世界空间法线。
+    private getMeshWorldHitNormal(hit: Intersection<Object3D>, target: Vector3): Vector3 {
         target.copy(hit.face?.normal ?? this.up);
         this.normalMatrix.getNormalMatrix(hit.object.matrixWorld);
         target.applyMatrix3(this.normalMatrix).normalize();

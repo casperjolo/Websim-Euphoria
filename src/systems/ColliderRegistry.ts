@@ -1,12 +1,12 @@
 import * as THREE from "three";
-import type { playerController } from "../playerController";
-import type { ColliderDesc, ColliderHandle, DynamicColliderDesc } from "../collision/ColliderDesc";
+import type { playerController } from "../PlayerController";
+import type { ColliderDesc, ColliderHandle, DynamicColliderDesc } from "../collision/colliderDesc";
 import type { MotionType } from "../collision/CollisionWorld";
 import {
     attachBoundsTree,
     buildKinematicMergedMesh,
     buildStaticMergedMesh,
-} from "../collision/ColliderBuild";
+} from "../collision/colliderBuild";
 import type { KinematicColliderEntry } from "../types";
 
 let warnedDynamicMesh = false; 
@@ -23,9 +23,33 @@ export class ColliderRegistry {
     /** 静态构建代数：异步 BVH 完成时若代数变了则丢弃 */
     private buildGens = new Map<number, number>();
     private _contentScale = new THREE.Vector3();
+    /** 静态 / 运动学 mesh 碰撞线框开关。 */
+    private debugVisible = false;
 
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
+    }
+
+    /** 返回碰撞 mesh 调试开关。 */
+    getDebugVisible(): boolean {
+        return this.debugVisible;
+    }
+
+    /** 切换静态 / 运动学 mesh 碰撞线框。 */
+    setDebugVisible(visible: boolean): void {
+        this.debugVisible = visible;
+        this.syncDebugVisibility();
+    }
+
+    /** 同步已就绪碰撞 mesh 的调试显隐。 */
+    syncDebugVisibility(): void {
+        const synced = new Set<THREE.Mesh>();
+        for (const handle of this.handles.values()) {
+            const mesh = handle.collisionMesh;
+            if (!mesh || synced.has(mesh)) continue;
+            synced.add(mesh);
+            this.syncDebugMesh(mesh);
+        }
     }
 
     /** 按 desc 创建碰撞体；校验 motion/shape 约束后分派到 mesh/box/sphere。 */
@@ -231,6 +255,7 @@ export class ColliderRegistry {
                 ready: Boolean((readyMesh.geometry as any).boundsTree),
                 userData: desc.userData,
             });
+            this.syncDebugMesh(readyMesh);
             return this.makeHandle(entry.id, "static", null, null, readyMesh);
         }
 
@@ -266,9 +291,7 @@ export class ColliderRegistry {
             onReady: () => {
                 if (this.buildGens.get(world.id) !== gen) return;
                 this.ctrl.collisionWorld.setReady(world.id, true);
-                if (this.ctrl.getDisplayCollider() && !this.ctrl.scene.children.includes(built.mesh)) {
-                    this.ctrl.scene.add(built.mesh);
-                }
+                this.syncDebugMesh(built.mesh);
             },
         });
         return handle;
@@ -311,6 +334,7 @@ export class ColliderRegistry {
             });
             entry.worldId = world.id;
             this.kinematicColliders.push(entry);
+            this.syncDebugMesh(mesh);
             return this.makeHandle(world.id, "kinematic", follow, follow, mesh);
         }
 
@@ -364,12 +388,19 @@ export class ColliderRegistry {
                 if (entry.buildId !== buildId || !this.kinematicColliders.includes(entry)) return;
                 entry.ready = true;
                 this.ctrl.collisionWorld.setReady(entry.worldId, true);
-                if (this.ctrl.getDisplayCollider() && !this.ctrl.scene.children.includes(built.mesh)) {
-                    this.ctrl.scene.add(built.mesh);
-                }
+                this.syncDebugMesh(built.mesh);
             },
         });
         return handle;
+    }
+
+    /** 按当前开关同步单个碰撞 mesh。 */
+    private syncDebugMesh(mesh: THREE.Mesh): void {
+        if (this.debugVisible && (mesh.geometry as any).boundsTree) {
+            if (!this.ctrl.scene.children.includes(mesh)) this.ctrl.scene.add(mesh);
+        } else {
+            this.ctrl.scene.remove(mesh);
+        }
     }
 
     /**

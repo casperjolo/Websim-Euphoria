@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { BvhWorkerPool } from "../utils/bvhWorkerPool";
+import type { BvhWorkerPool } from "../utils/BvhWorkerPool";
 
 /**
  * 碰撞网格构建工具。

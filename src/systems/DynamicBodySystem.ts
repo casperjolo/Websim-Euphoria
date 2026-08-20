@@ -1,10 +1,10 @@
 import * as THREE from "three";
-import type { playerController } from "../playerController";
+import type { playerController } from "../PlayerController";
 import { CollisionGroup } from "../collision/groups";
 import { ContactCache } from "../collision/contacts/ContactCache";
 import { ContactManifold } from "../collision/contacts/ContactManifold";
 import { contactSkinForExtent, type RawContact } from "../collision/contacts/ContactPoint";
-import { reduceContacts } from "../collision/contacts/ContactReducer";
+import { reduceContacts } from "../collision/contacts/contactReducer";
 import { ContactImpulseSolver } from "../collision/solver/ContactImpulseSolver";
 import { DynamicBody } from "../collision/DynamicBody";
 import {
@@ -20,11 +20,11 @@ import {
     DynamicBoxBody,
     isBoxBody,
 } from "../collision/DynamicBox";
-import { DYNAMIC_BODY_DEFAULTS, type DynamicColliderDesc } from "../collision/ColliderDesc";
+import { DYNAMIC_BODY_DEFAULTS, type DynamicColliderDesc } from "../collision/colliderDesc";
 import type { VehicleInstance, VehicleWheelColliderUserData } from "../types";
 import { capsuleSphereOverlap, createCollisionTemps } from "../utils/capsuleCollision";
 import { VehicleCollision } from "../utils/vehiclePhysics/VehicleCollision";
-import { createObbObbTemps, resolveObbObb } from "../collision/ObbObb";
+import { createObbObbTemps, resolveObbObb } from "../collision/obbObb";
 
 const TARGET_SUB_DT = 1 / 1200; // 目标子步时长（秒）
 const MAX_SUBSTEPS = 20; // 单帧最多子步数
@@ -33,6 +33,7 @@ const MAX_SPEED_GRAVITY = 2; // 速度上限相对 |gravity| 的倍数
 const CHARACTER_PUSH_MASS = 10; // 推动态体时用的人物假质量（scale = 1 时）。
 const MAX_RAW = 64; // 单体单帧原始接触上限
 const POS_CORRECT = 0.4; // 求解后残留穿透的位置修正比例
+const MAX_DEPENETRATION_EXTENTS = 20; // 位置修正每秒最多推出的特征尺寸倍数
 const ROLL_BLEND = 0.45; // 支撑面上向无滑滚动收敛的插值比例
 const SUPPORT_Y = 0.5; // 视为支撑面的法线 y 下限
 const DYNAMIC_MASK = CollisionGroup.DEFAULT | CollisionGroup.VEHICLE | CollisionGroup.DEBRIS;
@@ -45,6 +46,14 @@ const SLEEP_TIME = 0.35; // 连续满足阈值后进入休眠（秒）
 const SLEEP_WAKE_FACTOR = 3; // 超过阈值该倍数才清零休眠计时（迟滞）
 const BROADPHASE_CELL_SCALE = 2; // 动态体互撞宽相位：XZ 网格单元 = 最大特征尺寸 × 该系数（下限 1）。
 
+/** 人物向下查询命中的动态支撑面。 */
+export type DynamicGroundHit = {
+    body: DynamicBody;
+    point: THREE.Vector3;
+    normal: THREE.Vector3;
+    velocity: THREE.Vector3;
+};
+
 /**
  * 动态刚体推进：按 kind 分派形状窄相（球 / 盒）。
  * 网格接触走 ContactImpulseSolver；球–球 / 盒–盒 / 与人 / 与车用简化或 OBB 冲量。
@@ -52,6 +61,8 @@ const BROADPHASE_CELL_SCALE = 2; // 动态体互撞宽相位：XZ 网格单元 =
 export class DynamicBodySystem {
     private ctrl: playerController;
     list: DynamicBody[] = []; // 全部动态刚体
+    /** 动态刚体碰撞线框开关。 */
+    private debugVisible = false;
     private temps = createSphereCollisionTemps();
     private carryPrevInv = new THREE.Matrix4();
     private skipVehicleMeshes: number[] = []; // 跳过车辆外观，避免与底盘盒重复
@@ -81,10 +92,49 @@ export class DynamicBodySystem {
     private broadphaseAxisY = new THREE.Vector3();
     private broadphaseAxisZ = new THREE.Vector3();
     private broadphasePairSeen = new Set<number>();
+    private groundRay = new THREE.Ray();
+    private groundBox = new THREE.Box3();
+    private groundSphere = new THREE.Sphere();
+    private groundOriginLocal = new THREE.Vector3();
+    private groundDirectionLocal = new THREE.Vector3();
+    private groundPointLocal = new THREE.Vector3();
+    private groundNormalLocal = new THREE.Vector3();
+    private groundInvQuat = new THREE.Quaternion();
+    private groundPoint = new THREE.Vector3();
+    private groundNormal = new THREE.Vector3();
+    private groundHit: DynamicGroundHit = {
+        body: null as unknown as DynamicBody,
+        point: new THREE.Vector3(),
+        normal: new THREE.Vector3(),
+        velocity: new THREE.Vector3(),
+    };
 
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
         this.contactSolver.velocityIterations = 12;
+    }
+
+    /** 返回动态刚体调试开关。 */
+    getDebugVisible(): boolean {
+        return this.debugVisible;
+    }
+
+    /** 切换动态刚体碰撞线框。 */
+    setDebugVisible(visible: boolean): void {
+        this.debugVisible = visible;
+        this.syncDebugVisibility();
+    }
+
+    /** 同步全部动态刚体碰撞线框。 */
+    syncDebugVisibility(): void {
+        for (const body of this.list) {
+            this.syncDebugMesh(body);
+            if (this.debugVisible) {
+                if (!this.ctrl.scene.children.includes(body.debugMesh)) this.ctrl.scene.add(body.debugMesh);
+            } else {
+                this.ctrl.scene.remove(body.debugMesh);
+            }
+        }
     }
 
     /** 当前人物推动假质量：CHARACTER_PUSH_MASS × scale。 */
@@ -146,7 +196,7 @@ export class DynamicBodySystem {
         body.colliderId = col.id;
         this.list.push(body);
         this.contactCaches.set(body, new ContactCache());
-        if (this.ctrl.getDisplayDynamicBody()) this.ctrl.scene.add(debugMesh);
+        if (this.debugVisible) this.ctrl.scene.add(debugMesh);
         return body;
     }
 
@@ -209,7 +259,7 @@ export class DynamicBodySystem {
         body.colliderId = col.id;
         this.list.push(body);
         this.contactCaches.set(body, new ContactCache());
-        if (this.ctrl.getDisplayDynamicBody()) this.ctrl.scene.add(debugMesh);
+        if (this.debugVisible) this.ctrl.scene.add(debugMesh);
         return body;
     }
 
@@ -219,6 +269,7 @@ export class DynamicBodySystem {
         if (idx === -1) return;
         this.list.splice(idx, 1);
         this.contactCaches.delete(body);
+        if (this.ctrl.activeDynamicBody === body) this.ctrl.activeDynamicBody = null;
         this.ctrl.collisionWorld.remove(body.colliderId);
         this.ctrl.scene.remove(body.debugMesh);
         body.debugMesh.geometry.dispose();
@@ -233,6 +284,65 @@ export class DynamicBodySystem {
     /** 清除全部动态刚体。 */
     clear(): void {
         while (this.list.length) this.remove(this.list[this.list.length - 1]);
+    }
+
+    /** 从指定世界坐标向下查询最高的动态表面。 */
+    raycastGround(origin: THREE.Vector3, minNormalY = SUPPORT_Y): DynamicGroundHit | null {
+        let bestY = -Infinity;
+        let bestBody: DynamicBody | null = null;
+
+        for (const body of this.list) {
+            let hit = false;
+            if (isBoxBody(body)) hit = this.raycastBoxGround(origin, body, minNormalY);
+            else if (isSphereBody(body)) hit = this.raycastSphereGround(origin, body, minNormalY);
+            if (!hit || this.groundPoint.y <= bestY) continue;
+            bestY = this.groundPoint.y;
+            bestBody = body;
+            this.groundHit.point.copy(this.groundPoint);
+            this.groundHit.normal.copy(this.groundNormal);
+        }
+
+        if (!bestBody) return null;
+        this.groundHit.body = bestBody;
+        bestBody.getVelocityAtPoint(this.groundHit.point, this.groundHit.velocity);
+        return this.groundHit;
+    }
+
+    /** 向下射线与动态 OBB 求交。 */
+    private raycastBoxGround(origin: THREE.Vector3, body: DynamicBoxBody, minNormalY: number): boolean {
+        this.groundInvQuat.copy(body.quaternion).invert();
+        this.groundOriginLocal.copy(origin).sub(body.position).applyQuaternion(this.groundInvQuat);
+        this.groundDirectionLocal.set(0, -1, 0).applyQuaternion(this.groundInvQuat).normalize();
+        this.groundRay.set(this.groundOriginLocal, this.groundDirectionLocal);
+        this.groundBox.min.copy(body.halfExtents).multiplyScalar(-1);
+        this.groundBox.max.copy(body.halfExtents);
+        if (!this.groundRay.intersectBox(this.groundBox, this.groundPointLocal)) return false;
+
+        const dx = Math.abs(Math.abs(this.groundPointLocal.x) - body.halfExtents.x);
+        const dy = Math.abs(Math.abs(this.groundPointLocal.y) - body.halfExtents.y);
+        const dz = Math.abs(Math.abs(this.groundPointLocal.z) - body.halfExtents.z);
+        if (dx <= dy && dx <= dz) {
+            this.groundNormalLocal.set(Math.sign(this.groundPointLocal.x || 1), 0, 0);
+        } else if (dy <= dz) {
+            this.groundNormalLocal.set(0, Math.sign(this.groundPointLocal.y || 1), 0);
+        } else {
+            this.groundNormalLocal.set(0, 0, Math.sign(this.groundPointLocal.z || 1));
+        }
+
+        this.groundNormal.copy(this.groundNormalLocal).applyQuaternion(body.quaternion).normalize();
+        if (this.groundNormal.y < minNormalY) return false;
+        this.groundPoint.copy(this.groundPointLocal).applyQuaternion(body.quaternion).add(body.position);
+        return this.groundPoint.y <= origin.y;
+    }
+
+    /** 向下射线与动态球求交。 */
+    private raycastSphereGround(origin: THREE.Vector3, body: DynamicSphereBody, minNormalY: number): boolean {
+        this.groundRay.set(origin, this.groundDirectionLocal.set(0, -1, 0));
+        this.groundSphere.center.copy(body.position);
+        this.groundSphere.radius = body.radius;
+        if (!this.groundRay.intersectSphere(this.groundSphere, this.groundPoint)) return false;
+        this.groundNormal.subVectors(this.groundPoint, body.position).normalize();
+        return this.groundNormal.y >= minNormalY && this.groundPoint.y <= origin.y;
     }
 
     /** 推进全部动态刚体：子步求解 → 平台带走 → 休眠判定 → 同步视觉。 */
@@ -250,16 +360,21 @@ export class DynamicBodySystem {
         for (const body of this.list) {
             body.mesh.position.copy(body.position);
             body.mesh.quaternion.copy(body.quaternion);
-            body.debugMesh.position.copy(body.position);
-            body.debugMesh.quaternion.copy(body.quaternion);
-            if (isSphereBody(body)) body.debugMesh.scale.setScalar(body.radius);
-            else if (isBoxBody(body)) {
-                body.debugMesh.scale.set(
-                    body.halfExtents.x * 2,
-                    body.halfExtents.y * 2,
-                    body.halfExtents.z * 2,
-                );
-            }
+            if (this.debugVisible) this.syncDebugMesh(body);
+        }
+    }
+
+    /** 将动态刚体当前形状与位姿写入调试 mesh。 */
+    private syncDebugMesh(body: DynamicBody): void {
+        body.debugMesh.position.copy(body.position);
+        body.debugMesh.quaternion.copy(body.quaternion);
+        if (isSphereBody(body)) body.debugMesh.scale.setScalar(body.radius);
+        else if (isBoxBody(body)) {
+            body.debugMesh.scale.set(
+                body.halfExtents.x * 2,
+                body.halfExtents.y * 2,
+                body.halfExtents.z * 2,
+            );
         }
     }
 
@@ -391,7 +506,10 @@ export class DynamicBodySystem {
                 this.temps.normal.set(nx / w, ny / w, nz / w);
                 if (this.temps.normal.lengthSq() > 1e-8) {
                     this.temps.normal.normalize();
-                    body.position.addScaledVector(this.temps.normal, Math.min(deepest, maxPush));
+                    body.position.addScaledVector(
+                        this.temps.normal,
+                        Math.min(deepest, maxPush, this.maxPositionCorrection(body, dt)),
+                    );
                 }
             }
             return;
@@ -445,7 +563,10 @@ export class DynamicBodySystem {
                 this.temps.normal.set(nx / w, ny / w, nz / w);
                 if (this.temps.normal.lengthSq() > 1e-8) {
                     this.temps.normal.normalize();
-                    body.position.addScaledVector(this.temps.normal, Math.min(deepest, maxPush));
+                    body.position.addScaledVector(
+                        this.temps.normal,
+                        Math.min(deepest, maxPush, this.maxPositionCorrection(body, dt)),
+                    );
                 }
             }
             return;
@@ -455,13 +576,7 @@ export class DynamicBodySystem {
         cache?.match(this.manifolds);
         this.contactSolver.solveVelocity(body, this.manifolds, dt);
         cache?.save(this.manifolds);
-        for (const manifold of this.manifolds) {
-            for (const point of manifold.contacts) {
-                const skin = contactSkinForExtent(body.characteristicExtent());
-                const corr = (point.penetration - skin) * POS_CORRECT;
-                if (corr > 0) body.position.addScaledVector(manifold.normal, corr);
-            }
-        }
+        this.correctMeshPenetration(body, this.manifolds, dt);
     }
 
     /** 球网格接触：归约 → 冲量 → 位置修正。 */
@@ -472,14 +587,26 @@ export class DynamicBodySystem {
         cache?.match(this.manifolds);
         this.contactSolver.solveVelocity(body, this.manifolds, dt);
         cache?.save(this.manifolds);
+        this.correctMeshPenetration(body, this.manifolds, dt);
+    }
 
-        for (const manifold of this.manifolds) {
+    /** 每个流形只按最深接触修正一次位置。 */
+    private correctMeshPenetration(body: DynamicBody, manifolds: ContactManifold[], dt: number): void {
+        const skin = contactSkinForExtent(body.characteristicExtent());
+        const maxCorrection = this.maxPositionCorrection(body, dt);
+        for (const manifold of manifolds) {
+            let deepest = 0;
             for (const point of manifold.contacts) {
-                const skin = contactSkinForExtent(body.characteristicExtent());
-                const corr = (point.penetration - skin) * POS_CORRECT;
-                if (corr > 0) body.position.addScaledVector(manifold.normal, corr);
+                if (point.penetration > deepest) deepest = point.penetration;
             }
+            const correction = Math.min((deepest - skin) * POS_CORRECT, maxCorrection);
+            if (correction > 0) body.position.addScaledVector(manifold.normal, correction);
         }
+    }
+
+    /** 按特征尺寸限制单子步的最大位置修正。 */
+    private maxPositionCorrection(body: DynamicBody, dt: number): number {
+        return body.characteristicExtent() * MAX_DEPENETRATION_EXTENTS * dt;
     }
 
     /**

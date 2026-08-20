@@ -1,11 +1,11 @@
 import * as THREE from "three";
-import type { playerController } from "../playerController";
+import type { playerController } from "../PlayerController";
 import { loadVehicleModel as loadVehicleModelUtil } from "../utils/vehicleLoader";
 import { DEFAULT_MAX_SUSPENSION_TRAVEL, DEFAULT_WHEEL_PHYSICS } from "../utils/vehicleController";
 import { applyCapsuleCollision, createCollisionTemps } from "../utils/capsuleCollision";
 import type { VehicleInstance, VehicleOptions, KinematicColliderEntry, VehicleWheelColliderUserData } from "../types";
 import { CollisionGroup } from "../collision/groups";
-import { createObbObbTemps, resolveObbObb } from "../collision/ObbObb";
+import { createObbObbTemps, resolveObbObb } from "../collision/obbObb";
 
 export class VehicleSystem {
     private ctrl: playerController; // 主控制器引用
@@ -64,6 +64,31 @@ export class VehicleSystem {
     constructor(ctrl: playerController) {
         this.ctrl = ctrl;
         (this.raycaster as any).firstHitOnly = true;
+    }
+
+    /** 切换车辆底盘物理盒。 */
+    setPhysicsDebugVisible(visible: boolean): void {
+        this.params.debug.showPhysicsBox = visible;
+        this.syncDebugVisibility();
+    }
+
+    /** 同步全部车辆调试对象的显隐。 */
+    syncDebugVisibility(): void {
+        for (const v of this.list) {
+            if (v.physicsBoxMesh) {
+                if (this.params.debug.showPhysicsBox) {
+                    if (!v.vehicleGroup.children.includes(v.physicsBoxMesh)) v.vehicleGroup.add(v.physicsBoxMesh);
+                } else {
+                    v.vehicleGroup.remove(v.physicsBoxMesh);
+                }
+            }
+            if (v.wheelRayDebug) v.wheelRayDebug.visible = this.params.debug.showWheelRays;
+            if (v.wheelTravelDebug) v.wheelTravelDebug.visible = this.params.debug.showWheelTravel;
+            if (v.wheelSphereDebug) {
+                v.wheelSphereDebug.visible = this.params.debug.showWheelSpheres;
+                if (v.wheelSphereDebug.visible) this.syncWheelSphereDebug(v);
+            }
+        }
     }
 
     /** 由车身水平包围圆和人物胶囊半径推算上车范围。 */
@@ -148,6 +173,7 @@ export class VehicleSystem {
         const c = this.ctrl;
         c.controllerMode = 1;
         c.playerVelocity.set(0, 0, 0);
+        c.activeDynamicBody = null;
         c.mobileControls?.syncControllerModeBtn(1);
         c.cam.setOverShoulder(false);
         c.animation.playByName("driving");

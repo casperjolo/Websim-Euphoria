@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-import { MobileControls } from "./utils/mobileControls";
+import { MobileControls } from "./utils/MobileControls";
 import type { PlayerControllerOptions, PlayerModelOptions, VehicleInstance, VehicleOptions, KinematicColliderEntry, KeyMap } from "./types";
 import type { PlayerPlugin } from "./plugins/types";
 import { AnimationSystem } from "./systems/AnimationSystem";
@@ -13,14 +13,15 @@ import { VehicleSystem } from "./systems/VehicleSystem";
 import { DynamicBodySystem } from "./systems/DynamicBodySystem";
 import { ColliderRegistry } from "./systems/ColliderRegistry";
 import type { DynamicBody } from "./collision/DynamicBody";
-import type { ColliderDesc, ColliderHandle } from "./collision/ColliderDesc";
+import type { ColliderDesc, ColliderHandle } from "./collision/colliderDesc";
 import type { MotionType } from "./collision/CollisionWorld";
 import { applyCapsuleCollision, createCollisionTemps, type CollisionTemps } from "./utils/capsuleCollision";
 import { getBbox } from "./utils/bbox";
-import { BvhWorkerPool } from "./utils/bvhWorkerPool";
+import { BvhWorkerPool } from "./utils/BvhWorkerPool";
 import { CollisionWorld } from "./collision/CollisionWorld";
 import { CHARACTER_QUERY_MASK } from "./collision/groups";
 import { CharacterMovement } from "./systems/CharacterMovement";
+import { PlayerDebug } from "./systems/PlayerDebug";
 
 /** 未传入delta时计算帧间隔。 */
 let _lastUpdateTime = performance.now();
@@ -111,10 +112,14 @@ export class playerController {
     collisionWorld = new CollisionWorld();
     /** 统一创建 / 运动学跟随。 */
     private colliders = new ColliderRegistry(this);
+    /** 人物胶囊与地面探测调试。 */
+    private playerDebug = new PlayerDebug(this);
     /** 人物移动（胶囊推出）。 */
-    private character = new CharacterMovement(this);
+    private character = new CharacterMovement(this, this.playerDebug);
     /** 当前站立的运动学碰撞体。 */
     activeKinematicCollider: KinematicColliderEntry | null = null;
+    /** 当前站立的动态刚体。 */
+    activeDynamicBody: DynamicBody | null = null;
     /** 异步 BVH 构建队列。 */
     private readonly bvhWorkerPool = new BvhWorkerPool();
 
@@ -140,16 +145,6 @@ export class playerController {
     mobileControls: MobileControls | null = null;
     /** 靠近车辆。 */
     isNearVehicle = false;
-
-    // ==================== 调试 ====================
-    /** 显示静态 / 运动学 mesh 碰撞线框。 */
-    private displayCollider = false;
-    /** 显示玩家胶囊线框。 */
-    private displayPlayerCapsule = false;
-    /** 显示动态刚体碰撞线框。 */
-    private displayDynamicBody = false;
-    /** 显示车辆底盘物理盒。 */
-    private displayVehiclePhysics = false;
 
     // ==================== 方向常量 & 复用向量 ====================
     /** 朝向旋转速度。 */
@@ -524,7 +519,7 @@ export class playerController {
         this.playerCapsule.position.copy(savedPos);
         this.playerCapsule.quaternion.copy(savedQuat);
         if (wasFirstPerson) this.cam.setFirstPerson();
-        this.setColliderDebug(this.displayCollider);
+        this.syncDebugVisibility();
         for (const plugin of this.plugins) plugin.onPlayerModelChange?.();
     }
 
@@ -561,9 +556,9 @@ export class playerController {
     /** @internal BVH worker。 */
     getBvhWorkerPool() { return this.bvhWorkerPool; }
     /** @internal 静态 / 运动学 mesh 线框开关。 */
-    getDisplayCollider() { return this.displayCollider; }
+    getDisplayCollider() { return this.colliders.getDebugVisible(); }
     /** @internal 动态刚体线框开关。 */
-    getDisplayDynamicBody() { return this.displayDynamicBody; }
+    getDisplayDynamicBody() { return this.dynamics.getDebugVisible(); }
 
     /** 统一创建碰撞体。 */
     addCollider(desc: ColliderDesc): ColliderHandle {
@@ -646,6 +641,7 @@ export class playerController {
             this.vehicle.finishPhysics(delta);
         }
         this.dynamics.step(delta);
+        this.character.applyDynamicSupportCarry();
         this.commitKinematicPrevMatrices();
     }
 
@@ -665,49 +661,10 @@ export class playerController {
 
     /** 同步全部 debug 可见性。 */
     syncDebugVisibility() {
-        this.syncPlayerCapsuleDebug();
-        this.syncMeshColliderDebug();
-        this.syncDynamicBodyDebug();
-        this.syncVehiclePhysicsDebug();
-    }
-
-    /** 同步玩家胶囊线框。 */
-    private syncPlayerCapsuleDebug() {
-        if (!this.playerCapsule) return;
-        (this.playerCapsule.material as THREE.Material).visible = this.displayPlayerCapsule;
-    }
-
-    /** 同步静态 / 运动学 mesh 碰撞线框。 */
-    private syncMeshColliderDebug() {
-        const dbg = this.displayCollider;
-        for (const mesh of this.getColliderMeshes()) {
-            if (dbg && (mesh.geometry as any).boundsTree) {
-                if (!this.scene.children.includes(mesh)) this.scene.add(mesh);
-            } else this.scene.remove(mesh);
-        }
-    }
-
-    /** 同步动态刚体碰撞线框。 */
-    private syncDynamicBodyDebug() {
-        const dbg = this.displayDynamicBody;
-        for (const body of this.dynamics.list) {
-            const mesh = body.debugMesh;
-            if (dbg) {
-                if (!this.scene.children.includes(mesh)) this.scene.add(mesh);
-            } else this.scene.remove(mesh);
-        }
-    }
-
-    /** 同步车辆底盘物理盒。 */
-    private syncVehiclePhysicsDebug() {
-        const dbg = this.displayVehiclePhysics;
-        this.vehicle.params.debug.showPhysicsBox = dbg;
-        for (const v of this.vehicle.list) {
-            if (!v.physicsBoxMesh) continue;
-            if (dbg) {
-                if (!v.vehicleGroup.children.includes(v.physicsBoxMesh)) v.vehicleGroup.add(v.physicsBoxMesh);
-            } else v.vehicleGroup.remove(v.physicsBoxMesh);
-        }
+        this.playerDebug.syncVisibility();
+        this.colliders.syncDebugVisibility();
+        this.dynamics.syncDebugVisibility();
+        this.vehicle.syncDebugVisibility();
     }
 
     /** 设置落地状态。 */
@@ -812,6 +769,7 @@ export class playerController {
             this.syncDebugVisibility();
         }
         this.playerVelocity.set(0, 0, 0);
+        this.activeDynamicBody = null;
         this.playerCapsule.position.copy(position ?? this.initPos);
     }
 
@@ -870,9 +828,15 @@ export class playerController {
     getAllVehicles() { return this.vehicle.list; }
     /** 获取当前站立的运动学碰撞体。 */
     getActiveKinematicCollider() { return this.activeKinematicCollider; }
+    /** 获取当前站立的动态刚体。 */
+    getActiveDynamicBody() { return this.activeDynamicBody; }
 
     /** 移除动态刚体。 */
     removeDynamicBody(body: DynamicBody) { this.dynamics.remove(body); }
+    /** 从指定世界坐标向下查询动态刚体表面。 */
+    raycastDynamicGround(origin: THREE.Vector3, minNormalY?: number) {
+        return this.dynamics.raycastGround(origin, minNormalY);
+    }
     /** 全部动态刚体。 */
     getDynamicBodies(): DynamicBody[] { return this.dynamics.list; }
     /** 清除全部动态刚体。 */
@@ -916,23 +880,19 @@ export class playerController {
     // --- 调试 ---
     /** 切换静态碰撞线框。 */
     setColliderDebug(debug: boolean) {
-        this.displayCollider = debug;
-        this.syncMeshColliderDebug();
+        this.colliders.setDebugVisible(debug);
     }
     /** 切换玩家胶囊线框。 */
     setPlayerCapsuleDebug(debug: boolean) {
-        this.displayPlayerCapsule = debug;
-        this.syncPlayerCapsuleDebug();
+        this.playerDebug.setVisible(debug);
     }
     /** 切换动态刚体碰撞线框。 */
     setDynamicBodyDebug(debug: boolean) {
-        this.displayDynamicBody = debug;
-        this.syncDynamicBodyDebug();
+        this.dynamics.setDebugVisible(debug);
     }
     /** 切换车辆底盘物理盒。 */
     setVehiclePhysicsDebug(debug: boolean) {
-        this.displayVehiclePhysics = debug;
-        this.syncVehiclePhysicsDebug();
+        this.vehicle.setPhysicsDebugVisible(debug);
     }
     /** 临时跳过玩家胶囊碰撞检测。 */
     setSkipCapsuleCollision(skip: boolean) { this.skipCapsuleCollision = skip; }
@@ -990,6 +950,8 @@ export class playerController {
             plugin.dispose?.();
         }
         this.plugins = [];
+
+        this.playerDebug.dispose();
 
         // 清除玩家对象
         if (this.playerCapsule) { this.playerCapsule.remove(this.camera); this.scene.remove(this.playerCapsule); }

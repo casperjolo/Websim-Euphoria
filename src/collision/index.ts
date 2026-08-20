@@ -16,8 +16,8 @@ export type {
     StaticColliderDesc,
     KinematicColliderDesc,
     DynamicColliderDesc,
-} from "./ColliderDesc";
-export { DYNAMIC_BODY_DEFAULTS } from "./ColliderDesc";
+} from "./colliderDesc";
+export { DYNAMIC_BODY_DEFAULTS } from "./colliderDesc";
 export { DynamicBody } from "./DynamicBody";
 export type { DynamicBodyKind, DynamicBodyMaterialOptions } from "./DynamicBody";
 export { DynamicSphereBody, isSphereBody } from "./DynamicSphere";
@@ -28,4 +28,4 @@ export {
     attachBoundsTree,
     ensureAttributesMinimal,
     unifiedAttribute,
-} from "./ColliderBuild";
+} from "./colliderBuild";

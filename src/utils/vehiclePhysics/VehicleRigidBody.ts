@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { integrateQuaternion } from "./VehicleMath";
+import { integrateQuaternion } from "./vehicleMath";
 
 export type VehicleRigidBodyOptions = {
     position: THREE.Vector3; // 初始世界位置

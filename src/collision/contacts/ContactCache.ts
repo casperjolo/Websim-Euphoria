@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { ContactManifold } from "./ContactManifold";
 import { ContactPoint } from "./ContactPoint";
-import { normalClass } from "./ContactReducer";
+import { normalClass } from "./contactReducer";
 
 const MATCH_NORMAL = 0.95; // 法线点积低于此值视为不同流形
 const MATCH_DISTANCE = 0.08; // 局部接触点匹配距离上限

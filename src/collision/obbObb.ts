@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { impulseDenominator } from "../utils/vehiclePhysics/VehicleMath";
+import { impulseDenominator } from "../utils/vehiclePhysics/vehicleMath";
 import type { ImpulseBody } from "./solver/ImpulseBody";
 
 const EPS = 1e-8; // 退化轴 / 零长度下限

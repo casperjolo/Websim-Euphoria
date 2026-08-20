@@ -161,7 +161,7 @@ export type PlayerControllerOptions = {
     /** 相机看向点高度比例（0 为底部，1 为顶部），默认 0.8。 */
     camLookAtHeightRatio?: number;
     /** 初始化时批量创建的碰撞体；未传则不自动建碰撞，需事后 `addCollider`。 */
-    colliders?: import("../collision/ColliderDesc").ColliderDesc[];
+    colliders?: import("../collision/colliderDesc").ColliderDesc[];
     /** 移动端是否显示虚拟控制 UI，默认 true。 */
     isShowMobileControls?: boolean;
     /** 移动端按钮显隐配置。 */

@@ -1,4 +1,4 @@
-import type { playerController } from "../playerController";
+import type { playerController } from "../PlayerController";
 import type { KeyAction, KeyMap } from "../types";
 
 // 默认键位表（动作 -> KeyboardEvent.code 列表）

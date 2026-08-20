@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { integrateQuaternion } from "../utils/vehiclePhysics/VehicleMath";
+import { integrateQuaternion } from "../utils/vehiclePhysics/vehicleMath";
 
 /** 冲量唤醒：质心线速度增量 ‖Δv‖ = ‖J‖·invMass 超过该值则醒（世界单位/秒）。 */
 const WAKE_DELTA_V = 1e-4;

@@ -1,7 +1,9 @@
 import * as THREE from "three";
-import type { playerController } from "../playerController";
+import type { playerController } from "../PlayerController";
 import type { KinematicColliderEntry } from "../types";
 import { CHARACTER_QUERY_MASK } from "../collision/groups";
+import type { DynamicBody } from "../collision/DynamicBody";
+import type { PlayerDebug } from "./PlayerDebug";
 import { applyCapsuleCollision } from "../utils/capsuleCollision";
 
 /**
@@ -9,17 +11,28 @@ import { applyCapsuleCollision } from "../utils/capsuleCollision";
  * 不走刚体冲量核（位置推出式 CharacterController）。
  */
 export class CharacterMovement {
-    constructor(private readonly ctrl: playerController) {}
+    private dynamicSupportBody: DynamicBody | null = null;
+    private dynamicSupportPrevPosition = new THREE.Vector3();
+    private dynamicSupportPrevQuaternion = new THREE.Quaternion();
+    private dynamicSupportInvQuaternion = new THREE.Quaternion();
+    private dynamicSupportLocal = new THREE.Vector3();
+    private dynamicSupportBefore = new THREE.Vector3();
+    private dynamicSupportDelta = new THREE.Vector3();
+
+    constructor(
+        private readonly ctrl: playerController,
+        private readonly debug: PlayerDebug,
+    ) {}
 
     /** 步行 / 飞行一帧：输入速度 → 落地 → 分步碰撞 → 朝向与相机。 */
     update(delta: number): void {
         const c = this.ctrl;
         // 载具模式只跑动画，移动由车辆系统负责
         if (c.controllerMode === 1) {
+            this.debug.clearGroundProbe();
             c.runAnimationPass(delta);
             return;
         }
-
         // —— 输入与目标速度 ——
         c.camera.getWorldDirection(c.camDir);
         const angle = 2 * Math.PI - (Math.atan2(c.camDir.z, c.camDir.x) + Math.PI / 2);
@@ -60,7 +73,7 @@ export class CharacterMovement {
             c.playerVelocity.y += Math.sign(diffY) * Math.min(Math.abs(diffY), c.moveDir.y !== 0 ? accelStep : decelStep);
         }
 
-        // —— 脚下射线：静态 / 运动学网格，取最高命中 ——
+        // —— 脚下射线：静态 / 运动学网格 / 动态体，取最高命中 ——
         c.groundRaycaster.ray.origin.copy(c.playerCapsule.position);
         let bestHit: THREE.Intersection | undefined;
         let hitEntry: KinematicColliderEntry | null = null;
@@ -72,18 +85,33 @@ export class CharacterMovement {
                 hitEntry = col.motion === "kinematic" ? col.userData as KinematicColliderEntry : null;
             }
         }
-        c.activeKinematicCollider = hitEntry;
-
+        let dynamicHit = c.dynamics.raycastGround(c.playerCapsule.position);
+        if (dynamicHit && bestHit && dynamicHit.point.y <= bestHit.point.y) dynamicHit = null;
+        if (dynamicHit) {
+            bestHit = undefined;
+            hitEntry = null;
+        }
+        const groundPoint = dynamicHit?.point ?? bestHit?.point;
+        this.debug.updateGroundProbe(
+            c.groundRaycaster.ray.origin,
+            groundPoint ?? null,
+            c.maxH,
+            c.groundRaycaster.near,
+        );
         // —— 重力 / 贴地 snap（飞行跳过） ——
         if (!c.isFlying) {
-            if (bestHit) {
-                const snapY = bestHit.point.y + c.snapH;
-                const dist = c.playerCapsule.position.y - bestHit.point.y;
+            if (groundPoint) {
+                const snapY = groundPoint.y + c.snapH;
+                const dist = c.playerCapsule.position.y - groundPoint.y;
                 if (dist > c.maxH) {
                     c.applyGravity(delta); // 离地过远当坠落
                 } else if (c.playerVelocity.y <= 0) {
                     if (c.playerIsOnGround) {
-                        c.snapToGround(snapY, c.isFlatFloor(bestHit), delta);
+                        c.snapToGround(
+                            snapY,
+                            dynamicHit ? dynamicHit.normal.y >= c.minFloorNormalY : c.isFlatFloor(bestHit!),
+                            delta,
+                        );
                     } else {
                         // 下落中：本帧会落到地面则贴地，否则继续重力
                         const predictedY = c.playerCapsule.position.y + c.playerVelocity.y * delta;
@@ -98,6 +126,10 @@ export class CharacterMovement {
             }
             c.playerCapsule.position.y += c.playerVelocity.y * delta;
         }
+
+        c.activeDynamicBody = c.playerIsOnGround ? dynamicHit?.body ?? null : null;
+        c.activeKinematicCollider = c.playerIsOnGround && !c.activeDynamicBody ? hitEntry : null;
+        this.setDynamicSupport(c.activeDynamicBody);
 
         // —— 水平（飞行则含竖直）分步移动 + 胶囊推出 ——
         const capsuleInfo = c.playerCapsule.capsuleInfo;
@@ -198,5 +230,51 @@ export class CharacterMovement {
 
         c.animation.setAnimationByPressed();
         c.runAnimationPass(delta);
+    }
+
+    /** 切换当前动态支撑体并记录位姿。 */
+    private setDynamicSupport(body: DynamicBody | null): void {
+        if (this.dynamicSupportBody === body) return;
+        this.dynamicSupportBody = body;
+        if (!body) return;
+        this.dynamicSupportPrevPosition.copy(body.position);
+        this.dynamicSupportPrevQuaternion.copy(body.quaternion);
+    }
+
+    /** 动态支撑体推进后按前后位姿带走人物。 */
+    applyDynamicSupportCarry(): void {
+        const c = this.ctrl;
+        const body = c.activeDynamicBody;
+        if (body !== this.dynamicSupportBody) this.setDynamicSupport(body);
+        if (!body) return;
+        if (!c.dynamics.list.includes(body)) {
+            c.activeDynamicBody = null;
+            this.setDynamicSupport(null);
+            return;
+        }
+        if (c.controllerMode === 1 || c.isFlying || !c.playerIsOnGround) {
+            this.dynamicSupportPrevPosition.copy(body.position);
+            this.dynamicSupportPrevQuaternion.copy(body.quaternion);
+            return;
+        }
+
+        this.dynamicSupportBefore.copy(c.playerCapsule.position);
+        this.dynamicSupportInvQuaternion.copy(this.dynamicSupportPrevQuaternion).invert();
+        this.dynamicSupportLocal.subVectors(
+            c.playerCapsule.position,
+            this.dynamicSupportPrevPosition,
+        ).applyQuaternion(this.dynamicSupportInvQuaternion);
+        c.playerCapsule.position.copy(this.dynamicSupportLocal)
+            .applyQuaternion(body.quaternion)
+            .add(body.position);
+        c.playerCapsule.updateMatrixWorld();
+
+        this.dynamicSupportDelta.subVectors(c.playerCapsule.position, this.dynamicSupportBefore);
+        if (!c.isFirstPerson && this.dynamicSupportDelta.lengthSq() > 0) {
+            c.camera.position.add(this.dynamicSupportDelta);
+            c.controls.target.add(this.dynamicSupportDelta);
+        }
+        this.dynamicSupportPrevPosition.copy(body.position);
+        this.dynamicSupportPrevQuaternion.copy(body.quaternion);
     }
 }

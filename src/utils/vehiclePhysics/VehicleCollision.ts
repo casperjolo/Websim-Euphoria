@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import type { ContactManifold } from "../../collision/contacts/ContactManifold";
 import { CONTACT_SKIN, contactSkinForExtent, type RawContact } from "../../collision/contacts/ContactPoint";
-import { reduceContacts } from "../../collision/contacts/ContactReducer";
-import { closestPointOnTriangle } from "./VehicleMath";
+import { reduceContacts } from "../../collision/contacts/contactReducer";
+import { closestPointOnTriangle } from "./vehicleMath";
 import type { ImpulseBody } from "../../collision/solver/ImpulseBody";
 import type { VehicleRigidBody } from "./VehicleRigidBody";
 
