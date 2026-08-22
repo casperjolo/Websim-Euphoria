@@ -41,10 +41,10 @@ export const DEFAULT_MAX_SUSPENSION_TRAVEL = 0.35;
 
 /** 视觉悬挂跟随速度（越大越贴射线）。 */
 const VISUAL_FOLLOW = 14;
-/** 接地标记球半径。 */
-const DEBUG_HIT_RADIUS = 0.04;
-/** 行程刻度线半宽。 */
-const DEBUG_TICK = 0.08;
+/** 接地标记球相对轮胎半径的比例。 */
+const DEBUG_HIT_RADIUS_RATIO = 0.12;
+/** 行程刻度线半宽相对轮胎半径的比例。 */
+const DEBUG_TICK_RADIUS_RATIO = 0.25;
 
 /** 创建调试线段网格。 */
 function makeDebugLine(material: THREE.LineBasicMaterial, segments: number): THREE.LineSegments {
@@ -112,12 +112,14 @@ export function createVehicleController(
 
     const wheelRayDebug = new THREE.Group();
     wheelRayDebug.name = "wheelRayDebug";
+    wheelRayDebug.userData.excludeFromCollider = true;
     const wheelTravelDebug = new THREE.Group();
     wheelTravelDebug.name = "wheelTravelDebug";
+    wheelTravelDebug.userData.excludeFromCollider = true;
     const rayLines: THREE.LineSegments[] = [];
     const hitMarks: THREE.Mesh[] = [];
     const travelLines: THREE.LineSegments[] = [];
-    const hitGeo = new THREE.SphereGeometry(DEBUG_HIT_RADIUS, 8, 6);
+    const hitGeo = new THREE.SphereGeometry(1, 8, 6);
     const hitMat = new THREE.MeshBasicMaterial({ color: 0xffff66, depthTest: false });
     const rayMatHit = new THREE.LineBasicMaterial({ color: 0x66ff66, depthTest: false });
     const rayMatMiss = new THREE.LineBasicMaterial({ color: 0xff5555, depthTest: false });
@@ -129,6 +131,8 @@ export function createVehicleController(
         const hit = new THREE.Mesh(hitGeo, hitMat);
         hit.frustumCulled = false;
         hit.renderOrder = 21;
+        hit.visible = false;
+        hit.scale.setScalar(Math.max(1e-6, (wheelsInfo[i]?.radius ?? 0) * DEBUG_HIT_RADIUS_RATIO));
         hitMarks.push(hit);
         wheelRayDebug.add(hit);
         const travel = makeDebugLine(travelMat, 4);
@@ -196,6 +200,7 @@ export function createVehicleController(
             if (wheel.isInContact) {
                 const hitDist = Math.max(0, wheel.visualLength + wheel.radius);
                 hit.position.copy(conn).addScaledVector(_dir, hitDist);
+                hit.scale.setScalar(Math.max(1e-6, wheel.radius * DEBUG_HIT_RADIUS_RATIO));
                 hit.visible = true;
             } else {
                 hit.visible = false;
@@ -209,7 +214,7 @@ export function createVehicleController(
             _tick.copy(wheel.axle);
             if (_tick.lengthSq() < 1e-12) _tick.set(1, 0, 0);
             else _tick.normalize();
-            _tick.multiplyScalar(Math.max(DEBUG_TICK, wheel.radius * 0.25));
+            _tick.multiplyScalar(Math.max(1e-6, wheel.radius * DEBUG_TICK_RADIUS_RATIO));
             _rest.copy(conn).addScaledVector(_dir, rest);
             const attr = line.geometry.getAttribute("position") as THREE.BufferAttribute;
             setSegment(attr, 0, _from, _to);

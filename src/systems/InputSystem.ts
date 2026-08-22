@@ -239,7 +239,8 @@ export class InputSystem {
 
     // 鼠标移动处理
     private onMouseMove(e: MouseEvent) {
-        if (document.pointerLockElement === document.body) {
+        const lockTarget = this.ctrl.controls.domElement;
+        if (lockTarget && document.pointerLockElement === lockTarget) {
             this.ctrl.cam.setToward(e.movementX, e.movementY, 0.0001);
         }
     }

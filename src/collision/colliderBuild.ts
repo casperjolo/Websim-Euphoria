@@ -7,6 +7,16 @@ import type { BvhWorkerPool } from "../utils/BvhWorkerPool";
  * 碰撞网格构建工具。
  */
 
+/** 调试辅助物及其子级不应被烘焙进 mesh collider。 */
+function isExcludedFromCollider(object: THREE.Object3D): boolean {
+    let current: THREE.Object3D | null = object;
+    while (current) {
+        if (current.userData.excludeFromCollider === true) return true;
+        current = current.parent;
+    }
+    return false;
+}
+
 /** 校验并补全合并所需属性（position / normal / uv）；含 NaN 或顶点数不足时返回 null。 */
 export function ensureAttributesMinimal(geom: THREE.BufferGeometry): THREE.BufferGeometry | null {
     if (!geom.attributes.position) return null;
@@ -85,7 +95,12 @@ function collectWorldSpaceGeometries(sources: THREE.Object3D[]): THREE.BufferGeo
         obj.updateMatrixWorld(true);
         obj.traverse(c => {
             const a = c as any;
-            if ((a.isMesh || a.isLineSegments) && a.geometry && c.name !== "capsule") collectMesh(a);
+            if (
+                (a.isMesh || a.isLineSegments)
+                && a.geometry
+                && c.name !== "capsule"
+                && !isExcludedFromCollider(c)
+            ) collectMesh(a);
         });
     }
     return collected;
@@ -97,7 +112,7 @@ function collectLocalSpaceGeometries(source: THREE.Object3D): THREE.BufferGeomet
     const invSource = new THREE.Matrix4().copy(source.matrixWorld).invert();
     source.traverse(c => {
         const m = c as THREE.Mesh;
-        if (!m?.isMesh || !m.geometry || c.name === "capsule") return;
+        if (!m?.isMesh || !m.geometry || c.name === "capsule" || isExcludedFromCollider(c)) return;
         try {
             let geom = (m.geometry as THREE.BufferGeometry).clone();
             geom.applyMatrix4(new THREE.Matrix4().multiplyMatrices(invSource, m.matrixWorld));

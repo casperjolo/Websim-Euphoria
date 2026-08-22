@@ -47,8 +47,12 @@ export function createLeg(
 
         // IK 运行时目标和地面命中信息。
         smoothedTarget: new Vector3(),
+        pelvisTarget: new Vector3(),
+        hasPelvisTarget: false,
         hitPoint: new Vector3(),
         hitNormal: new Vector3(0, 1, 0),
+        supportPoint: new Vector3(),
+        supportNormal: new Vector3(0, 1, 0),
         footSamplePoint: new Vector3(),
         soleSamples: ["heelL", "heelR", "toeL", "toeR"].map(name => ({
             name,
@@ -78,6 +82,7 @@ export function createLeg(
         marker: null,
         hitMarker: null,
         rayLine: null,
+        raiseLimitLine: null,
     };
 }
 

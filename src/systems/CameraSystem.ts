@@ -8,7 +8,7 @@ export class CameraSystem {
     epsilon = 35; // 安全距离偏移
     minDist = 100; // 最小相机距离
     maxDist = 440; // 最大相机距离
-    originMaxDist = 440; // 初始最大距离
+    originMaxDist = 440; // 配置的默认最远距离
     sensitivity = 5; // 鼠标灵敏度
     mouseMode: 0 | 1 | 2 | 3 | 4 | 5 = 1; // 鼠标控制模式
     zoomEnabled = false; // 是否允许缩放
@@ -22,6 +22,8 @@ export class CameraSystem {
     vehicleTurnLerp = 0.01;
     private _springVelocity = new THREE.Vector3();
     private _springResult = new THREE.Vector3();
+    private zoomWheelElement: HTMLElement | SVGElement | null = null;
+    private readonly boundZoomWheel: EventListener = (event) => this.onZoomWheel(event as WheelEvent);
 
     raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3()); // 相机碰撞射线
     centerRay = new THREE.Raycaster(); // 屏幕中心射线
@@ -103,7 +105,8 @@ export class CameraSystem {
             const rawOffset = new THREE.Vector3(Math.cos(angle) * 400 * s, 200 * s, Math.sin(angle) * 400 * s);
             this.ctrl.controls.target.copy(this.getLookAtPoint());
             this.ctrl.camera.position.copy(this.ctrl.controls.target).add(rawOffset.normalize().multiplyScalar(this.maxDist));
-            this.ctrl.controls.enableZoom = this.zoomEnabled;
+            // 滚轮由 CameraSystem 改写 maxDist，禁用自带的直接位移缩放。
+            this.ctrl.controls.enableZoom = false;
             this.setOverShoulder(this.ctrl.enableOverShoulderView);
         }
         this.setPointerLock();
@@ -135,9 +138,10 @@ export class CameraSystem {
 
     // 指针锁定控制
     setPointerLock() {
-        if (!document.body.requestPointerLock) return;
+        const lockTarget = this.ctrl.controls.domElement;
+        if (!lockTarget?.requestPointerLock) return;
         if (((this.mouseMode === 0 || this.mouseMode === 1 || this.mouseMode === 5) && !this.ctrl.isFirstPerson) || this.ctrl.isFirstPerson) {
-            document.body.requestPointerLock();
+            lockTarget.requestPointerLock();
         } else {
             document.exitPointerLock();
         }
@@ -153,7 +157,7 @@ export class CameraSystem {
                 const rawOffset = new THREE.Vector3(Math.cos(angle) * 400 * s, 200 * s, Math.sin(angle) * 400 * s);
                 this.ctrl.controls.target.copy(this.getLookAtPoint());
                 this.ctrl.camera.position.copy(this.ctrl.controls.target).add(rawOffset.normalize().multiplyScalar(this.maxDist));
-                this.ctrl.controls.enableZoom = this.zoomEnabled;
+                this.ctrl.controls.enableZoom = false;
             } else {
                 this.setFirstPerson();
             }
@@ -163,17 +167,61 @@ export class CameraSystem {
 
     // 初始化轨道控制
     initControls() {
-        this.ctrl.controls.enableZoom = this.zoomEnabled;
+        this.ctrl.controls.enableZoom = false;
         this.ctrl.controls.rotateSpeed = this.sensitivity * 0.05;
         this.ctrl.controls.maxPolarAngle = Math.PI;
         this.ctrl.controls.mouseButtons = { LEFT: 0, MIDDLE: 1, RIGHT: 2 };
         // 防止相机轨道半径归零穿越目标点
         this.ctrl.controls.minDistance = this.minDist;
+        this.connectZoomWheel();
+    }
+
+    /** 切换第三人称滚轮缩放；关闭时恢复配置的默认最远距离。 */
+    setZoomEnabled(enabled: boolean) {
+        this.zoomEnabled = enabled;
+        this.ctrl.controls.enableZoom = false;
+        this.maxDist = enabled
+            ? Math.max(this.maxDist, this.minDist)
+            : this.originMaxDist;
+    }
+
+    /** 绑定到渲染画布，使普通鼠标与 Pointer Lock 状态共用同一滚轮入口。 */
+    private connectZoomWheel() {
+        const element = this.ctrl.controls.domElement;
+        if (!element) return;
+        if (this.zoomWheelElement === element) return;
+        this.disconnectZoomWheel();
+        element.addEventListener("wheel", this.boundZoomWheel, { passive: false });
+        this.zoomWheelElement = element;
+    }
+
+    private disconnectZoomWheel() {
+        this.zoomWheelElement?.removeEventListener("wheel", this.boundZoomWheel);
+        this.zoomWheelElement = null;
+    }
+
+    /** 滚轮改变目标最远距离。 */
+    private onZoomWheel(event: WheelEvent) {
+        if (!this.zoomEnabled || this.ctrl.isFirstPerson || event.deltaY === 0) return;
+        event.preventDefault();
+
+        // 与 OrbitControls 一致地归一化像素、行和页三种 wheel delta。
+        let deltaY = event.deltaY;
+        if (event.deltaMode === 1) deltaY *= 16;
+        else if (event.deltaMode === 2) deltaY *= 100;
+        if (event.ctrlKey) deltaY *= 10;
+
+        const scale = Math.pow(0.95, Math.abs(deltaY * 0.01));
+        const nextDistance = deltaY < 0
+            ? this.maxDist * scale
+            : this.maxDist / scale;
+        this.maxDist = Math.max(nextDistance, this.minDist);
     }
 
     // 重置轨道控制
     resetControls() {
         if (!this.ctrl.controls) return;
+        this.disconnectZoomWheel();
         this.ctrl.controls.enabled = true;
         this.ctrl.controls.enablePan = true;
         this.ctrl.controls.maxPolarAngle = Math.PI / 2;
@@ -240,7 +288,8 @@ export class CameraSystem {
         this.ctrl.camera.position.add(lookTarget);
         this.ctrl.controls.update();
 
-        const desiredDist = Math.max(this.minDist, v.size.l * 0.8);
+        const vehicleBaseDistance = Math.max(this.minDist, v.size.l * 0.8);
+        const desiredDist = Math.max(this.maxDist, vehicleBaseDistance);
         this.updateWithRaycast(this.ctrl.controls.target, desiredDist);
 
         if ((this.ctrl.input.fwd || this.ctrl.input.bkd) && v.followVehicleDirection) {

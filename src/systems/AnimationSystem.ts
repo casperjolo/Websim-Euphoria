@@ -264,8 +264,8 @@ export class AnimationSystem {
             }
         }
 
-        // 恢复相机距离
-        this.ctrl.cam.maxDist = this.ctrl.cam.originMaxDist;
+        // 未启用缩放时恢复默认距离；启用后保留滚轮选择的 maxDist。
+        if (!this.ctrl.cam.zoomEnabled) this.ctrl.cam.maxDist = this.ctrl.cam.originMaxDist;
 
         if (this.ctrl.controllerMode === 1) return;
 

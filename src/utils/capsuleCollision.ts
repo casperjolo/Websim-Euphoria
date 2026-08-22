@@ -9,6 +9,52 @@ export interface CollisionTemps {
     closestTri: THREE.Vector3; // 三角面最近点
 }
 
+/** 地面体积探测的通用命中结果。 */
+export interface GroundProbeHit {
+    point: THREE.Vector3;
+    normal: THREE.Vector3;
+    /** 从胶囊下端球心沿向下方向到支撑点的距离。 */
+    distance: number;
+}
+
+/**
+ * 一次圆柱地面探测的参数、临时向量和当前最近命中。
+ */
+export interface GroundProbeQuery {
+    start: THREE.Vector3;
+    down: THREE.Vector3;
+    maxDistance: number;
+    radius: number;
+    radiusSq: number;
+    minNormalY: number;
+    delta: THREE.Vector3;
+    radialOffset: THREE.Vector3;
+    hit: GroundProbeHit;
+}
+
+/** BVH 三角形和动态盒表面三角形共同具备的最小查询接口。 */
+export interface GroundProbeTriangle {
+    closestPointToSegment(
+        segment: THREE.Line3,
+        trianglePoint: THREE.Vector3,
+        segmentPoint: THREE.Vector3,
+    ): number;
+    getNormal(target: THREE.Vector3): THREE.Vector3;
+}
+
+/** 地面体积探测所需的复用临时对象。 */
+export interface GroundProbeTemps {
+    invMat: THREE.Matrix4;
+    normalMat: THREE.Matrix3;
+    localSeg: THREE.Line3;
+    localBox: THREE.Box3;
+    colliderScale: THREE.Vector3;
+    localTriPoint: THREE.Vector3;
+    localSegPoint: THREE.Vector3;
+    localNormal: THREE.Vector3;
+    query: GroundProbeQuery;
+}
+
 // 创建一组预分配的临时对象
 export function createCollisionTemps(): CollisionTemps {
     return {
@@ -18,6 +64,179 @@ export function createCollisionTemps(): CollisionTemps {
         closestSeg: new THREE.Vector3(),
         closestTri: new THREE.Vector3(),
     };
+}
+
+/** 创建可跨帧复用的圆柱地面探测状态。 */
+export function createGroundProbeQuery(): GroundProbeQuery {
+    return {
+        start: new THREE.Vector3(),
+        down: new THREE.Vector3(0, -1, 0),
+        maxDistance: 0,
+        radius: 0,
+        radiusSq: 0,
+        minNormalY: 0,
+        delta: new THREE.Vector3(),
+        radialOffset: new THREE.Vector3(),
+        hit: {
+            point: new THREE.Vector3(),
+            normal: new THREE.Vector3(),
+            distance: Infinity,
+        },
+    };
+}
+
+/** 写入本次探测参数，并清空上一次留下的最近命中。 */
+export function resetGroundProbeQuery(
+    query: GroundProbeQuery,
+    start: THREE.Vector3,
+    down: THREE.Vector3,
+    maxDistance: number,
+    radius: number,
+    minNormalY: number,
+): void {
+    query.start.copy(start);
+    query.down.copy(down).normalize();
+    query.maxDistance = Math.max(0, maxDistance);
+    query.radius = Math.max(0, radius);
+    query.radiusSq = query.radius * query.radius;
+    query.minNormalY = minNormalY;
+    query.hit.distance = Infinity;
+}
+
+/**
+ * 将形状算法给出的表面点送入统一的圆柱筛选器。
+ * 返回 true 表示该点有效，并且替换了当前最近命中。
+ */
+export function tryGroundProbeCandidate(
+    query: GroundProbeQuery,
+    point: THREE.Vector3,
+    normal: THREE.Vector3,
+): boolean {
+    query.delta.subVectors(point, query.start);
+
+    // 投影到向下轴得到探测深度；轴起点上方和圆柱末端之外都不属于传感区。
+    const distance = query.delta.dot(query.down);
+    if (
+        distance < -1e-5
+        || distance > query.maxDistance + 1e-5
+        || distance >= query.hit.distance
+    ) return false;
+
+    // 去掉轴向分量后只剩横向偏移，用它判断候选点是否落在圆柱半径内。
+    query.radialOffset.copy(query.delta).addScaledVector(query.down, -distance);
+    if (query.radialOffset.lengthSq() > query.radiusSq) return false;
+
+    // 只接受法线足够朝上的可站立表面。
+    if (-normal.dot(query.down) < query.minNormalY) return false;
+
+    query.hit.distance = distance;
+    query.hit.point.copy(point);
+    query.hit.normal.copy(normal);
+    return true;
+}
+
+/**
+ * 从三角面生成表面候选点，再交给统一圆柱筛选器。
+ * 网格可传入本地到世界的变换；动态盒的三角形已经在世界空间，无需传变换。
+ */
+export function tryGroundProbeTriangle(
+    query: GroundProbeQuery,
+    segment: THREE.Line3,
+    triangle: GroundProbeTriangle,
+    trianglePoint: THREE.Vector3,
+    segmentPoint: THREE.Vector3,
+    normal: THREE.Vector3,
+    pointMatrix?: THREE.Matrix4,
+    normalMatrix?: THREE.Matrix3,
+): boolean {
+    // 三角面到圆柱中心轴的最近点，就是该三角面最有可能落入圆柱的候选点。
+    triangle.closestPointToSegment(segment, trianglePoint, segmentPoint);
+    if (pointMatrix) trianglePoint.applyMatrix4(pointMatrix);
+
+    triangle.getNormal(normal);
+    if (normalMatrix) normal.applyMatrix3(normalMatrix);
+    normal.normalize();
+
+    return tryGroundProbeCandidate(query, trianglePoint, normal);
+}
+
+/** 创建一组地面体积探测临时对象。 */
+export function createGroundProbeTemps(): GroundProbeTemps {
+    return {
+        invMat: new THREE.Matrix4(),
+        normalMat: new THREE.Matrix3(),
+        localSeg: new THREE.Line3(),
+        localBox: new THREE.Box3(),
+        colliderScale: new THREE.Vector3(),
+        localTriPoint: new THREE.Vector3(),
+        localSegPoint: new THREE.Vector3(),
+        localNormal: new THREE.Vector3(),
+        query: createGroundProbeQuery(),
+    };
+}
+
+/**
+ * 用带半径的竖直传感区查找胶囊脚下的可支撑网格。
+ * 中心射线落在细缝中时，传感区仍能触及缝隙两侧的顶面。
+ */
+export function probeMeshGround(
+    sensorStart: THREE.Vector3,
+    down: THREE.Vector3,
+    maxDistance: number,
+    sensorRadius: number,
+    minNormalY: number,
+    collider: THREE.Mesh,
+    temps: GroundProbeTemps,
+): GroundProbeHit | null {
+    const boundsTree = (collider.geometry as any)?.boundsTree;
+    if (!boundsTree || maxDistance <= 0 || sensorRadius <= 0 || down.lengthSq() === 0) return null;
+
+    resetGroundProbeQuery(
+        temps.query,
+        sensorStart,
+        down,
+        maxDistance,
+        sensorRadius,
+        minNormalY,
+    );
+    temps.invMat.copy(collider.matrixWorld).invert();
+    temps.normalMat.getNormalMatrix(collider.matrixWorld);
+    temps.localSeg.start.copy(temps.query.start).applyMatrix4(temps.invMat);
+    temps.localSeg.end.copy(temps.query.start)
+        .addScaledVector(temps.query.down, temps.query.maxDistance)
+        .applyMatrix4(temps.invMat);
+
+    // BVH 宽相位：用包住整个探测圆柱的本地 AABB 排除远处节点。
+    // 非等比缩放时取最小轴缩放计算半径，包围盒会偏大但不会漏掉候选面。
+    temps.colliderScale.setFromMatrixScale(collider.matrixWorld);
+    const minScale = Math.max(
+        1e-8,
+        Math.min(temps.colliderScale.x, temps.colliderScale.y, temps.colliderScale.z),
+    );
+    const localRadius = sensorRadius / minScale;
+    temps.localBox.makeEmpty()
+        .expandByPoint(temps.localSeg.start)
+        .expandByPoint(temps.localSeg.end)
+        .expandByScalar(localRadius);
+
+    boundsTree.shapecast({
+        intersectsBounds: (box: THREE.Box3) => box.intersectsBox(temps.localBox),
+        intersectsTriangle: (tri: any) => {
+            // 窄相位、坐标变换和候选过滤由网格与动态盒共用的函数完成。
+            tryGroundProbeTriangle(
+                temps.query,
+                temps.localSeg,
+                tri,
+                temps.localTriPoint,
+                temps.localSegPoint,
+                temps.localNormal,
+                collider.matrixWorld,
+                temps.normalMat,
+            );
+        },
+    });
+
+    return Number.isFinite(temps.query.hit.distance) ? temps.query.hit : null;
 }
 
 /**

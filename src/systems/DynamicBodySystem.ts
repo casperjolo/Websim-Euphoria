@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { ExtendedTriangle } from "three-mesh-bvh";
 import type { playerController } from "../PlayerController";
 import { CollisionGroup } from "../collision/groups";
 import { ContactCache } from "../collision/contacts/ContactCache";
@@ -22,7 +23,14 @@ import {
 } from "../collision/DynamicBox";
 import { DYNAMIC_BODY_DEFAULTS, type DynamicColliderDesc } from "../collision/colliderDesc";
 import type { VehicleInstance, VehicleWheelColliderUserData } from "../types";
-import { capsuleSphereOverlap, createCollisionTemps } from "../utils/capsuleCollision";
+import {
+    capsuleSphereOverlap,
+    createCollisionTemps,
+    createGroundProbeQuery,
+    resetGroundProbeQuery,
+    tryGroundProbeCandidate,
+    tryGroundProbeTriangle,
+} from "../utils/capsuleCollision";
 import { VehicleCollision } from "../utils/vehiclePhysics/VehicleCollision";
 import { createObbObbTemps, resolveObbObb } from "../collision/obbObb";
 
@@ -45,6 +53,14 @@ const SLEEP_ANGULAR = 0.7; // 角速度低于该值可累计休眠
 const SLEEP_TIME = 0.35; // 连续满足阈值后进入休眠（秒）
 const SLEEP_WAKE_FACTOR = 3; // 超过阈值该倍数才清零休眠计时（迟滞）
 const BROADPHASE_CELL_SCALE = 2; // 动态体互撞宽相位：XZ 网格单元 = 最大特征尺寸 × 该系数（下限 1）。
+const BOX_TRIANGLES = [
+    0, 2, 3, 0, 3, 1,
+    4, 5, 7, 4, 7, 6,
+    0, 4, 6, 0, 6, 2,
+    1, 3, 7, 1, 7, 5,
+    0, 1, 5, 0, 5, 4,
+    2, 6, 7, 2, 7, 3,
+] as const;
 
 /** 人物向下查询命中的动态支撑面。 */
 export type DynamicGroundHit = {
@@ -102,6 +118,14 @@ export class DynamicBodySystem {
     private groundInvQuat = new THREE.Quaternion();
     private groundPoint = new THREE.Vector3();
     private groundNormal = new THREE.Vector3();
+    private groundVolumeQuery = createGroundProbeQuery();
+    private groundProbeSegment = new THREE.Line3();
+    private groundProbeTriangle = new ExtendedTriangle();
+    private groundProbeTrianglePoint = new THREE.Vector3();
+    private groundProbeSegmentPoint = new THREE.Vector3();
+    private groundProbeSphereDelta = new THREE.Vector3();
+    private groundProbeSphereHorizontal = new THREE.Vector3();
+    private groundProbeBoxVertices = Array.from({ length: 8 }, () => new THREE.Vector3());
     private groundHit: DynamicGroundHit = {
         body: null as unknown as DynamicBody,
         point: new THREE.Vector3(),
@@ -306,6 +330,111 @@ export class DynamicBodySystem {
         this.groundHit.body = bestBody;
         bestBody.getVelocityAtPoint(this.groundHit.point, this.groundHit.velocity);
         return this.groundHit;
+    }
+
+    /** 用带半径的竖直传感区查询最近的动态支撑面。 */
+    probeGroundVolume(
+        sensorStart: THREE.Vector3,
+        down: THREE.Vector3,
+        maxDistance: number,
+        sensorRadius: number,
+        minNormalY = SUPPORT_Y,
+    ): DynamicGroundHit | null {
+        if (maxDistance <= 0 || sensorRadius <= 0 || down.lengthSq() === 0) return null;
+
+        // 所有动态形状写入同一个查询状态。
+        resetGroundProbeQuery(
+            this.groundVolumeQuery,
+            sensorStart,
+            down,
+            maxDistance,
+            sensorRadius,
+            minNormalY,
+        );
+        this.groundProbeSegment.start.copy(this.groundVolumeQuery.start);
+        this.groundProbeSegment.end.copy(this.groundVolumeQuery.start)
+            .addScaledVector(this.groundVolumeQuery.down, this.groundVolumeQuery.maxDistance);
+
+        let bestBody: DynamicBody | null = null;
+        for (const body of this.list) {
+            // 各形状只负责生成表面候选点；共用筛选器负责决定是否更新最近命中。
+            const improved = isBoxBody(body)
+                ? this.probeBoxGroundVolume(body)
+                : isSphereBody(body)
+                    ? this.probeSphereGroundVolume(body)
+                    : false;
+            if (improved) bestBody = body;
+        }
+
+        if (!bestBody) return null;
+        this.groundHit.point.copy(this.groundVolumeQuery.hit.point);
+        this.groundHit.normal.copy(this.groundVolumeQuery.hit.normal);
+        this.groundHit.body = bestBody;
+        bestBody.getVelocityAtPoint(this.groundHit.point, this.groundHit.velocity);
+        return this.groundHit;
+    }
+
+    /** 圆柱传感区与动态 OBB 的表面三角形查询。 */
+    private probeBoxGroundVolume(body: DynamicBoxBody): boolean {
+        const half = body.halfExtents;
+        // 碰撞盒只保存半尺寸和位姿；先把 8 个局部角点转换到世界空间。
+        for (let i = 0; i < this.groundProbeBoxVertices.length; i++) {
+            this.groundProbeBoxVertices[i]
+                .set(
+                    (i & 1) === 0 ? -half.x : half.x,
+                    (i & 2) === 0 ? -half.y : half.y,
+                    (i & 4) === 0 ? -half.z : half.z,
+                )
+                .applyQuaternion(body.quaternion)
+                .add(body.position);
+        }
+
+        let improved = false;
+        for (let i = 0; i < BOX_TRIANGLES.length; i += 3) {
+            // 将 OBB 的 6 个面拆成 12 个三角形，与 BVH 网格复用相同的候选点语义。
+            this.groundProbeTriangle.set(
+                this.groundProbeBoxVertices[BOX_TRIANGLES[i]],
+                this.groundProbeBoxVertices[BOX_TRIANGLES[i + 1]],
+                this.groundProbeBoxVertices[BOX_TRIANGLES[i + 2]],
+            );
+            if (tryGroundProbeTriangle(
+                this.groundVolumeQuery,
+                this.groundProbeSegment,
+                this.groundProbeTriangle,
+                this.groundProbeTrianglePoint,
+                this.groundProbeSegmentPoint,
+                this.groundNormal,
+            )) improved = true;
+        }
+        return improved;
+    }
+
+    /** 圆柱传感区与动态球的解析查询。 */
+    private probeSphereGroundVolume(body: DynamicSphereBody): boolean {
+        const query = this.groundVolumeQuery;
+        this.groundProbeSphereDelta.subVectors(body.position, query.start);
+        const centerDistance = this.groundProbeSphereDelta.dot(query.down);
+        this.groundProbeSphereHorizontal.copy(this.groundProbeSphereDelta)
+            .addScaledVector(query.down, -centerDistance);
+
+        // 在探测圆柱的圆形截面内，选择横向最靠近球心的位置。
+        const horizontalDistance = this.groundProbeSphereHorizontal.length();
+        const surfaceOffset = Math.max(0, horizontalDistance - query.radius);
+        if (surfaceOffset > body.radius) return false;
+
+        const upwardExtent = Math.sqrt(Math.max(0, body.radius * body.radius - surfaceOffset * surfaceOffset));
+        this.groundPoint.copy(body.position);
+        if (horizontalDistance > 1e-8) {
+            this.groundPoint.addScaledVector(
+                this.groundProbeSphereHorizontal,
+                -surfaceOffset / horizontalDistance,
+            );
+        }
+        this.groundPoint.addScaledVector(query.down, -upwardExtent);
+        this.groundNormal.subVectors(this.groundPoint, body.position).normalize();
+
+        // 球只负责解析求出点和法线，其余有效性检查仍交给共用筛选器。
+        return tryGroundProbeCandidate(query, this.groundPoint, this.groundNormal);
     }
 
     /** 向下射线与动态 OBB 求交。 */

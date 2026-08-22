@@ -202,30 +202,48 @@ async function init() {
 // 创建调试面板
 function createDebugPanel() {
     const options = footIK?.getOptions() ?? {};
+    const roundedFootIKValue = (value, fallback, decimals = 1) => {
+        const factor = 10 ** decimals;
+        return Math.round((value ?? fallback) * factor) / factor;
+    };
     const params = {
         // 是否启用 Foot IK
         footIKEnabled: options.enabled ?? true,
         // 显示统一 Foot IK 调试（IK 目标 / 最高命中 / 脚底四点）
         footIKDebug: options.debug ?? false,
-        // 是否把左右脚相位文字刷到面板
-        footPhaseDebug: false,
         // 左脚相位调试文本（只读）
         leftFootPhase: "",
+        // 左脚距离下一次落地的时间（只读）
+        leftFootLand: "--",
+        // 左脚实时 IK 权重（只读）
+        leftFootIKWeight: 0,
         // 右脚相位调试文本（只读）
         rightFootPhase: "",
+        // 右脚距离下一次落地的时间（只读）
+        rightFootLand: "--",
+        // 右脚实时 IK 权重（只读）
+        rightFootIKWeight: 0,
         // 显示太阳方向与阴影相机辅助线
         sunDebug: false,
         // 显示玩家胶囊碰撞体
         playerDebug: false,
+        // 双脚同处高台面时的骨盆最大上抬距离
+        maxPelvisRaise: roundedFootIKValue(options.maxPelvisRaise, 36, 0),
+        // 骨盆最大下沉距离
+        maxPelvisDrop: roundedFootIKValue(options.maxPelvisDrop, 36, 0),
+        // 脚部最大上抬距离
+        maxFootRaise: roundedFootIKValue(options.maxFootRaise, 36, 0),
+        // 支撑脚最大下探距离
+        maxFootDrop: roundedFootIKValue(options.maxFootDrop, 36, 0),
 
         // 虚拟脚底左右半宽
-        soleHalfWidth: options.soleHalfWidth ?? 7,
+        soleHalfWidth: roundedFootIKValue(options.soleHalfWidth, 7),
         // 脚尖采样点向前延伸
-        soleToeExtend: options.soleToeExtend ?? 7,
+        soleToeExtend: roundedFootIKValue(options.soleToeExtend, 7),
         // 脚跟采样点向后延伸
-        soleHeelExtend: options.soleHeelExtend ?? 3,
+        soleHeelExtend: roundedFootIKValue(options.soleHeelExtend, 3),
         // 脚骨到鞋底蒙皮厚度补偿（贴地时额外上抬，避免鞋底陷入地面）
-        soleSkinThickness: options.soleSkinThickness ?? 3,
+        soleSkinThickness: roundedFootIKValue(options.soleSkinThickness, 3),
     };
     debugParams = params;
 
@@ -266,22 +284,41 @@ function createDebugPanel() {
     debugFolder.add(params, "footIKDebug").name("Debug Markers").onChange(value => {
         footIK?.setDebugEnabled(value && params.footIKEnabled);
     });
-    debugFolder.add(params, "footPhaseDebug").name("Phase Debug");
     debugFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
+    debugFolder.add(params, "leftFootLand").name("Left Land").listen().disable();
+    debugFolder.add(params, "leftFootIKWeight").name("Left IK Weight").decimals(3).listen().disable();
     debugFolder.add(params, "rightFootPhase").name("Right Phase").listen().disable();
+    debugFolder.add(params, "rightFootLand").name("Right Land").listen().disable();
+    debugFolder.add(params, "rightFootIKWeight").name("Right IK Weight").decimals(3).listen().disable();
     debugFolder.open();
 
+    const pelvisFolder = gui.addFolder("Pelvis");
+    pelvisFolder.add(params, "maxPelvisRaise", 0, 60, 1).name("Max Raise").decimals(0).onChange(value => {
+        applyFootIKOptions({ maxPelvisRaise: value });
+    });
+    pelvisFolder.add(params, "maxPelvisDrop", 0, 60, 1).name("Max Drop").decimals(0).onChange(value => {
+        applyFootIKOptions({ maxPelvisDrop: value });
+    });
+
+    const footReachFolder = gui.addFolder("Foot Reach");
+    footReachFolder.add(params, "maxFootRaise", 0, 60, 1).name("Max Raise").decimals(0).onChange(value => {
+        applyFootIKOptions({ maxFootRaise: value });
+    });
+    footReachFolder.add(params, "maxFootDrop", 0, 60, 1).name("Max Drop").decimals(0).onChange(value => {
+        applyFootIKOptions({ maxFootDrop: value });
+    });
+
     const soleFolder = gui.addFolder("Sole Layout");
-    soleFolder.add(params, "soleHalfWidth", 0, 24, 0.1).name("Half Width").onChange(value => {
+    soleFolder.add(params, "soleHalfWidth", 0, 24, 0.1).name("Half Width").decimals(1).onChange(value => {
         applyFootIKOptions({ soleHalfWidth: value });
     });
-    soleFolder.add(params, "soleToeExtend", 0, 24, 0.1).name("Toe Extend").onChange(value => {
+    soleFolder.add(params, "soleToeExtend", 0, 24, 0.1).name("Toe Extend").decimals(1).onChange(value => {
         applyFootIKOptions({ soleToeExtend: value });
     });
-    soleFolder.add(params, "soleHeelExtend", 0, 24, 0.1).name("Heel Extend").onChange(value => {
+    soleFolder.add(params, "soleHeelExtend", 0, 24, 0.1).name("Heel Extend").decimals(1).onChange(value => {
         applyFootIKOptions({ soleHeelExtend: value });
     });
-    soleFolder.add(params, "soleSkinThickness", 0, 16, 0.1).name("Skin Thickness").onChange(value => {
+    soleFolder.add(params, "soleSkinThickness", 0, 16, 0.1).name("Skin Thickness").decimals(1).onChange(value => {
         applyFootIKOptions({ soleSkinThickness: value });
     });
     soleFolder.open();
@@ -477,9 +514,17 @@ function animate() {
 
 // 更新脚步相位调试面板
 function updateFootPhasePanel() {
-    if (!debugParams || !footIK || !debugParams.footPhaseDebug) return;
+    if (!debugParams || !footIK) return;
     debugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
+    debugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
+    debugParams.leftFootIKWeight = footIK.getFootIKWeight("left");
     debugParams.rightFootPhase = footIK.getFootPhaseDebugText("right");
+    debugParams.rightFootLand = formatFootLandTime(footIK.getFootTimeToLand("right"));
+    debugParams.rightFootIKWeight = footIK.getFootIKWeight("right");
+}
+
+function formatFootLandTime(value) {
+    return Number.isFinite(value) ? `${value.toFixed(2)}s` : "--";
 }
 
 // 鼠标右键慢动作

@@ -23,6 +23,7 @@ export class ColliderRegistry {
     /** 静态构建代数：异步 BVH 完成时若代数变了则丢弃 */
     private buildGens = new Map<number, number>();
     private _contentScale = new THREE.Vector3();
+    private _contentOffsetMatrix = new THREE.Matrix4();
     /** 静态 / 运动学 mesh 碰撞线框开关。 */
     private debugVisible = false;
 
@@ -154,10 +155,19 @@ export class ColliderRegistry {
         }
     }
 
-    /** 将 follow 世界矩阵（含 contentScale）写入碰撞 mesh。 */
+    /** 将 follow 世界矩阵（含 contentOffset / contentScale）写入碰撞 mesh。 */
     private writeKinematicMeshMatrix(entry: KinematicColliderEntry): void {
         entry.source.updateMatrixWorld(true);
         entry.mesh.matrix.copy(entry.source.matrixWorld);
+        if (entry.contentOffset.lengthSq() > 0) {
+            entry.mesh.matrix.multiply(
+                this._contentOffsetMatrix.makeTranslation(
+                    entry.contentOffset.x,
+                    entry.contentOffset.y,
+                    entry.contentOffset.z,
+                ),
+            );
+        }
         const s = entry.contentScale;
         if (s !== 1) {
             entry.mesh.matrix.scale(this._contentScale.set(s, s, s));
@@ -174,6 +184,17 @@ export class ColliderRegistry {
         const entry = this.kinematicColliders.find(e => e.source === source);
         if (!entry) return;
         entry.contentScale *= ratio;
+        entry.contentOffset.multiplyScalar(ratio);
+        this.writeKinematicMeshMatrix(entry);
+        entry.prevWorldMatrix.copy(entry.mesh.matrixWorld);
+    }
+
+    /** 运行时平移已烘焙的运动学 mesh 碰撞，不重建 BVH。 */
+    translateKinematicContent(source: THREE.Object3D, localOffset: THREE.Vector3): void {
+        if (!source || !Number.isFinite(localOffset.lengthSq()) || localOffset.lengthSq() === 0) return;
+        const entry = this.kinematicColliders.find(e => e.source === source);
+        if (!entry) return;
+        entry.contentOffset.add(localOffset);
         this.writeKinematicMeshMatrix(entry);
         entry.prevWorldMatrix.copy(entry.mesh.matrixWorld);
     }
@@ -317,6 +338,7 @@ export class ColliderRegistry {
                 source: follow ?? mesh,
                 mesh,
                 contentScale: 1,
+                contentOffset: new THREE.Vector3(),
                 prevWorldMatrix: new THREE.Matrix4().copy(follow?.matrixWorld ?? mesh.matrixWorld),
                 deltaPos: new THREE.Vector3(),
                 deltaRotY: 0,
@@ -360,6 +382,7 @@ export class ColliderRegistry {
             source: followTarget,
             mesh: built.mesh,
             contentScale: 1,
+            contentOffset: new THREE.Vector3(),
             prevWorldMatrix: new THREE.Matrix4().copy(followTarget.matrixWorld),
             deltaPos: new THREE.Vector3(),
             deltaRotY: 0,

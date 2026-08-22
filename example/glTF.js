@@ -7,12 +7,10 @@ import {
     Timer,
     EquirectangularReflectionMapping,
     Mesh,
-    MeshBasicMaterial,
     MeshStandardMaterial,
     PerspectiveCamera,
     Raycaster,
     Scene,
-    SkeletonHelper,
     SphereGeometry,
     Vector2,
     Vector3,
@@ -24,6 +22,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { playerController } from "../src/PlayerController";
+import { FootIK } from "../src/foot-ik";
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { CSM } from "three/examples/jsm/csm/CSM.js";
@@ -37,11 +36,12 @@ let renderer;
 let controls;
 let gltfLoader;
 let guiParams = null;
-let raycastSphere = null;
+let footIK = null;
+let footIKDebugParams = null;
+let gui = null;
 
 let stats = null;
 let csm = null;
-let skeletonHelper = null;
 let currentBlobUrl = null;
 let platform = null;
 let platformCloud = null;
@@ -151,14 +151,64 @@ const PLAYER_MODELS = {
     },
 };
 
-// 车辆配置（Generic Sedan Car by MMC Works, CC BY 4.0）
+// 车辆配置
+const VEHICLE_TUNING = {
+    followVehicleDirection: true,
+    debug: { showPhysicsBox: false, showWheelRays: false, showWheelTravel: false, showWheelSpheres: false },
+    chassis: {
+        density: 1,
+        linearDamping: 0.05,
+        angularDamping: 0.5,
+        clearance: 0.25,
+        sizeScale: { x: 0.9, y: 0.65, z: 0.9 },
+    },
+    suspension: {
+        restLength: 0.15,
+        maxTravel: 0.15,
+        stiffness: 25,
+        compression: 2.1,
+        relaxation: 2.5,
+        maxForce: 6000,
+        frictionSlip: 8,
+        sideFrictionStiffness: 1,
+        rollInfluence: 0.12,
+    },
+    steering: {
+        maxSteerAngle: Math.PI / 5,
+        steerTime: 0.45,
+        steerReturnTimeSlow: 0.55,
+        steerReturnTimeFast: 0.4,
+        highSpeedSteerScale: 0.3,
+    },
+    grip: {
+        maxG: 1.2,
+        sideFrictionIdle: 1,
+        sideFrictionFrontMin: 0.55,
+        sideFrictionRearMin: 0.45,
+        handbrakeRearFriction: 0.35,
+        handbrakeRearDriveScale: 0.65,
+        handbrakeReleaseTime: 0.15,
+        wheelbaseRatio: 0.55,
+    },
+    power: {
+        maxSpeed: 100,
+        acceleration: 5,
+        deceleration: 5,
+    },
+};
+
 const VEHICLE_CONFIG = {
     url: "./glb/sedan.glb",
     scale: 0.1,
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-    chassis: { density: 1 },
-    power: { maxSpeed: 200, acceleration: 8, deceleration: 30 },
-    driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
+    followVehicleDirection: VEHICLE_TUNING.followVehicleDirection,
+    debug: VEHICLE_TUNING.debug,
+    chassis: VEHICLE_TUNING.chassis,
+    suspension: VEHICLE_TUNING.suspension,
+    steering: VEHICLE_TUNING.steering,
+    grip: VEHICLE_TUNING.grip,
+    power: VEHICLE_TUNING.power,
+    driverSeatPosition: new Vector3(-0.6, 1.0, 0.4),
     driverSeatRotation: -Math.PI / 2,
 };
 
@@ -167,7 +217,11 @@ init();
 function setupCSMMaterial(material) {
     if (!material || !csm) return;
     const mats = Array.isArray(material) ? material : [material];
-    mats.forEach((m) => csm.setupMaterial(m));
+    mats.forEach((m) => {
+        csm.setupMaterial(m);
+        // 材质可能已在异步加载期间编译，注入 CSM 后必须刷新 shader。
+        m.needsUpdate = true;
+    });
 }
 
 function createCSM(shadowMapSize, scale) {
@@ -230,6 +284,48 @@ async function loadVehicleConfig(extra = {}) {
         animations: gltf.animations,
         ...extra,
     };
+}
+
+// 加载车辆。
+async function spawnSceneSedan() {
+    await player.loadVehicleModel(await loadVehicleConfig({
+        scale: VEHICLE_CONFIG.scale * globalScale,
+        position: pos.clone().add(new Vector3(0, -0.2, -0.5)),
+    }));
+
+    const sedan = player.getAllVehicles().at(-1);
+    sedan?.vehicleGroup?.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+        setupCSMMaterial(child.material);
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => {
+            if (!material) return;
+            material.metalness = 0.8;
+            material.roughness = 0;
+        });
+    });
+    applyVehicleTuning();
+}
+
+// Foot IK 使用通用骨骼名识别，模型切换后由插件自动重新绑定。
+function attachFootIK() {
+    const p = guiParams;
+    footIK = new FootIK({
+        enabled: p?.footIKEnabled ?? true,
+        debug: (p?.footIKEnabled ?? true) && (p?.footIKDebug ?? false),
+        maxPelvisRaise: p?.maxPelvisRaise ?? 36,
+        maxPelvisDrop: p?.maxPelvisDrop ?? 36,
+        maxFootRaise: p?.maxFootRaise ?? 60,
+        maxFootDrop: p?.maxFootDrop ?? 36,
+        soleHalfWidth: p?.soleHalfWidth ?? 7,
+        soleToeExtend: p?.soleToeExtend ?? 7,
+        soleHeelExtend: p?.soleHeelExtend ?? 3,
+        soleSkinThickness: p?.soleSkinThickness ?? 1.6,
+    });
+    player.use(footIK);
+    if (p) footIKDebugParams = p;
 }
 
 /** 动态球视觉 */
@@ -406,14 +502,6 @@ async function init() {
     });
     document.body.appendChild(stats.dom);
 
-    // 射线交点可视化小球
-    const sphereGeo = new SphereGeometry(0.05, 16, 16);
-    const sphereMat = new MeshBasicMaterial({ color: 0x00ffff, opacity: 0.8, transparent: true, depthTest: false });
-    raycastSphere = new Mesh(sphereGeo, sphereMat);
-    raycastSphere.visible = false;
-    raycastSphere.renderOrder = 999;
-    scene.add(raycastSphere);
-
     // 加载场景
     initGltfLoader();
     const sceneModel = await initGLBScene(modelUrl);
@@ -425,24 +513,36 @@ async function init() {
         scene,
         camera,
         controls,
-        playerModelConfig: await loadPlayerModelConfig("josh"),
+        playerModelConfig: {
+            ...(await loadPlayerModelConfig("josh")),
+            speed: 150,
+            runSpeed: 600,
+        },
         initPos: pos,
-        minCamDistance: 50,
-        maxCamDistance: 220,
+        minCamDistance: 8,
+        maxCamDistance: 300,
+        camLookAtHeightRatio: 0.5,
         enableSpringCamera: true,
-        enableOverShoulderView: false,
+        springCameraTime: 0.1,
+        enableOverShoulderView: true,
+        camOverShoulderOffsetRatio: 0,
+        enableZoom: true,
         colliders: [
             { motion: "static", shape: { kind: "mesh", source: sceneModel } },
         ],
     });
+    attachFootIK();
 
-    // 骨骼可视化
-    const playerModel = player.getPlayerModel();
-    if (playerModel) {
-        skeletonHelper = new SkeletonHelper(playerModel);
-        skeletonHelper.visible = false;
-        scene.add(skeletonHelper);
-    }
+    // 先完成角色材质的 CSM 注入，避免等待车辆时用非 CSM shader 提前编译。
+    player.getPlayerModel()?.traverse((child) => {
+        if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            setupCSMMaterial(child.material);
+        }
+    });
+
+    await spawnSceneSedan();
 
     // 创建动态平台
     const liftPlatform = createDynamicPlatform({
@@ -455,15 +555,6 @@ async function init() {
     createDynamicPlatform({
         position: dynamicPlatformXPath[0],
         motion: { axis: "x", distance: 3, speed: 0.1 },
-    });
-
-    // 阴影
-    player.getPlayerModel()?.traverse((child) => {
-        if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-            setupCSMMaterial(child.material);
-        }
     });
 
     // 调试
@@ -543,6 +634,8 @@ async function replaceScene(file) {
     removeDynamicPlatforms();
     player?.destroy();
     player = null;
+    footIK = null;
+    footIKDebugParams = null;
 
     // 加载新场景
     await initGLBScene(blobUrl, [1, 1, 1]);
@@ -685,20 +778,24 @@ async function onPreviewDblClick() {
         controls,
         playerModelConfig: {
             ...(await loadPlayerModelConfig(spawnKey)),
-            speed: guiParams?.playerSpeed ?? 300,
+            speed: guiParams?.playerSpeed ?? 150,
             runSpeed: guiParams?.playerRunSpeed ?? 600,
         },
         initPos,
-        minCamDistance: 50,
-        maxCamDistance: 220,
+        minCamDistance: guiParams?.minCamDistance ?? 8,
+        maxCamDistance: guiParams?.maxCamDistance ?? 300,
+        camLookAtHeightRatio: guiParams?.camLookAtHeightRatio ?? 0.5,
         enableSpringCamera: guiParams?.enableSpringCamera ?? true,
+        springCameraTime: guiParams?.springCameraTime ?? 0.1,
         enableOverShoulderView: guiParams?.enableOverShoulderView ?? true,
-        camOverShoulderOffsetRatio: guiParams?.camOverShoulderOffsetRatio ?? 0.2,
+        camOverShoulderOffsetRatio: guiParams?.camOverShoulderOffsetRatio ?? 0,
         thirdMouseMode: guiParams?.thirdMouseMode ?? 1,
+        enableZoom: guiParams?.enableZoom ?? true,
         colliders: [
             { motion: "static", shape: { kind: "mesh", source: sceneModel } },
         ],
     });
+    attachFootIK();
 
     player.getPlayerModel()?.traverse((child) => {
         if (child.isMesh) {
@@ -715,7 +812,6 @@ function animate(timestamp) {
 
     if (player) {
         player.update();
-        updateCenterRaycast();
     } else {
         controls.update();
     }
@@ -723,22 +819,11 @@ function animate(timestamp) {
     updateDynamicPlatforms();
 
     csm?.update();
+    updateFootIKDebugPanel();
 
     renderer.render(scene, camera);
 
     stats?.update();
-}
-
-// 更新中心射线交点
-function updateCenterRaycast() {
-    if (!guiParams?.centerRaycast) return;
-    const hit = player.getCenterScreenRaycastHit();
-    if (hit) {
-        raycastSphere.position.copy(hit.point);
-        raycastSphere.visible = true;
-    } else {
-        raycastSphere.visible = false;
-    }
 }
 
 function onWindowResize() {
@@ -749,247 +834,291 @@ function onWindowResize() {
 }
 
 // 调试
+function applyVehicleTuning() {
+    const t = VEHICLE_TUNING;
+    const vehicles = player?.getAllVehicles?.() ?? [];
+    for (const v of vehicles) {
+        player?.setVehicleChassisSizeScale?.(v, t.chassis.sizeScale);
+        player?.setVehicleClearance?.(v, t.chassis.clearance);
+        const he = v.halfExtents;
+        const volume = 8 * he.x * he.y * he.z;
+        v.chassisBody.setMass(volume * Math.max(1e-8, t.chassis.density));
+        v.chassisBody.linearDamping = t.chassis.linearDamping;
+        v.chassisBody.angularDamping = t.chassis.angularDamping;
+
+        Object.assign(v.steering, t.steering);
+        Object.assign(v.grip, t.grip);
+        v.maxSpeed = t.power.maxSpeed * v.scale;
+        v.acceleration = t.power.acceleration * v.scale;
+        v.deceleration = t.power.deceleration * v.scale;
+        v.followVehicleDirection = t.followVehicleDirection;
+
+        const sus = t.suspension;
+        const staticSag = 9.81 * v.scale / (4 * Math.max(1e-4, sus.stiffness));
+        const rest = Math.max(sus.restLength * v.scale, staticSag * 1.2);
+        v.sideFrictionStiffness = sus.sideFrictionStiffness;
+
+        const wheelCount = v.vehicleController.numWheels();
+        for (let i = 0; i < wheelCount; i++) {
+            v.vehicleController.setWheelSuspensionRestLength(i, rest);
+            v.vehicleController.setWheelMaxSuspensionTravel(i, sus.maxTravel * v.scale);
+            v.vehicleController.setWheelSuspensionStiffness(i, sus.stiffness);
+            v.vehicleController.setWheelSuspensionCompression(i, sus.compression);
+            v.vehicleController.setWheelSuspensionRelaxation(i, sus.relaxation);
+            v.vehicleController.setWheelMaxSuspensionForce(i, sus.maxForce);
+            v.vehicleController.setWheelFrictionSlip(i, sus.frictionSlip);
+            v.vehicleController.setWheelSideFrictionStiffness(i, sus.sideFrictionStiffness);
+            v.vehicleController.setWheelRollInfluence(i, sus.rollInfluence);
+        }
+
+        if (v.physicsBoxMesh) {
+            if (t.debug.showPhysicsBox) v.vehicleGroup.add(v.physicsBoxMesh);
+            else v.vehicleGroup.remove(v.physicsBoxMesh);
+        }
+        if (v.wheelRayDebug) v.wheelRayDebug.visible = t.debug.showWheelRays;
+        if (v.wheelTravelDebug) v.wheelTravelDebug.visible = t.debug.showWheelTravel;
+        if (v.wheelSphereDebug) v.wheelSphereDebug.visible = t.debug.showWheelSpheres;
+    }
+    if (player?.vehicle?.params?.debug) {
+        Object.assign(player.vehicle.params.debug, t.debug);
+    }
+}
+
 function initGUI() {
-    const gui = new GUI({ title: "Debug Panel", width: 280 });
+    const footIKOptions = footIK?.getOptions() ?? {};
+    const roundedValue = (value, fallback, decimals = 1) => {
+        const factor = 10 ** decimals;
+        return Math.round((value ?? fallback) * factor) / factor;
+    };
+    const playerScale = Math.max(1e-8, player?.playerModelConfig?.scale ?? getModelScale("josh"));
+    const toBasePlayerValue = (value, fallback, decimals = 0) => (
+        roundedValue(Number.isFinite(value) ? value / playerScale : undefined, fallback, decimals)
+    );
+    const params = {
+        playerModel: "josh",
+        showShadow: renderer.shadowMap.enabled,
+        colliderDebug: false,
+        playerCapsuleDebug: false,
+        mouseSensitivity: roundedValue(player?.cam?.sensitivity, 5, 1),
+        gravity: toBasePlayerValue(player?.gravity, -2400),
+        jumpHeight: toBasePlayerValue(player?.jumpHeight, 600),
+        playerSpeed: toBasePlayerValue(player?.playerSpeed, 150),
+        playerRunSpeed: toBasePlayerValue(player?.playerRunSpeed, 600),
+        flySpeed: toBasePlayerValue(player?.playerFlySpeed, 2100),
+        playerAcceleration: roundedValue(player?.playerAcceleration, 30, 0),
+        playerDeceleration: roundedValue(player?.playerDeceleration, 30, 0),
+        timeScale: roundedValue(player?.timeScale, 1, 2),
+        minCamDistance: toBasePlayerValue(player?.cam?.minDist, 8),
+        maxCamDistance: toBasePlayerValue(player?.cam?.maxDist, 300),
+        camLookAtHeightRatio: roundedValue(player?.cam?.lookAtHeightRatio, 0.5, 2),
+        enableOverShoulderView: player?.enableOverShoulderView ?? true,
+        camOverShoulderOffsetRatio: roundedValue(player?.cam?.overShoulderOffsetRatio, 0, 2),
+        enableSpringCamera: player?.cam?.enableSpringCamera ?? true,
+        springCameraTime: roundedValue(player?.cam?.springCameraTime, 0.1, 2),
+        thirdMouseMode: player?.cam?.mouseMode ?? 1,
+        enableZoom: player?.cam?.zoomEnabled ?? true,
+        footIKEnabled: footIKOptions.enabled ?? true,
+        footIKDebug: footIKOptions.debug ?? false,
+        leftFootPhase: "",
+        leftFootLand: "--",
+        leftFootIKWeight: 0,
+        rightFootPhase: "",
+        rightFootLand: "--",
+        rightFootIKWeight: 0,
+        maxPelvisRaise: roundedValue(footIKOptions.maxPelvisRaise, 36, 0),
+        maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 36, 0),
+        maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 60, 0),
+        maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 36, 0),
+        soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
+        soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
+        soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
+        soleSkinThickness: roundedValue(footIKOptions.soleSkinThickness, 1.6),
+        maxSteerDeg: VEHICLE_TUNING.steering.maxSteerAngle * 180 / Math.PI,
+    };
+    guiParams = params;
+    footIKDebugParams = params;
+
+    const applyFootIKOptions = (options) => footIK?.configure(options);
+
+    gui = new GUI({ title: "Showcase Controls", width: 320 });
     Object.assign(gui.domElement.style, {
         position: "fixed",
         top: "12px",
         right: "12px",
-        zIndex: "9999",
+        maxHeight: "calc(100vh - 24px)",
+        overflowY: "auto",
     });
+    gui.domElement.addEventListener("pointerdown", (event) => event.stopPropagation());
 
-    ["pointerdown", "mousedown", "click"].forEach((type) => {
-        gui.domElement.addEventListener(type, (e) => e.stopPropagation());
-    });
-
-    // 上传场景按钮
-    const uploadInput = document.createElement("input");
-    uploadInput.type = "file";
-    uploadInput.accept = ".gltf,.glb";
-    uploadInput.style.display = "none";
-    document.body.appendChild(uploadInput);
-    uploadInput.addEventListener("change", async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        await replaceScene(file);
-        uploadInput.value = ""; // 允许重复上传同名文件
-    });
-    gui.add({ upload: () => uploadInput.click() }, "upload").name("Change Scene (.glb/.gltf)");
-
-    const params = {
-        playerModel: "josh",
-        showFPS: true,
-        showShadow: false,
-        mouseSensitivity: 5,
-        gravity: -2400,
-        jumpHeight: 600,
-        playerSpeed: 300,
-        playerRunSpeed: 600,
-        flySpeed: 2100,
-        playerAcceleration: 30,
-        playerDeceleration: 30,
-        timeScale: 1,
-        minCamDistance: 50,
-        maxCamDistance: 220,
-        camLookAtHeightRatio: 0.8,
-        enableSpringCamera: true,
-        springCameraTime: 0.05,
-        thirdMouseMode: 1,
-        enableZoom: false,
-        debug: false,
-        enableOverShoulderView: false,
-        camOverShoulderOffsetRatio: 0.2,
-        centerRaycast: false,
-        showSkeleton: false,
-    };
-
-    const defaults = { ...params };
-
-    const spawnController = gui.add(
-        {
-            spawn: async () => {
-                if (player.getAllVehicles().length >= 5) {
-                    alert("For performance reasons, the demo supports a maximum of 5 vehicles.");
-                    return;
-                }
-
-                const playerPos = player.getPosition();
-
-                // 取相机朝向的水平分量，沿该方向偏移生成车辆
-                const camDir = new Vector3();
-                camera.getWorldDirection(camDir);
-                camDir.y = 0;
-                camDir.normalize();
-
-                const spawnPos = playerPos.clone().addScaledVector(camDir, 0.5);
-                spawnPos.y = playerPos.y;
-
-                await player.loadVehicleModel(await loadVehicleConfig({
-                    scale: VEHICLE_CONFIG.scale * globalScale,
-                    position: spawnPos,
-                }));
-                const spawned = player.getAllVehicles().at(-1);
-                spawned?.vehicleGroup?.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                        setupCSMMaterial(child.material);
-                        // 设置金属材质
-                        child.material.metalness = 0.8;
-                        child.material.roughness = 0.0;
-                    }
+    const sceneFolder = gui.addFolder("Scene");
+    sceneFolder.add(params, "playerModel", Object.keys(PLAYER_MODELS))
+        .name("Character Model")
+        .onChange(async (modelKey) => {
+            await player?.switchPlayerModel(await loadPlayerModelConfig(modelKey));
+            player?.getPlayerModel()?.traverse((child) => {
+                if (!child.isMesh) return;
+                child.castShadow = true;
+                child.receiveShadow = true;
+                setupCSMMaterial(child.material);
+                if (modelKey !== "ual") return;
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((material) => {
+                    if (!material) return;
+                    material.metalness = 0.8;
+                    material.roughness = 0;
                 });
-            },
-        },
-        "spawn"
-    ).name("Spawn Vehicle");
-
-    ["pointerdown", "mousedown", "click"].forEach((type) => {
-        spawnController.domElement.addEventListener(type, (e) => e.stopPropagation());
-    });
-
-    const spawnSphereDir = new Vector3();
-    const spawnSphereController = gui.add(
-        {
-            spawnSphere: () => {
-                if (player.getDynamicBodies().length >= 20) {
-                    alert("For performance reasons, the demo supports a maximum of 20 spheres.");
-                    return;
-                }
-                const origin = player.getPosition()?.clone();
-                if (!origin) return;
-                const s = player.playerModelConfig.scale;
-                camera.getWorldDirection(spawnSphereDir);
-                origin.addScaledVector(spawnSphereDir, 50 * s);
-                origin.y += 30 * s;
-                // 动态球
-                const mesh = createDemoSphereMesh(0x88c0d0);
-                scene.add(mesh);
-                player.addCollider({
-                    motion: "dynamic",
-                    shape: { kind: "sphere", radius: 18 * s, position: origin },
-                    mesh,
-                });
-            },
-        },
-        "spawnSphere",
-    ).name("Spawn Sphere");
-    ["pointerdown", "mousedown", "click"].forEach((type) => {
-        spawnSphereController.domElement.addEventListener(type, (e) => e.stopPropagation());
-    });
-    const clearSphereController = gui.add(
-        {
-            clearSpheres: () => {
-                for (const body of [...player.getDynamicBodies()]) {
-                    scene.remove(body.mesh);
-                    body.mesh.geometry.dispose();
-                    const mat = body.mesh.material;
-                    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-                    else mat?.dispose?.();
-                }
-                player.clearDynamicBodies();
-            },
-        },
-        "clearSpheres",
-    ).name("Clear Spheres");
-    ["pointerdown", "mousedown", "click"].forEach((type) => {
-        clearSphereController.domElement.addEventListener(type, (e) => e.stopPropagation());
-    });
-
-    gui.add(params, "playerModel", Object.keys(PLAYER_MODELS))
-        .name("Player Model")
-        .onChange(async (v) => {
-            await player.switchPlayerModel(await loadPlayerModelConfig(v));
-            player.getPlayerModel()?.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                    setupCSMMaterial(child.material);
-                    if (v == "ual") {
-                        child.material.metalness = 0.8;
-                        child.material.roughness = 0.0;
-                    }
-                }
             });
-
-            // 重建骨骼可视化
-            if (skeletonHelper) {
-                scene.remove(skeletonHelper);
-                skeletonHelper.dispose();
-            }
-            const newModel = player.getPlayerModel();
-            if (newModel) {
-                skeletonHelper = new SkeletonHelper(newModel);
-                skeletonHelper.visible = params.showSkeleton;
-                scene.add(skeletonHelper);
-            }
         });
-
-    gui.add(params, "showFPS").name("Show FPS").onChange((v) => stats.dom.style.display = v ? "block" : "none");
-    gui.add(params, "showShadow").name("Show Shadow").onChange((v) => {
-        renderer.shadowMap.enabled = v;
+    sceneFolder.add(params, "showShadow").name("Shadows").onChange((value) => {
+        renderer.shadowMap.enabled = value;
         scene.traverse((child) => {
-            if (child.isMesh) {
-                child.material.needsUpdate = true;
-            }
+            if (!child.isMesh) return;
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach((material) => {
+                if (material) material.needsUpdate = true;
+            });
         });
     });
-    gui.add(params, "mouseSensitivity", 1, 20, 0.1).onChange((v) => player.setMouseSensitivity(v));
-    gui.add(params, "gravity", -6000, 0, 50).onChange((v) => player.setGravity(v));
-    gui.add(params, "jumpHeight", 0, 2000, 10).onChange((v) => player.setJumpHeight(v));
-    gui.add(params, "playerSpeed", 0, 10000, 10).name("Walk Speed").onChange((v) => player.setPlayerSpeed(v));
-    gui.add(params, "playerRunSpeed", 0, 10000, 10).name("Run Speed").onChange((v) => player.setPlayerRunSpeed(v));
-    gui.add(params, "flySpeed", 0, 5000, 10).onChange((v) => player.setPlayerFlySpeed(v));
-    gui.add(params, "playerAcceleration", 1, 100, 1).name("Acceleration").onChange((v) => player.playerAcceleration = v);
-    gui.add(params, "playerDeceleration", 1, 100, 1).name("Deceleration").onChange((v) => player.playerDeceleration = v);
-    gui.add(params, "timeScale", 0, 3, 0.05).name("Time Scale").onChange((v) => player.timeScale = v);
-    gui.add(params, "minCamDistance", 0, 200, 1).onChange((v) => player.setMinCamDistance(v));
-    gui.add(params, "maxCamDistance", 50, 1000, 1).onChange((v) => player.setMaxCamDistance(v));
-    gui.add(params, "camLookAtHeightRatio", 0, 1, 0.01).onChange((v) => player.setCamLookAtHeightRatio(v));
-    gui.add(params, "camOverShoulderOffsetRatio", -1, 1, 0.01).onChange((v) => player.setCamOverShoulderOffsetRatio(v));
-    gui.add(params, "enableSpringCamera").name("Spring Camera").onChange((v) => player.cam.enableSpringCamera = v);
-    gui.add(params, "springCameraTime", 0.01, 1, 0.01).name("Spring Time").onChange((v) => player.cam.springCameraTime = v);
-    gui.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).onChange((v) => player.setThirdMouseMode(Number(v)));
-    gui.add(params, "enableZoom").onChange((v) => player.setEnableZoom(v));
-    gui.add(params, "debug").onChange((v) => player.setColliderDebug(v));
-    gui.add(params, "enableOverShoulderView").onChange((v) => player.setOverShoulderView(v));
-    gui.add(params, "centerRaycast").name("Center Raycast Debug")
-        .onChange((v) => { if (!v) raycastSphere.visible = false; });
-    gui.add(params, "showSkeleton").name("Show Skeleton")
-        .onChange((v) => { if (skeletonHelper) skeletonHelper.visible = v; });
+    sceneFolder.open();
 
-    const resetController = gui.add(
-        {
-            resetToDefault: () => {
-                Object.assign(params, defaults);
-                gui.controllers.forEach((c) => c.updateDisplay());
-                gui.folders.forEach((f) => f.controllers.forEach((c) => c.updateDisplay()));
+    const collisionFolder = gui.addFolder("Collision Debug");
+    collisionFolder.add(params, "colliderDebug").name("Static / Kinematic Meshes").onChange((value) => {
+        player?.setColliderDebug(value);
+    });
+    collisionFolder.open();
 
-                player.setMouseSensitivity(defaults.mouseSensitivity);
-                player.setGravity(defaults.gravity);
-                player.setJumpHeight(defaults.jumpHeight);
-                player.setPlayerSpeed(defaults.playerSpeed);
-                player.setPlayerRunSpeed(defaults.playerRunSpeed);
-                player.setPlayerFlySpeed(defaults.flySpeed);
-                player.timeScale = defaults.timeScale;
-                player.setMinCamDistance(defaults.minCamDistance);
-                player.setMaxCamDistance(defaults.maxCamDistance);
-                player.setThirdMouseMode(defaults.thirdMouseMode);
-                player.setEnableZoom(defaults.enableZoom);
-                player.setColliderDebug(defaults.debug);
-                player.setOverShoulderView(defaults.enableOverShoulderView);
-                player.setCamOverShoulderOffsetRatio(defaults.camOverShoulderOffsetRatio);
-                raycastSphere.visible = false;
-
-                if (stats) stats.dom.style.display = "none";
-            },
-        },
-        "resetToDefault"
-    ).name("Reset to Default");
-
-    ["pointerdown", "mousedown", "click"].forEach((type) => {
-        resetController.domElement.addEventListener(type, (e) => e.stopPropagation());
+    const characterFolder = gui.addFolder("Character");
+    characterFolder.add(params, "playerCapsuleDebug").name("Capsule").onChange((value) => {
+        player?.setPlayerCapsuleDebug?.(value);
     });
 
-    guiParams = params;
+    const movementFolder = characterFolder.addFolder("Movement");
+    movementFolder.add(params, "gravity", -6000, 0, 50).name("Gravity").decimals(0).onChange((value) => player?.setGravity(value));
+    movementFolder.add(params, "jumpHeight", 0, 2000, 10).name("Jump Height").decimals(0).onChange((value) => player?.setJumpHeight(value));
+    movementFolder.add(params, "playerSpeed", 0, 10000, 10).name("Walk Speed").decimals(0).onChange((value) => player?.setPlayerSpeed(value));
+    movementFolder.add(params, "playerRunSpeed", 0, 10000, 10).name("Run Speed").decimals(0).onChange((value) => player?.setPlayerRunSpeed(value));
+    movementFolder.add(params, "flySpeed", 0, 5000, 10).name("Fly Speed").decimals(0).onChange((value) => player?.setPlayerFlySpeed(value));
+    movementFolder.add(params, "playerAcceleration", 1, 100, 1).name("Acceleration").decimals(0).onChange((value) => {
+        if (player) player.playerAcceleration = value;
+    });
+    movementFolder.add(params, "playerDeceleration", 1, 100, 1).name("Deceleration").decimals(0).onChange((value) => {
+        if (player) player.playerDeceleration = value;
+    });
+    movementFolder.add(params, "timeScale", 0, 3, 0.05).name("Time Scale").decimals(2).onChange((value) => {
+        if (player) player.timeScale = value;
+    });
+    movementFolder.close();
+
+    const characterCameraFolder = characterFolder.addFolder("Camera");
+    characterCameraFolder.add(params, "mouseSensitivity", 1, 20, 0.1).name("Mouse Sensitivity").decimals(1).onChange((value) => player?.setMouseSensitivity(value));
+    characterCameraFolder.add(params, "minCamDistance", 0, 200, 1).name("Min Distance").decimals(0).onChange((value) => player?.setMinCamDistance(value));
+    characterCameraFolder.add(params, "maxCamDistance", 50, 1000, 1).name("Max Distance").decimals(0).onChange((value) => player?.setMaxCamDistance(value));
+    characterCameraFolder.add(params, "camLookAtHeightRatio", 0, 1, 0.01).name("Look-at Height Ratio").decimals(2).onChange((value) => player?.setCamLookAtHeightRatio(value));
+    characterCameraFolder.add(params, "enableOverShoulderView").name("Over-Shoulder View").onChange((value) => player?.setOverShoulderView(value));
+    characterCameraFolder.add(params, "camOverShoulderOffsetRatio", -0.2, 0.2, 0.01).name("Over-Shoulder Offset").decimals(2).onChange((value) => player?.setCamOverShoulderOffsetRatio(value));
+    characterCameraFolder.add(params, "enableSpringCamera").name("Spring Camera").onChange((value) => {
+        if (player) player.cam.enableSpringCamera = value;
+    });
+    characterCameraFolder.add(params, "springCameraTime", 0.01, 1, 0.01).name("Spring Time").decimals(2).onChange((value) => {
+        if (player) player.cam.springCameraTime = value;
+    });
+    characterCameraFolder.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).name("Mouse Mode").onChange((value) => player?.setThirdMouseMode(Number(value)));
+    characterCameraFolder.add(params, "enableZoom").name("Enable Zoom").onChange((value) => player?.setEnableZoom(value));
+    characterCameraFolder.close();
+
+    const footIKFolder = characterFolder.addFolder("Foot IK");
+    footIKFolder.add(params, "footIKEnabled").name("Enabled").onChange((value) => {
+        footIK?.setEnabled(value);
+        footIK?.setDebugEnabled(value && params.footIKDebug);
+    });
+    footIKFolder.add(params, "footIKDebug").name("Debug Markers").onChange((value) => {
+        footIK?.setDebugEnabled(value && params.footIKEnabled);
+    });
+
+    const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
+    footIKRuntimeFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
+    footIKRuntimeFolder.add(params, "leftFootLand").name("Left Land").listen().disable();
+    footIKRuntimeFolder.add(params, "leftFootIKWeight").name("Left IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.add(params, "rightFootPhase").name("Right Phase").listen().disable();
+    footIKRuntimeFolder.add(params, "rightFootLand").name("Right Land").listen().disable();
+    footIKRuntimeFolder.add(params, "rightFootIKWeight").name("Right IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.close();
+
+    const pelvisFolder = footIKFolder.addFolder("Pelvis");
+    pelvisFolder.add(params, "maxPelvisRaise", 0, 60, 1).name("Max Raise").decimals(0).onChange((value) => applyFootIKOptions({ maxPelvisRaise: value }));
+    pelvisFolder.add(params, "maxPelvisDrop", 0, 60, 1).name("Max Drop").decimals(0).onChange((value) => applyFootIKOptions({ maxPelvisDrop: value }));
+    pelvisFolder.close();
+
+    const footReachFolder = footIKFolder.addFolder("Foot Reach");
+    footReachFolder.add(params, "maxFootRaise", 0, 60, 1).name("Max Raise").decimals(0).onChange((value) => applyFootIKOptions({ maxFootRaise: value }));
+    footReachFolder.add(params, "maxFootDrop", 0, 60, 1).name("Max Drop").decimals(0).onChange((value) => applyFootIKOptions({ maxFootDrop: value }));
+    footReachFolder.close();
+
+    const soleFolder = footIKFolder.addFolder("Sole Layout");
+    soleFolder.add(params, "soleHalfWidth", 0, 24, 0.1).name("Half Width").decimals(1).onChange((value) => applyFootIKOptions({ soleHalfWidth: value }));
+    soleFolder.add(params, "soleToeExtend", 0, 24, 0.1).name("Toe Extend").decimals(1).onChange((value) => applyFootIKOptions({ soleToeExtend: value }));
+    soleFolder.add(params, "soleHeelExtend", 0, 24, 0.1).name("Heel Extend").decimals(1).onChange((value) => applyFootIKOptions({ soleHeelExtend: value }));
+    soleFolder.add(params, "soleSkinThickness", 0, 16, 0.1).name("Skin Thickness").decimals(1).onChange((value) => applyFootIKOptions({ soleSkinThickness: value }));
+    soleFolder.close();
+    footIKFolder.close();
+    characterFolder.open();
+
+    const t = VEHICLE_TUNING;
+    const vehicleFolder = gui.addFolder("Vehicle");
+
+    const chassisFolder = vehicleFolder.addFolder("Chassis");
+    chassisFolder.add(t.chassis, "clearance", 0, 2, 0.05).name("Clearance").decimals(2).onChange(applyVehicleTuning);
+    chassisFolder.add(t.chassis.sizeScale, "x", 0.1, 1.5, 0.05).name("Size Scale X").decimals(2).onChange(applyVehicleTuning);
+    chassisFolder.add(t.chassis.sizeScale, "y", 0.1, 1.5, 0.05).name("Size Scale Y").decimals(2).onChange(applyVehicleTuning);
+    chassisFolder.add(t.chassis.sizeScale, "z", 0.1, 1.5, 0.05).name("Size Scale Z").decimals(2).onChange(applyVehicleTuning);
+    chassisFolder.close();
+
+    const vehicleCameraFolder = vehicleFolder.addFolder("Camera");
+    vehicleCameraFolder.add(t, "followVehicleDirection").name("Follow Vehicle Heading").onChange(applyVehicleTuning);
+    vehicleCameraFolder.close();
+
+    const vehicleDebugFolder = vehicleFolder.addFolder("Debug");
+    vehicleDebugFolder.add(t.debug, "showPhysicsBox").name("Chassis Collider").onChange(applyVehicleTuning);
+    vehicleDebugFolder.add(t.debug, "showWheelRays").name("Wheel Rays").onChange(applyVehicleTuning);
+    vehicleDebugFolder.add(t.debug, "showWheelTravel").name("Suspension Travel").onChange(applyVehicleTuning);
+    vehicleDebugFolder.add(t.debug, "showWheelSpheres").name("Wheel Colliders").onChange(applyVehicleTuning);
+    vehicleDebugFolder.close();
+
+    const drivingFolder = vehicleFolder.addFolder("Driving");
+    drivingFolder.add(t.power, "maxSpeed", 0, 200, 1).name("Max Speed").onChange(applyVehicleTuning);
+    drivingFolder.add(t.power, "acceleration", 0, 10, 0.1).name("Acceleration").onChange(applyVehicleTuning);
+    drivingFolder.add(t.power, "deceleration", 0, 10, 0.1).name("Braking Deceleration").onChange(applyVehicleTuning);
+    drivingFolder.close();
+
+    const handlingFolder = vehicleFolder.addFolder("Handling");
+    handlingFolder.add(params, "maxSteerDeg", 5, 60, 0.5).name("Max Steering Angle (deg)").onChange((degrees) => {
+        t.steering.maxSteerAngle = degrees * Math.PI / 180;
+        applyVehicleTuning();
+    });
+    handlingFolder.add(t.steering, "steerTime", 0.1, 1.5, 0.05).name("Steering Response Time").decimals(2).onChange(applyVehicleTuning);
+    handlingFolder.add(t.steering, "highSpeedSteerScale", 0.1, 1, 0.01).name("High-Speed Steering Scale").decimals(2).onChange(applyVehicleTuning);
+    handlingFolder.add(t.grip, "maxG", 0.1, 3, 0.05).name("Max Lateral G").onChange(applyVehicleTuning);
+    handlingFolder.close();
+
+    const suspensionFolder = vehicleFolder.addFolder("Suspension");
+    suspensionFolder.add(t.suspension, "restLength", 0.05, 0.5, 0.01).name("Rest Length").decimals(2).onChange(applyVehicleTuning);
+    suspensionFolder.add(t.suspension, "maxTravel", 0.05, 0.5, 0.01).name("Max Travel").decimals(2).onChange(applyVehicleTuning);
+    suspensionFolder.add(t.suspension, "stiffness", 0.1, 50, 0.1).name("Stiffness").decimals(1).onChange(applyVehicleTuning);
+    suspensionFolder.close();
+
+    vehicleFolder.open();
+}
+
+function updateFootIKDebugPanel() {
+    if (!footIKDebugParams || !footIK) return;
+    footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
+    footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
+    footIKDebugParams.leftFootIKWeight = footIK.getFootIKWeight("left");
+    footIKDebugParams.rightFootPhase = footIK.getFootPhaseDebugText("right");
+    footIKDebugParams.rightFootLand = formatFootLandTime(footIK.getFootTimeToLand("right"));
+    footIKDebugParams.rightFootIKWeight = footIK.getFootIKWeight("right");
+}
+
+function formatFootLandTime(value) {
+    return Number.isFinite(value) ? `${value.toFixed(2)}s` : "--";
 }

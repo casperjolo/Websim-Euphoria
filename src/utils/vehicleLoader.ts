@@ -186,6 +186,7 @@ export async function loadVehicleModel(
     }
 
     let boxTop = localMax.y;
+    const chassisTopClearance = (boxTop - minTireBottom) / Math.max(scale, 1e-8);
     // 默认盒底罩到轮心，弹簧压死后由盒子托住，避免只靠轮网格撑地
     let boxBottom = Math.min(localMin.y, minHubY);
     if (opts.chassis?.clearance != null) {
@@ -193,6 +194,7 @@ export async function loadVehicleModel(
         boxBottom = Math.max(boxBottom, minTireBottom);
     }
     if (boxBottom > boxTop - MIN_BOX_HEIGHT) boxBottom = boxTop - MIN_BOX_HEIGHT;
+    const chassisClearance = (boxBottom - minTireBottom) / Math.max(scale, 1e-8);
 
     // X/Z 绕水平中心；Y 从盒底向上缩，离地间隙不变
     const sizeScale = chassis.sizeScale;
@@ -262,6 +264,7 @@ export async function loadVehicleModel(
         new THREE.BoxGeometry(halfExtents.x * 2, halfExtents.y * 2, halfExtents.z * 2),
         new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.3 }),
     );
+    physicsBoxMesh.userData.excludeFromCollider = true;
     if (debug.showPhysicsBox) vehicleGroup.add(physicsBoxMesh);
 
     vehicleGroup.position.copy(spawnPosition);
@@ -303,6 +306,11 @@ export async function loadVehicleModel(
         grip,
         size: { l: Math.max(bodySize.x, bodySize.z), w: Math.min(bodySize.x, bodySize.z), h: bodySize.y },
         halfExtents,
+        chassisClearance,
+        chassisTopClearance,
+        chassisSizeScaleX: sx,
+        chassisSizeScaleY: sy,
+        chassisSizeScaleZ: sz,
         maxSpeed,
         acceleration,
         deceleration,

@@ -3,8 +3,18 @@ import type { playerController } from "../PlayerController";
 import type { KinematicColliderEntry } from "../types";
 import { CHARACTER_QUERY_MASK } from "../collision/groups";
 import type { DynamicBody } from "../collision/DynamicBody";
+import type { DynamicGroundHit } from "./DynamicBodySystem";
 import type { PlayerDebug } from "./PlayerDebug";
-import { applyCapsuleCollision } from "../utils/capsuleCollision";
+import {
+    applyCapsuleCollision,
+    createGroundProbeTemps,
+    probeMeshGround,
+} from "../utils/capsuleCollision";
+
+/** 体积地面传感区半径相对玩家胶囊半径的比例。 */
+const GROUND_SENSOR_RADIUS_RATIO = 0.4;
+/** 可作为支撑面的最小向上法线分量。 */
+const GROUND_SUPPORT_NORMAL_Y = 0.5;
 
 /**
  * 人物胶囊移动：地面射线、分步推出、重力 snap、平台携带。
@@ -18,17 +28,26 @@ export class CharacterMovement {
     private dynamicSupportLocal = new THREE.Vector3();
     private dynamicSupportBefore = new THREE.Vector3();
     private dynamicSupportDelta = new THREE.Vector3();
+    private groundProbeTemps = createGroundProbeTemps();
+    private groundProbeStart = new THREE.Vector3();
+    private groundProbeDown = new THREE.Vector3();
+    private groundProbeOffset = new THREE.Vector3();
+    private shapeGroundPoint = new THREE.Vector3();
+    private shapeGroundNormal = new THREE.Vector3();
+    private rayGroundNormal = new THREE.Vector3();
+    private rayGroundNormalMatrix = new THREE.Matrix3();
 
     constructor(
         private readonly ctrl: playerController,
         private readonly debug: PlayerDebug,
-    ) {}
+    ) { }
 
     /** 步行 / 飞行一帧：输入速度 → 落地 → 分步碰撞 → 朝向与相机。 */
     update(delta: number): void {
         const c = this.ctrl;
         // 载具模式只跑动画，移动由车辆系统负责
         if (c.controllerMode === 1) {
+            c.clearGroundSupport();
             this.debug.clearGroundProbe();
             c.runAnimationPass(delta);
             return;
@@ -74,6 +93,7 @@ export class CharacterMovement {
         }
 
         // —— 脚下射线：静态 / 运动学网格 / 动态体，取最高命中 ——
+        c.playerCapsule.updateMatrixWorld(true);
         c.groundRaycaster.ray.origin.copy(c.playerCapsule.position);
         let bestHit: THREE.Intersection | undefined;
         let hitEntry: KinematicColliderEntry | null = null;
@@ -91,7 +111,100 @@ export class CharacterMovement {
             bestHit = undefined;
             hitEntry = null;
         }
-        const groundPoint = dynamicHit?.point ?? bestHit?.point;
+        // 射线阶段已经在网格与动态体之间选出最高命中，体积探测只作为失效时的补充。
+        let groundPoint: THREE.Vector3 | undefined = dynamicHit?.point ?? bestHit?.point;
+        let usedShapeGround = false;
+
+        // 中心射线没有近距离支撑时，用带宽度的体积探测覆盖细缝两侧。
+        const rayGroundDistance = groundPoint
+            ? c.playerCapsule.position.y - groundPoint.y
+            : Infinity;
+        const groundCapsuleInfo = c.playerCapsule.capsuleInfo;
+
+        // 从胶囊下端球心开始向下探测。
+        this.groundProbeStart.copy(groundCapsuleInfo.segment.end)
+            .applyMatrix4(c.playerCapsule.matrixWorld);
+        this.groundProbeDown.copy(c.upVector).negate();
+
+        const lowerCenterOffset = this.groundProbeOffset
+            .subVectors(c.playerCapsule.position, this.groundProbeStart)
+            .dot(c.upVector);
+        const maxProbeDistance = Math.max(0, c.maxH - lowerCenterOffset);
+        const sensorRadius = groundCapsuleInfo.radius * GROUND_SENSOR_RADIUS_RATIO;
+
+        // 近距离中心射线仍是快速路径；只有射线错过或命中过远时才执行体积查询。
+        const useShapeProbe = rayGroundDistance > c.maxH;
+        if (useShapeProbe) {
+            let shapeDistance = Infinity;
+            let shapeEntry: KinematicColliderEntry | null = null;
+            let shapeDynamicHit: DynamicGroundHit | null = null;
+
+            // 静态、运动学及已登记的动态网格都通过 BVH 生成候选支撑面，保留最近命中。
+            for (const col of c.collisionWorld.query({ mask: CHARACTER_QUERY_MASK })) {
+                if (col.shape.kind !== "mesh") continue;
+                const hit = probeMeshGround(
+                    this.groundProbeStart,
+                    this.groundProbeDown,
+                    maxProbeDistance,
+                    sensorRadius,
+                    GROUND_SUPPORT_NORMAL_Y,
+                    col.shape.mesh,
+                    this.groundProbeTemps,
+                );
+                if (!hit || hit.distance >= shapeDistance) continue;
+                shapeDistance = hit.distance;
+                this.shapeGroundPoint.copy(hit.point);
+                this.shapeGroundNormal.copy(hit.normal);
+
+                // 保存运动学平台归属。
+                shapeEntry = col.motion === "kinematic"
+                    ? col.userData as KinematicColliderEntry
+                    : null;
+                shapeDynamicHit = null;
+            }
+
+            // 动态球和动态盒使用解析形状查询，再与网格结果竞争最近支撑面。
+            const dynamicVolumeHit = c.dynamics.probeGroundVolume(
+                this.groundProbeStart,
+                this.groundProbeDown,
+                maxProbeDistance,
+                sensorRadius,
+                GROUND_SUPPORT_NORMAL_Y,
+            );
+            if (dynamicVolumeHit) {
+                const dynamicDistance = this.groundProbeOffset
+                    .subVectors(dynamicVolumeHit.point, this.groundProbeStart)
+                    .dot(this.groundProbeDown);
+                if (dynamicDistance < shapeDistance) {
+                    shapeDistance = dynamicDistance;
+                    this.shapeGroundPoint.copy(dynamicVolumeHit.point);
+                    this.shapeGroundNormal.copy(dynamicVolumeHit.normal);
+                    shapeEntry = null;
+
+                    // 保存动态刚体归属。
+                    shapeDynamicHit = dynamicVolumeHit;
+                }
+            }
+
+            if (Number.isFinite(shapeDistance)) {
+                // 用体积探测结果替换失效射线，同时保持原有贴地、坡度和平台逻辑的输入格式。
+                groundPoint = this.shapeGroundPoint;
+                bestHit = undefined;
+                dynamicHit = shapeDynamicHit;
+                hitEntry = shapeEntry;
+                usedShapeGround = true;
+            }
+        }
+
+        // 调试圆柱始终显示实际尺寸；是否启用回退和是否命中分别控制其状态颜色。
+        this.debug.updateGroundSensor(
+            this.groundProbeStart,
+            this.groundProbeDown,
+            maxProbeDistance,
+            sensorRadius,
+            useShapeProbe,
+            usedShapeGround,
+        );
         this.debug.updateGroundProbe(
             c.groundRaycaster.ray.origin,
             groundPoint ?? null,
@@ -109,7 +222,11 @@ export class CharacterMovement {
                     if (c.playerIsOnGround) {
                         c.snapToGround(
                             snapY,
-                            dynamicHit ? dynamicHit.normal.y >= c.minFloorNormalY : c.isFlatFloor(bestHit!),
+                            usedShapeGround
+                                ? this.shapeGroundNormal.y >= c.minFloorNormalY
+                                : dynamicHit
+                                    ? dynamicHit.normal.y >= c.minFloorNormalY
+                                    : c.isFlatFloor(bestHit!),
                             delta,
                         );
                     } else {
@@ -177,6 +294,9 @@ export class CharacterMovement {
             }
         }
 
+        // 在 IK 执行前缓存本帧最终接地结果。
+        this.updateGroundSupport(groundPoint, bestHit, dynamicHit, usedShapeGround);
+
         // —— 角色朝向（第三人称 / 飞行） ——
         if (!c.isFirstPerson) {
             const camDirFlat = c.camDir.clone().setY(0).normalize().negate();
@@ -208,9 +328,8 @@ export class CharacterMovement {
             c.camera.position.add(lookTarget);
             c.controls.target.copy(lookTarget);
             c.controls.update();
-            if (!c.cam.zoomEnabled) {
-                c.cam.updateWithRaycast(c.controls.target);
-            }
+            // 滚轮缩放修改maxDist。
+            c.cam.updateWithRaycast(c.controls.target);
         }
 
         // 靠近车辆时显示上车按钮
@@ -230,6 +349,36 @@ export class CharacterMovement {
 
         c.animation.setAnimationByPressed();
         c.runAnimationPass(delta);
+    }
+
+    /** 将射线或体积探测最终采用的支撑点统一转换成世界空间结果。 */
+    private updateGroundSupport(
+        point: THREE.Vector3 | undefined,
+        meshHit: THREE.Intersection | undefined,
+        dynamicHit: DynamicGroundHit | null,
+        usedShapeGround: boolean,
+    ): void {
+        const c = this.ctrl;
+        if (c.isFlying || !c.playerIsOnGround || !point) {
+            c.clearGroundSupport();
+            return;
+        }
+
+        if (usedShapeGround) {
+            // 体积探测已经返回世界空间法线。
+            this.rayGroundNormal.copy(this.shapeGroundNormal);
+        } else if (dynamicHit) {
+            this.rayGroundNormal.copy(dynamicHit.normal);
+        } else if (meshHit?.face) {
+            // 射线命中网格法线转换到世界空间。
+            this.rayGroundNormal.copy(meshHit.face.normal)
+                .applyMatrix3(this.rayGroundNormalMatrix.getNormalMatrix(meshHit.object.matrixWorld))
+                .normalize();
+        } else {
+            this.rayGroundNormal.copy(c.upVector);
+        }
+
+        c.setGroundSupport(point, this.rayGroundNormal);
     }
 
     /** 切换当前动态支撑体并记录位姿。 */

@@ -492,6 +492,7 @@ export class VehicleSystem {
     private attachWheelSphereDebug(v: VehicleInstance): void {
         const group = new THREE.Group();
         group.name = "wheelSphereDebug";
+        group.userData.excludeFromCollider = true;
         const geo = new THREE.SphereGeometry(1, 16, 12);
         const mat = new THREE.MeshBasicMaterial({
             color: 0x00e8a0,
@@ -584,6 +585,141 @@ export class VehicleSystem {
             v.vehicleController.setWheelEngineForce(i, 0);
             v.vehicleController.setWheelBrake(i, brake);
             v.vehicleController.setWheelSideFrictionStiffness(i, v.sideFrictionStiffness);
+        }
+    }
+
+    /**
+     * 运行时修改底盘盒底相对轮胎触地点的高度。
+     * 重定底盘中心的同时反向平移车模和车轮，使车辆外观及轮胎触地点保持原位。
+     */
+    setClearance(v: VehicleInstance, clearance: number): void {
+        if (!v || !Number.isFinite(clearance) || v.scale <= 0) return;
+
+        const sy = Math.max(1e-3, v.chassisSizeScaleY);
+        const minHeight = 1e-3;
+        const maxClearance = Math.max(
+            0,
+            v.chassisTopClearance - minHeight / (v.scale * sy),
+        );
+        const nextClearance = THREE.MathUtils.clamp(clearance, 0, maxClearance);
+        const previousClearance = v.chassisClearance;
+        if (Math.abs(nextClearance - previousClearance) < 1e-8) return;
+
+        const oldHalfY = v.halfExtents.y;
+        const newHalfY = Math.max(
+            minHeight * 0.5,
+            (v.chassisTopClearance - nextClearance) * v.scale * sy * 0.5,
+        );
+        // 底盘中心相对轮胎触地点的位置 = clearance + 碰撞盒半高。
+        const centerShift = (nextClearance - previousClearance) * v.scale
+            + (newHalfY - oldHalfY);
+
+        const nextHalfExtents = v.halfExtents.clone();
+        nextHalfExtents.y = newHalfY;
+        v.chassisClearance = nextClearance;
+        this.applyChassisShape(v, nextHalfExtents, centerShift);
+    }
+
+    /** 运行时修改底盘碰撞盒三轴尺寸比例；Y 轴仍以盒底为缩放锚点。 */
+    setChassisSizeScale(
+        v: VehicleInstance,
+        sizeScale: { x?: number; y?: number; z?: number },
+    ): void {
+        if (!v || v.scale <= 0) return;
+
+        const oldSx = Math.max(1e-3, v.chassisSizeScaleX);
+        const oldSy = Math.max(1e-3, v.chassisSizeScaleY);
+        const oldSz = Math.max(1e-3, v.chassisSizeScaleZ);
+        const sx = Math.max(1e-3, sizeScale.x ?? oldSx);
+        const sy = Math.max(1e-3, sizeScale.y ?? oldSy);
+        const sz = Math.max(1e-3, sizeScale.z ?? oldSz);
+        if (
+            Math.abs(sx - oldSx) < 1e-8
+            && Math.abs(sy - oldSy) < 1e-8
+            && Math.abs(sz - oldSz) < 1e-8
+        ) return;
+
+        const nextHalfExtents = new THREE.Vector3(
+            v.halfExtents.x / oldSx * sx,
+            Math.max(
+                5e-4,
+                (v.chassisTopClearance - v.chassisClearance) * v.scale * sy * 0.5,
+            ),
+            v.halfExtents.z / oldSz * sz,
+        );
+        const centerShift = nextHalfExtents.y - v.halfExtents.y;
+        v.chassisSizeScaleX = sx;
+        v.chassisSizeScaleY = sy;
+        v.chassisSizeScaleZ = sz;
+        this.applyChassisShape(v, nextHalfExtents, centerShift);
+    }
+
+    /** 同步底盘尺寸、车轮硬点、视觉原点和两套碰撞表示。 */
+    private applyChassisShape(
+        v: VehicleInstance,
+        nextHalfExtents: THREE.Vector3,
+        centerShift: number,
+    ): void {
+        const shiftsCenter = Math.abs(centerShift) >= 1e-8;
+
+        if (shiftsCenter) {
+            for (const child of v.vehicleGroup.children) {
+                if (
+                    child === v.physicsBoxMesh
+                    || child === v.wheelRayDebug
+                    || child === v.wheelTravelDebug
+                    || child === v.wheelSphereDebug
+                    || child === this.ctrl.playerCapsule
+                ) continue;
+                child.position.y -= centerShift;
+            }
+
+            const wheelCount = v.vehicleController.numWheels();
+            for (let i = 0; i < wheelCount; i++) {
+                const wheel = v.vehicleController.wheelAt(i);
+                if (!wheel) continue;
+                this.scratchLocal.copy(wheel.connectionPoint);
+                this.scratchLocal.y -= centerShift;
+                v.vehicleController.setWheelChassisConnectionPointCs(i, this.scratchLocal);
+            }
+
+            v.driverSeatPosition.y -= centerShift / v.scale;
+
+            // 移动底盘中心以抵消本地内容位移，车身与轮胎在世界空间保持不动。
+            this.scratchUp.set(0, centerShift, 0).applyQuaternion(v.chassisBody.quaternion);
+            v.chassisBody.position.add(this.scratchUp);
+            v.vehicleGroup.position.copy(v.chassisBody.position);
+            v.vehicleGroup.quaternion.copy(v.chassisBody.quaternion);
+            v.vehicleGroup.updateMatrixWorld(true);
+
+            this.ctrl.translateKinematicColliderContent(
+                v.vehicleGroup,
+                this.scratchLocal.set(0, -centerShift, 0),
+            );
+        }
+
+        v.halfExtents.copy(nextHalfExtents);
+        v.chassisBody.setHalfExtents(v.halfExtents);
+
+        const chassisCol = v.chassisColliderId != null
+            ? this.ctrl.collisionWorld.get(v.chassisColliderId)
+            : undefined;
+        if (chassisCol?.shape.kind === "box") {
+            chassisCol.shape.halfExtents.copy(v.halfExtents);
+        }
+
+        if (v.physicsBoxMesh) {
+            v.physicsBoxMesh.geometry.dispose();
+            v.physicsBoxMesh.geometry = new THREE.BoxGeometry(
+                v.halfExtents.x * 2,
+                v.halfExtents.y * 2,
+                v.halfExtents.z * 2,
+            );
+            v.physicsBoxMesh.scale.set(1, 1, 1);
+        }
+        if (v.wheelSphereDebug) this.syncWheelSphereDebug(v);
+        if (this.active === v && this.ctrl.controllerMode === 1) {
+            this.ctrl.syncMountedPlayer(v);
         }
     }
 

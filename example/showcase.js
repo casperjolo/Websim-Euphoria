@@ -16,7 +16,6 @@ import {
     MeshStandardMaterial,
     PerspectiveCamera,
     PlaneGeometry,
-    Quaternion,
     RepeatWrapping,
     ShaderMaterial,
     Shape,
@@ -99,9 +98,6 @@ const OBSTACLE_X0 = -9;
 const OBSTACLE_COUNT = 6;
 const OBSTACLE_SPACING = 1.8;
 
-// 远端左：动态区；右：运动学平台区
-const ZONE_PROP = { x: -34, z: -9, size: 12, drop: 0.25 };
-const ZONE_KINE = { x: -34, z: 9 };
 const PROP_SPHERE_R = 0.2;
 const ACCENT_GRAY = 0xc8c8c8;
 const PROP_GRID = 4;
@@ -110,6 +106,9 @@ const PROP_ACCENT_COLOR = 0x7eb0d4;
 
 const KINE_SHUTTLE_SPEED = 0.9;
 const KINE_SPIN_SPEED = 0.35;
+const STATIC_STRIP_COUNT = 6;
+const STATIC_STRIP_GAP_RADIUS_RATIO = 0.5;
+const STATIC_STRIP_DEPTH_RADIUS_RATIO = 3;
 
 const MINI_SCALE = 0.1; // 小场景相对大场景的比例
 const PLAYER_SCALE_NORMAL = 0.005; // 大场景人物缩放
@@ -117,7 +116,6 @@ const VEHICLE_SCALE_NORMAL = 0.5; // 大场景车辆缩放
 // 梯形连接段长度：相对宽端开口宽度（宽矩形 / 收腰）
 const TRAP_WIDE_LEN_RATIO = 0.45;
 const TRAP_SLOPE_LEN_RATIO = 0.4;
-const SLOPE_DOMINO_COUNT = 10;
 // 收腰段：青通道 tint
 const TRAP_TINT_COLOR = 0x88c8e0;
 
@@ -132,9 +130,9 @@ function createShowcaseLayout(scale = 1) {
         deckY: DECK_Y * s,
         deckThick: DECK_THICK * s,
         l1Top: 1.2 * s,
-        obstacleX0: -9 * s,
-        obstacleCount: 6,
-        obstacleSpacing: 1.8 * s,
+        obstacleX0: OBSTACLE_X0 * s,
+        obstacleCount: OBSTACLE_COUNT,
+        obstacleSpacing: OBSTACLE_SPACING * s,
         obstacleZ: 3.2 * s,
         obstacleCylR: 0.15 * s,
         obstacleCylLen: 2.5 * s,
@@ -162,12 +160,11 @@ let renderer;
 let controls;
 let player;
 let footIK;
-let gui;
+let footIKDebugParams;
 let stats;
-let kinematicPlatforms = [];
-let mainLayout;
+const kinematicPlatforms = [];
 let trapScaleRange = null; // 收腰段：wideWestX 处 scale=1，westX 处 scale=0.1
-let glowPortals = [];
+const glowPortals = [];
 let zoneScale = 1; // 当前场景总缩放（1 → MINI_SCALE）
 const scaleGateWorldPos = new Vector3(); // 缩放判定用的世界坐标缓冲
 
@@ -240,7 +237,7 @@ async function init() {
 
     // 测试场景
     const prototypeMat = await loadTiledMaterial("./textures/showcase/prototype.png");
-    mainLayout = createShowcaseLayout(1);
+    const mainLayout = createShowcaseLayout();
     const miniLayout = createShowcaseLayout(MINI_SCALE);
     // 矩形西墙全开，开口贴合南北墙外缘，与梯形宽端相接
     const mainWestOpening = {
@@ -282,14 +279,13 @@ async function init() {
 
     // 豁口发光门帘：宽矩形/收腰交界 + 梯形西口（进入小场景）
     const slopeEastOpening = { zCenter: 0, width: trapLayout.halfWide * 2 };
-    glowPortals = [
+    glowPortals.push(
         createGlowGapPortal(mainLayout, slopeEastOpening, trapLayout.wideWestX),
         createGlowGapPortal(miniLayout, miniOpening, trapLayout.westX),
-    ];
+    );
     for (const portal of glowPortals) scene.add(portal);
 
     // 加载玩家模型
-
     const gltfLoader = new GLTFLoader();
     const playerGltf = await gltfLoader.loadAsync("./glb/ual.glb");
 
@@ -306,8 +302,11 @@ async function init() {
         minCamDistance: 8,
         maxCamDistance: 300,
         camLookAtHeightRatio: 0.5,
+        enableOverShoulderView: true,
+        camOverShoulderOffsetRatio: 0,
         enableSpringCamera: true,
         springCameraTime: 0.1,
+        enableZoom: true,
         playerModelConfig: {
             model: playerGltf.scene,
             animations: playerGltf.animations,
@@ -333,6 +332,12 @@ async function init() {
         },
     });
     enableModelShadows(player.playerModel);
+    const staticStripBridge = createStaticStripPlatforms(prototypeMat, mainLayout, scene, {
+        centerX: getBalancedKinematicMeetCenterX(mainLayout, trapLayout.wideWestX),
+    });
+    const miniStripBridge = createStaticStripPlatforms(prototypeMat, miniLayout, miniWorld, {
+        centerX: getBalancedKinematicMeetCenterX(miniLayout),
+    });
 
     // 初始化脚部 IK
     footIK = new FootIK({
@@ -359,15 +364,18 @@ async function init() {
     player.use(footIK);
 
     await spawnShowcaseVehicles(gltfLoader);
-    spawnVehiclePropBodies(prototypeMat);
+    spawnVehiclePropBodies(prototypeMat, mainLayout);
     spawnLayoutPropBodies(prototypeMat, miniLayout, miniWorld.position);
-    spawnSlopeDominoes(prototypeMat, mainLayout, trapLayout, miniLayout.wallH);
     createKinematicPlatforms(prototypeMat, mainLayout, scene, {
-        meetCenterX: trapLayout.eastX,
+        meetCenterX: staticStripBridge.centerX,
+        middleStripSpan: staticStripBridge.span,
         slopeMeetCenterX: trapLayout.wideWestX,
         slopeWestX: trapLayout.westX,
     });
-    createKinematicPlatforms(prototypeMat, miniLayout, miniWorld);
+    createKinematicPlatforms(prototypeMat, miniLayout, miniWorld, {
+        meetCenterX: miniStripBridge.centerX,
+        middleStripSpan: miniStripBridge.span,
+    });
 
     createDebugPanel();
 
@@ -376,7 +384,7 @@ async function init() {
         if (e.code !== "KeyR" || e.repeat) return;
         player?.resetVehicle();
     });
-    window.hideLoader?.();
+    window["hideLoader"]?.();
 }
 
 // 加载 tiling 纹理材质
@@ -596,10 +604,7 @@ function addPolygonFloor(root, points, layout, material) {
     geo.translate(0, deckY - deckThick * 0.5, 0);
     const floor = new Mesh(applyWorldTileUV(geo, { x: 0, y: 0, z: 0 }, tileSize), material);
     floor.name = "TrapezoidFloor";
-    floor.castShadow = true;
-    floor.receiveShadow = true;
-    root.add(floor);
-    return floor;
+    return addShadowMesh(root, floor);
 }
 
 // 沿多边形外缘砌墙，跳过东西两端开口；收腰段墙高从大场景线性降到小场景
@@ -684,10 +689,7 @@ function addTaperedWall(root, layout, material, a, b, hA, hB, nx, nz) {
     geo.applyMatrix4(m);
 
     const mesh = new Mesh(applyWorldTileUV(geo, { x: 0, y: 0, z: 0 }, tileSize), material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    root.add(mesh);
-    return mesh;
+    return addShadowMesh(root, mesh);
 }
 
 function addOrientedWall(root, layout, material, midX, midZ, length, nx, nz, dx, dz) {
@@ -697,10 +699,7 @@ function addOrientedWall(root, layout, material, midX, midZ, length, nx, nz, dx,
     geo.rotateY(Math.atan2(dx, dz));
     const mesh = new Mesh(applyWorldTileUV(geo, pos, tileSize), material);
     mesh.position.copy(pos);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    root.add(mesh);
-    return mesh;
+    return addShadowMesh(root, mesh);
 }
 
 // 创建豁口半透明发光门帘
@@ -770,7 +769,6 @@ function isNearScale(a, b) {
     return Math.abs(a - b) <= Math.max(Math.abs(b) * 1e-4, 1e-8);
 }
 
-// 收腰段 X：eastX → 1，westX → MINI_SCALE
 // 收腰段 X：wideWestX → 1，westX → MINI_SCALE；宽矩形段保持 1
 function zoneScaleFromX(x) {
     if (!trapScaleRange) return 1;
@@ -874,9 +872,7 @@ function createHalfBuriedObstacles(root, baseMat, layout) {
         cylGeo.rotateX(Math.PI / 2);
         const cyl = new Mesh(cylGeo, accentMat);
         cyl.position.copy(cylPos);
-        cyl.castShadow = true;
-        cyl.receiveShadow = true;
-        root.add(cyl);
+        addShadowMesh(root, cyl);
 
         addBox(root, new Vector3(x, deckTop, obstacleZ), obstacleBoxSize.clone(), accentMat, tileSize);
     }
@@ -893,7 +889,7 @@ async function spawnShowcaseVehicles(gltfLoader) {
             scale: VEHICLE_SCALE_NORMAL,
             position: spawnPos.clone(),
             wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-            driverSeatPosition: new Vector3(-0.6, 0.7, 0.4),
+            driverSeatPosition: new Vector3(-0.4, 1.0, 0.3),
             driverSeatRotation: -Math.PI / 2,
             modelRotation: -Math.PI / 2,
             followVehicleDirection: VEHICLE_TUNING.followVehicleDirection,
@@ -921,12 +917,12 @@ async function spawnShowcaseVehicles(gltfLoader) {
 }
 
 // 车辆前方动态刚体
-function spawnVehiclePropBodies(baseMat) {
+function spawnVehiclePropBodies(baseMat, layout) {
     const vehicles = player?.getAllVehicles?.() ?? [];
     if (vehicles.length < 2) return;
     const propMat = tintMaterial(baseMat, PROP_ACCENT_COLOR);
-    spawnSphereGrid(vehicles[0], propMat, mainLayout);
-    spawnBoxWall(vehicles[1], propMat, mainLayout);
+    spawnSphereGrid(vehicles[0], propMat, layout);
+    spawnBoxWall(vehicles[1], propMat, layout);
 }
 
 // 按布局生成动态球阵与箱墙
@@ -990,7 +986,7 @@ function spawnSphereGrid(vehicle, mat, layout) {
 }
 
 // 4×4 贴地球阵
-function spawnSphereGridAt({ mat, center, forward, right, radius, deckTop, gravity }) {
+function spawnSphereGridAt({ mat, center, forward, right, radius, deckTop, gravity = undefined }) {
     const spacing = radius * 2;
     const start = center.clone().addScaledVector(forward, -(PROP_GRID - 1) * spacing * 0.5);
     const geo = new SphereGeometry(1, 24, 16);
@@ -1003,9 +999,7 @@ function spawnSphereGridAt({ mat, center, forward, right, radius, deckTop, gravi
             pos.y = deckTop + radius;
             const mesh = new Mesh(geo, mat);
             mesh.scale.setScalar(radius);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            scene.add(mesh);
+            addShadowMesh(scene, mesh);
             player.addCollider({
                 motion: "dynamic",
                 shape: { kind: "sphere", radius, position: pos },
@@ -1031,7 +1025,7 @@ function spawnBoxWall(vehicle, mat, layout) {
 }
 
 // 4×4 箱墙
-function spawnBoxWallAt({ mat, center, right, boxSize, deckTop, gravity }) {
+function spawnBoxWallAt({ mat, center, right, boxSize, deckTop, gravity = undefined }) {
     const half = boxSize * 0.5;
     const start = center.clone();
     const geo = new BoxGeometry(1, 1, 1);
@@ -1044,9 +1038,7 @@ function spawnBoxWallAt({ mat, center, right, boxSize, deckTop, gravity }) {
             pos.y = deckTop + boxSize * (row + 0.5);
             const mesh = new Mesh(geo, mat);
             mesh.scale.setScalar(boxSize);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            scene.add(mesh);
+            addShadowMesh(scene, mesh);
             player.addCollider({
                 motion: "dynamic",
                 shape: {
@@ -1057,62 +1049,11 @@ function spawnBoxWallAt({ mat, center, right, boxSize, deckTop, gravity }) {
                 mesh,
                 restitution: 0.12,
                 friction: 0.7,
-                density: 10,
+                density: 1.2,
                 ...(gravity != null ? { gravity } : null),
             });
         }
     }
-}
-
-// 收腰段两侧：沿斜墙各 10 个渐小动态长方体
-function spawnSlopeDominoes(baseMat, layout, trap, westWallH) {
-    if (!player) return;
-    const mat = tintMaterial(baseMat, PROP_ACCENT_COLOR);
-    const deckTop = layout.deckY + layout.deckThick * 0.5;
-    const slopeLen = trap.wideWestX - trap.westX;
-    const geo = new BoxGeometry(1, 1, 1);
-
-    const spawnSide = (sign) => {
-        const zWide = sign * trap.halfWide;
-        const zNarrow = sign * trap.halfNarrow;
-        const inward = sign > 0 ? -1 : 1;
-
-        for (let i = 0; i < SLOPE_DOMINO_COUNT; i++) {
-            const t = (i + 0.5) / SLOPE_DOMINO_COUNT;
-            const sizeMul = 1 + t * (MINI_SCALE - 1);
-            const wallH = layout.wallH * (1 - t) + westWallH * t;
-            const dominoH = wallH;
-            const dominoLen = (slopeLen / SLOPE_DOMINO_COUNT) * 0.82 * sizeMul;
-            const dominoW = 0.3 * sizeMul;
-            // 宽面（高×长）朝向 ±X，薄边在 X 轴
-            const halfExtents = new Vector3(dominoW * 0.5, dominoH * 0.5, dominoLen * 0.5);
-
-            const x = trap.wideWestX + t * (trap.westX - trap.wideWestX);
-            const zEdge = zWide + t * (zNarrow - zWide);
-            const inset = layout.wallT + dominoLen * 0.5 + 0.04;
-            const pos = new Vector3(x, deckTop + dominoH * 0.5, zEdge + inward * inset);
-
-            const mesh = new Mesh(geo, mat);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            scene.add(mesh);
-            player.addCollider({
-                motion: "dynamic",
-                shape: {
-                    kind: "box",
-                    halfExtents,
-                    position: pos,
-                },
-                mesh,
-                restitution: 0.15,
-                friction: 0.65,
-                density: 1,
-            });
-        }
-    };
-
-    spawnSide(1);
-    spawnSide(-1);
 }
 
 // 六棱柱攀爬尺寸
@@ -1136,6 +1077,60 @@ function getHexClimbMetrics(layout) {
     };
 }
 
+// 悬空静态条板
+function createStaticStripPlatforms(baseMat, layout, parent, options = {}) {
+    const { sideLength, topHeight } = getHexClimbMetrics(layout);
+    const capsuleRadius = (player?.playerCapsule?.capsuleInfo?.radius
+        ?? 30 * PLAYER_SCALE_NORMAL) * layout.scale;
+    const gap = capsuleRadius * STATIC_STRIP_GAP_RADIUS_RATIO;
+    const stripDepth = capsuleRadius * STATIC_STRIP_DEPTH_RADIUS_RATIO;
+    const span = STATIC_STRIP_COUNT * stripDepth
+        + (STATIC_STRIP_COUNT - 1) * gap;
+    const centerX = options.centerX ?? 0;
+    const stripSize = new Vector3(
+        stripDepth,
+        layout.kineThickness,
+        sideLength,
+    );
+    const y = topHeight + layout.kineTopOffset - layout.kineThickness * 0.5;
+    const firstX = centerX + span * 0.5 - stripDepth * 0.5;
+    const root = new Group();
+    root.name = "StaticStripPlatforms";
+    const mat = tintMaterial(baseMat, ACCENT_GRAY);
+
+    for (let i = 0; i < STATIC_STRIP_COUNT; i++) {
+        const x = firstX - i * (stripDepth + gap);
+        const strip = addBox(
+            root,
+            new Vector3(x, y, 0),
+            stripSize,
+            mat,
+            layout.tileSize,
+        );
+        strip.name = `StaticStripPlatform${i + 1}`;
+    }
+
+    parent.add(root);
+    player.addCollider({
+        motion: "static",
+        shape: { kind: "mesh", source: root },
+    });
+    return { centerX, span };
+}
+
+/** 取两台运动学平台起点中心的中点。 */
+function getBalancedKinematicMeetCenterX(layout, spinStartBoundaryX) {
+    const { sideLength, platformApothem } = getHexClimbMetrics(layout);
+    const half = sideLength * 0.5;
+    const farEastX = -platformApothem - half;
+    const deckWestX = layout.platform.x - layout.platform.sizeX * 0.5;
+    const farWestX = deckWestX + half;
+    const spinStartX = Number.isFinite(spinStartBoundaryX)
+        ? spinStartBoundaryX + half
+        : farWestX;
+    return (farEastX + spinStartX) * 0.5;
+}
+
 // 运动学往返平台
 function createKinematicPlatforms(baseMat, layout, parent, options = {}) {
     const { sideLength, topHeight, platformApothem } = getHexClimbMetrics(layout);
@@ -1148,18 +1143,20 @@ function createKinematicPlatforms(baseMat, layout, parent, options = {}) {
     const farEastX = -platformApothem - half;
     const deckWestX = layout.platform.x - layout.platform.sizeX * 0.5;
     const farWestX = deckWestX + half;
-    const defaultMeetX = (farEastX + farWestX) * 0.5;
-    const meetCenterX = options.meetCenterX ?? defaultMeetX;
     const slopeMeetCenterX = options.slopeMeetCenterX;
     const slopeWestX = options.slopeWestX;
+    const defaultMeetX = getBalancedKinematicMeetCenterX(layout, slopeMeetCenterX);
+    const meetCenterX = options.meetCenterX ?? defaultMeetX;
+    const middleStripSpan = Math.max(0, options.middleStripSpan ?? 0);
 
-    // 同一相位 p：p=1 在收腰矩形并排；有收腰段时 p=0 在收腰起点并排
+    // 同一相位 p：p=1 时前两台分别停靠在静态条板两侧；p=0 时后两台在收腰起点衔接。
     const farEast = new Vector3(farEastX, y, 0);
-    const meetEast = new Vector3(meetCenterX + half, y, 0);
+    // 有静态条板时，两台平台分别停靠在条板组东西两侧；否则保持原来的相邻停靠。
+    const meetEast = new Vector3(meetCenterX + middleStripSpan * 0.5 + half, y, 0);
     const spinFrom = Number.isFinite(slopeMeetCenterX)
         ? new Vector3(slopeMeetCenterX + half, y, 0)
         : new Vector3(farWestX, y, 0);
-    const spinTo = new Vector3(meetCenterX - half, y, 0);
+    const spinTo = new Vector3(meetCenterX - middleStripSpan * 0.5 - half, y, 0);
 
     addKinematicShuttle({
         parent,
@@ -1183,24 +1180,46 @@ function createKinematicPlatforms(baseMat, layout, parent, options = {}) {
     });
 
     if (Number.isFinite(slopeMeetCenterX) && Number.isFinite(slopeWestX)) {
+        const slopeScaleFrom = 1;
+        const slopeScaleTo = MINI_SCALE;
         addKinematicShuttle({
             parent,
             name: `${prefix}ShuttleSlope`,
-            from: new Vector3(slopeMeetCenterX - half, y, 0),
-            to: new Vector3(slopeWestX + half, y, 0),
+            // 起点东边缘贴收腰段，终点西边缘以缩小后的半宽贴小场景边界。
+            from: new Vector3(slopeMeetCenterX - half * slopeScaleFrom, y, 0),
+            to: new Vector3(
+                slopeWestX + half * slopeScaleTo,
+                y * slopeScaleTo,
+                0,
+            ),
             size,
             mat,
             spinSpeed: 0,
             tileSize: layout.tileSize,
             zoneScale: true,
+            scaleFrom: slopeScaleFrom,
+            scaleTo: slopeScaleTo,
         });
     }
 }
 
 // 创建单个往返平台
-function addKinematicShuttle({ parent, name, from, to, size, mat, spinSpeed, tileSize, zoneScale = false }) {
+function addKinematicShuttle({
+    parent,
+    name,
+    from,
+    to,
+    size,
+    mat,
+    spinSpeed,
+    tileSize,
+    zoneScale = false,
+    scaleFrom = 1,
+    scaleTo = scaleFrom,
+}) {
     const mesh = addBox(parent, from.clone(), size, mat, tileSize);
     mesh.name = name;
+    mesh.scale.setScalar(scaleFrom);
     player.addCollider({
         motion: "kinematic",
         shape: { kind: "mesh", source: mesh },
@@ -1212,19 +1231,18 @@ function addKinematicShuttle({ parent, name, from, to, size, mat, spinSpeed, til
         to: to.clone(),
         spinSpeed,
         zoneScale,
-        lastZoneScale: 1,
+        scaleFrom,
+        scaleTo,
+        lastZoneScale: scaleFrom,
     };
-    if (zoneScale) applyKinematicZoneScale(entry, zoneScaleFromX(from.x));
     kinematicPlatforms.push(entry);
 }
 
-/** 收腰段运动学平台：按 X 与人物相同的 zoneScale 缩放视觉与碰撞。 */
+/** 收腰段运动学平台。 */
 function applyKinematicZoneScale(entry, targetScale) {
     if (!entry?.mesh || !Number.isFinite(targetScale)) return;
     if (isNearScale(entry.lastZoneScale, targetScale)) return;
-    const ratio = targetScale / entry.lastZoneScale;
     entry.mesh.scale.setScalar(targetScale);
-    player?.scaleKinematicColliderContent(entry.mesh, ratio);
     entry.lastZoneScale = targetScale;
 }
 
@@ -1245,7 +1263,10 @@ function updateKinematicPlatforms(t) {
 
     for (const entry of kinematicPlatforms) {
         entry.mesh.position.lerpVectors(entry.from, entry.to, p);
-        if (entry.zoneScale) applyKinematicZoneScale(entry, zoneScaleFromX(entry.mesh.position.x));
+        if (entry.zoneScale) {
+            const targetScale = entry.scaleFrom + (entry.scaleTo - entry.scaleFrom) * p;
+            applyKinematicZoneScale(entry, targetScale);
+        }
         if (entry.spinSpeed) entry.mesh.rotation.y = t * entry.spinSpeed;
     }
 }
@@ -1272,9 +1293,7 @@ function createClimbGroups(root, baseMat, layout) {
     );
     const platform = new Mesh(platformGeo, baseMat);
     platform.position.copy(platformPos);
-    platform.castShadow = true;
-    platform.receiveShadow = true;
-    root.add(platform);
+    addShadowMesh(root, platform);
 
     for (let index = 0; index < 3; index++) {
         const arm = new Group();
@@ -1336,10 +1355,7 @@ function createRampToPlatform(root, { platformRadius, angleDeg, length, width, z
     const ramp = new Mesh(createRampGeometry(length, height, width, origin, rotY, tileSize), baseMat);
     ramp.position.copy(origin);
     ramp.rotation.y = rotY;
-    ramp.castShadow = true;
-    ramp.receiveShadow = true;
-    root.add(ramp);
-    return ramp;
+    return addShadowMesh(root, ramp);
 }
 
 // 创建斜坡几何体。
@@ -1434,6 +1450,11 @@ function addBox(root, position, size, material, tileSize = TILE_SIZE) {
     const geo = applyWorldTileUV(new BoxGeometry(size.x, size.y, size.z), position, tileSize);
     const mesh = new Mesh(geo, material);
     mesh.position.copy(position);
+    return addShadowMesh(root, mesh);
+}
+
+// 统一启用网格阴影并挂到场景节点
+function addShadowMesh(root, mesh) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     root.add(mesh);
@@ -1455,6 +1476,8 @@ function applyVehicleTuning() {
     const t = VEHICLE_TUNING;
     const vehicles = player?.getAllVehicles?.() ?? [];
     for (const v of vehicles) {
+        player?.setVehicleChassisSizeScale?.(v, t.chassis.sizeScale);
+        player?.setVehicleClearance?.(v, t.chassis.clearance);
         const he = v.halfExtents;
         const volume = 8 * he.x * he.y * he.z;
         v.chassisBody.setMass(volume * Math.max(1e-8, t.chassis.density));
@@ -1495,29 +1518,68 @@ function applyVehicleTuning() {
         if (v.wheelSphereDebug) v.wheelSphereDebug.visible = t.debug.showWheelSpheres;
     }
     if (player?.vehicle?.params?.debug) {
-        player.vehicle.params.debug.showPhysicsBox = t.debug.showPhysicsBox;
-        player.vehicle.params.debug.showWheelRays = t.debug.showWheelRays;
-        player.vehicle.params.debug.showWheelTravel = t.debug.showWheelTravel;
-        player.vehicle.params.debug.showWheelSpheres = t.debug.showWheelSpheres;
+        Object.assign(player.vehicle.params.debug, t.debug);
     }
 }
 
 // 创建调试面板
 function createDebugPanel() {
+    const footIKOptions = footIK?.getOptions() ?? {};
+    const roundedValue = (value, fallback, decimals = 1) => {
+        const factor = 10 ** decimals;
+        return Math.round((value ?? fallback) * factor) / factor;
+    };
+    const playerScale = Math.max(1e-8, player?.playerModelConfig?.scale ?? PLAYER_SCALE_NORMAL);
+    const toBasePlayerValue = (value, fallback, decimals = 0) => (
+        roundedValue(Number.isFinite(value) ? value / playerScale : undefined, fallback, decimals)
+    );
     const params = {
         colliderDebug: false,
         playerCapsuleDebug: false,
         dynamicBodyDebug: false,
-        vehiclePhysicsDebug: false,
-        footIKEnabled: true,
-        footIKDebug: false,
+        mouseSensitivity: roundedValue(player?.cam?.sensitivity, 5, 1),
+        gravity: toBasePlayerValue(player?.gravity, -2400),
+        jumpHeight: toBasePlayerValue(player?.jumpHeight, 600),
+        playerSpeed: toBasePlayerValue(player?.playerSpeed, 100),
+        playerRunSpeed: toBasePlayerValue(player?.playerRunSpeed, 600),
+        flySpeed: toBasePlayerValue(player?.playerFlySpeed, 2100),
+        playerAcceleration: roundedValue(player?.playerAcceleration, 30, 0),
+        playerDeceleration: roundedValue(player?.playerDeceleration, 30, 0),
+        timeScale: roundedValue(player?.timeScale, 1, 2),
+        minCamDistance: toBasePlayerValue(player?.cam?.minDist, 8),
+        maxCamDistance: toBasePlayerValue(player?.cam?.maxDist, 300),
+        camLookAtHeightRatio: roundedValue(player?.cam?.lookAtHeightRatio, 0.5, 2),
+        enableOverShoulderView: player?.enableOverShoulderView ?? true,
+        camOverShoulderOffsetRatio: roundedValue(player?.cam?.overShoulderOffsetRatio, 0, 2),
+        enableSpringCamera: player?.cam?.enableSpringCamera ?? true,
+        springCameraTime: roundedValue(player?.cam?.springCameraTime, 0.1, 2),
+        thirdMouseMode: player?.cam?.mouseMode ?? 1,
+        enableZoom: player?.cam?.zoomEnabled ?? true,
+        footIKEnabled: footIKOptions.enabled ?? true,
+        footIKDebug: footIKOptions.debug ?? false,
+        leftFootPhase: "",
+        leftFootLand: "--",
+        leftFootIKWeight: 0,
+        rightFootPhase: "",
+        rightFootLand: "--",
+        rightFootIKWeight: 0,
+        maxPelvisRaise: roundedValue(footIKOptions.maxPelvisRaise, 36, 0),
+        maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 36, 0),
+        maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 36, 0),
+        maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 36, 0),
+        soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
+        soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
+        soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
+        soleSkinThickness: roundedValue(footIKOptions.soleSkinThickness, 3),
         maxSteerDeg: VEHICLE_TUNING.steering.maxSteerAngle * 180 / Math.PI,
-        resetVehicle() {
-            player?.resetVehicle();
-        },
+    };
+    footIKDebugParams = params;
+
+    const applyFootIKOptions = (patch) => {
+        footIK?.configure(patch);
     };
 
-    gui = new GUI({ title: "调试", width: 300 });
+    const gui = new GUI({ title: "Showcase Controls", width: 320 });
     Object.assign(gui.domElement.style, {
         position: "fixed",
         top: "12px",
@@ -1527,82 +1589,175 @@ function createDebugPanel() {
     });
     gui.domElement.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-    const sceneFolder = gui.addFolder("Scene");
-    sceneFolder.add(params, "colliderDebug").name("Mesh Collider").onChange((value) => {
+    const collisionFolder = gui.addFolder("Collision Debug");
+    collisionFolder.add(params, "colliderDebug").name("Static / Kinematic Meshes").onChange((value) => {
         player?.setColliderDebug(value);
     });
-    sceneFolder.add(params, "playerCapsuleDebug").name("角色胶囊").onChange((value) => {
-        player?.setPlayerCapsuleDebug?.(value);
-    });
-    sceneFolder.add(params, "dynamicBodyDebug").name("Dynamic Body").onChange((value) => {
+    collisionFolder.add(params, "dynamicBodyDebug").name("Dynamic Bodies").onChange((value) => {
         player?.setDynamicBodyDebug?.(value);
     });
-    sceneFolder.add(params, "vehiclePhysicsDebug").name("Vehicle Physics").onChange((value) => {
-        player?.setVehiclePhysicsDebug?.(value);
+    collisionFolder.open();
+
+    const characterFolder = gui.addFolder("Character");
+    characterFolder.add(params, "playerCapsuleDebug").name("Capsule").onChange((value) => {
+        player?.setPlayerCapsuleDebug?.(value);
     });
-    sceneFolder.add(params, "footIKEnabled").name("Foot IK").onChange((value) => {
+
+    const movementFolder = characterFolder.addFolder("Movement");
+    movementFolder.add(params, "gravity", -6000, 0, 50).name("Gravity").decimals(0).onChange((value) => {
+        player?.setGravity(value);
+    });
+    movementFolder.add(params, "jumpHeight", 0, 2000, 10).name("Jump Height").decimals(0).onChange((value) => {
+        player?.setJumpHeight(value);
+    });
+    movementFolder.add(params, "playerSpeed", 0, 10000, 10).name("Walk Speed").decimals(0).onChange((value) => {
+        player?.setPlayerSpeed(value);
+    });
+    movementFolder.add(params, "playerRunSpeed", 0, 10000, 10).name("Run Speed").decimals(0).onChange((value) => {
+        player?.setPlayerRunSpeed(value);
+    });
+    movementFolder.add(params, "flySpeed", 0, 5000, 10).name("Fly Speed").decimals(0).onChange((value) => {
+        player?.setPlayerFlySpeed(value);
+    });
+    movementFolder.add(params, "playerAcceleration", 1, 100, 1).name("Acceleration").decimals(0).onChange((value) => {
+        if (player) player.playerAcceleration = value;
+    });
+    movementFolder.add(params, "playerDeceleration", 1, 100, 1).name("Deceleration").decimals(0).onChange((value) => {
+        if (player) player.playerDeceleration = value;
+    });
+    movementFolder.add(params, "timeScale", 0, 3, 0.05).name("Time Scale").decimals(2).onChange((value) => {
+        if (player) player.timeScale = value;
+    });
+    movementFolder.close();
+
+    const characterCameraFolder = characterFolder.addFolder("Camera");
+    characterCameraFolder.add(params, "mouseSensitivity", 1, 20, 0.1).name("Mouse Sensitivity").decimals(1).onChange((value) => {
+        player?.setMouseSensitivity(value);
+    });
+    characterCameraFolder.add(params, "minCamDistance", 0, 200, 1).name("Min Distance").decimals(0).onChange((value) => {
+        player?.setMinCamDistance(value);
+    });
+    characterCameraFolder.add(params, "maxCamDistance", 50, 1000, 1).name("Max Distance").decimals(0).onChange((value) => {
+        player?.setMaxCamDistance(value);
+    });
+    characterCameraFolder.add(params, "camLookAtHeightRatio", 0, 1, 0.01).name("Look-at Height Ratio").decimals(2).onChange((value) => {
+        player?.setCamLookAtHeightRatio(value);
+    });
+    characterCameraFolder.add(params, "enableOverShoulderView").name("Over-Shoulder View").onChange((value) => {
+        player?.setOverShoulderView(value);
+    });
+    characterCameraFolder.add(params, "camOverShoulderOffsetRatio", -0.2, 0.2, 0.01).name("Over-Shoulder Offset").decimals(2).onChange((value) => {
+        player?.setCamOverShoulderOffsetRatio(value);
+    });
+    characterCameraFolder.add(params, "enableSpringCamera").name("Spring Camera").onChange((value) => {
+        if (player) player.cam.enableSpringCamera = value;
+    });
+    characterCameraFolder.add(params, "springCameraTime", 0.01, 1, 0.01).name("Spring Time").decimals(2).onChange((value) => {
+        if (player) player.cam.springCameraTime = value;
+    });
+    characterCameraFolder.add(params, "thirdMouseMode", { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }).name("Mouse Mode").onChange((value) => {
+        player?.setThirdMouseMode(Number(value));
+    });
+    characterCameraFolder.add(params, "enableZoom").name("Enable Zoom").onChange((value) => {
+        player?.setEnableZoom(value);
+    });
+    characterCameraFolder.close();
+
+    const footIKFolder = characterFolder.addFolder("Foot IK");
+    footIKFolder.add(params, "footIKEnabled").name("Enabled").onChange((value) => {
         footIK?.setEnabled(value);
+        footIK?.setDebugEnabled(value && params.footIKDebug);
     });
-    sceneFolder.add(params, "footIKDebug").name("Foot IK 调试").onChange((value) => {
-        footIK?.setDebugEnabled(value);
+    footIKFolder.add(params, "footIKDebug").name("Debug Markers").onChange((value) => {
+        footIK?.setDebugEnabled(value && params.footIKEnabled);
     });
-    sceneFolder.add(params, "resetVehicle").name("Reset Vehicle");
-    sceneFolder.open();
+
+    const footIKRuntimeFolder = footIKFolder.addFolder("Runtime");
+    footIKRuntimeFolder.add(params, "leftFootPhase").name("Left Phase").listen().disable();
+    footIKRuntimeFolder.add(params, "leftFootLand").name("Left Land").listen().disable();
+    footIKRuntimeFolder.add(params, "leftFootIKWeight").name("Left IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.add(params, "rightFootPhase").name("Right Phase").listen().disable();
+    footIKRuntimeFolder.add(params, "rightFootLand").name("Right Land").listen().disable();
+    footIKRuntimeFolder.add(params, "rightFootIKWeight").name("Right IK Weight").decimals(3).listen().disable();
+    footIKRuntimeFolder.close();
+
+    const pelvisFolder = footIKFolder.addFolder("Pelvis");
+    pelvisFolder.add(params, "maxPelvisRaise", 0, 60, 1).name("Max Raise").decimals(0).onChange((value) => {
+        applyFootIKOptions({ maxPelvisRaise: value });
+    });
+    pelvisFolder.add(params, "maxPelvisDrop", 0, 60, 1).name("Max Drop").decimals(0).onChange((value) => {
+        applyFootIKOptions({ maxPelvisDrop: value });
+    });
+    pelvisFolder.close();
+
+    const footReachFolder = footIKFolder.addFolder("Foot Reach");
+    footReachFolder.add(params, "maxFootRaise", 0, 60, 1).name("Max Raise").decimals(0).onChange((value) => {
+        applyFootIKOptions({ maxFootRaise: value });
+    });
+    footReachFolder.add(params, "maxFootDrop", 0, 60, 1).name("Max Drop").decimals(0).onChange((value) => {
+        applyFootIKOptions({ maxFootDrop: value });
+    });
+    footReachFolder.close();
+
+    const soleFolder = footIKFolder.addFolder("Sole Layout");
+    soleFolder.add(params, "soleHalfWidth", 0, 24, 0.1).name("Half Width").decimals(1).onChange((value) => {
+        applyFootIKOptions({ soleHalfWidth: value });
+    });
+    soleFolder.add(params, "soleToeExtend", 0, 24, 0.1).name("Toe Extend").decimals(1).onChange((value) => {
+        applyFootIKOptions({ soleToeExtend: value });
+    });
+    soleFolder.add(params, "soleHeelExtend", 0, 24, 0.1).name("Heel Extend").decimals(1).onChange((value) => {
+        applyFootIKOptions({ soleHeelExtend: value });
+    });
+    soleFolder.add(params, "soleSkinThickness", 0, 16, 0.1).name("Skin Thickness").decimals(1).onChange((value) => {
+        applyFootIKOptions({ soleSkinThickness: value });
+    });
+    soleFolder.close();
+    footIKFolder.close();
+    characterFolder.open();
 
     const t = VEHICLE_TUNING;
-    const vehicleFolder = gui.addFolder("车辆");
+    const vehicleFolder = gui.addFolder("Vehicle");
 
-    vehicleFolder.add(t, "followVehicleDirection").name("镜头跟随车头").onChange(applyVehicleTuning);
-    vehicleFolder.add(t.debug, "showPhysicsBox").name("显示物理盒").onChange(applyVehicleTuning);
-    vehicleFolder.add(t.debug, "showWheelRays").name("车轮射线").onChange(applyVehicleTuning);
-    vehicleFolder.add(t.debug, "showWheelTravel").name("车轮行程").onChange(applyVehicleTuning);
-    vehicleFolder.add(t.debug, "showWheelSpheres").name("车轮碰撞球").onChange(applyVehicleTuning);
+    const chassisFolder = vehicleFolder.addFolder("Chassis");
+    chassisFolder.add(t.chassis, "clearance", 0, 2, 0.05).name("Clearance").decimals(2).onChange(applyVehicleTuning);
+    chassisFolder.add(t.chassis.sizeScale, "x", 0.1, 1.5, 0.05).name("Size Scale X").decimals(2).onChange(applyVehicleTuning);
+    chassisFolder.add(t.chassis.sizeScale, "y", 0.1, 1.5, 0.05).name("Size Scale Y").decimals(2).onChange(applyVehicleTuning);
+    chassisFolder.add(t.chassis.sizeScale, "z", 0.1, 1.5, 0.05).name("Size Scale Z").decimals(2).onChange(applyVehicleTuning);
+    chassisFolder.close();
 
-    const chassisFolder = vehicleFolder.addFolder("底盘");
-    chassisFolder.add(t.chassis, "density", 0.1, 10, 0.05).name("密度").onChange(applyVehicleTuning);
-    chassisFolder.add(t.chassis, "linearDamping", 0, 2, 0.01).name("线阻尼").onChange(applyVehicleTuning);
-    chassisFolder.add(t.chassis, "angularDamping", 0, 5, 0.01).name("角阻尼").onChange(applyVehicleTuning);
-    chassisFolder.open();
+    const vehicleCameraFolder = vehicleFolder.addFolder("Camera");
+    vehicleCameraFolder.add(t, "followVehicleDirection").name("Follow Vehicle Heading").onChange(applyVehicleTuning);
+    vehicleCameraFolder.close();
 
-    const susFolder = vehicleFolder.addFolder("悬挂");
-    susFolder.add(t.suspension, "restLength", 0.05, 2, 0.01).name("静止长度").onChange(applyVehicleTuning);
-    susFolder.add(t.suspension, "maxTravel", 0.05, 10, 0.05).name("最大行程").onChange(applyVehicleTuning);
-    susFolder.add(t.suspension, "stiffness", 0.1, 50, 0.01).name("刚度").onChange(applyVehicleTuning);
-    susFolder.add(t.suspension, "compression", 0, 8, 0.01).name("压缩阻尼").onChange(applyVehicleTuning);
-    susFolder.add(t.suspension, "relaxation", 0, 8, 0.01).name("回弹阻尼").onChange(applyVehicleTuning);
-    susFolder.add(t.suspension, "maxForce", 100, 50000, 100).name("最大悬挂力").onChange(applyVehicleTuning);
-    susFolder.add(t.suspension, "frictionSlip", 0.1, 50, 0.1).name("纵向抓地").onChange(applyVehicleTuning);
-    susFolder.add(t.suspension, "sideFrictionStiffness", 0, 5, 0.01).name("侧向摩擦刚度").onChange(applyVehicleTuning);
-    susFolder.add(t.suspension, "rollInfluence", 0, 1, 0.01).name("侧倾影响").onChange(applyVehicleTuning);
-    susFolder.open();
+    const vehicleDebugFolder = vehicleFolder.addFolder("Debug");
+    vehicleDebugFolder.add(t.debug, "showPhysicsBox").name("Chassis Collider").onChange(applyVehicleTuning);
+    vehicleDebugFolder.add(t.debug, "showWheelRays").name("Wheel Rays").onChange(applyVehicleTuning);
+    vehicleDebugFolder.add(t.debug, "showWheelTravel").name("Suspension Travel").onChange(applyVehicleTuning);
+    vehicleDebugFolder.add(t.debug, "showWheelSpheres").name("Wheel Colliders").onChange(applyVehicleTuning);
+    vehicleDebugFolder.close();
 
-    const steerFolder = vehicleFolder.addFolder("转向");
-    steerFolder.add(params, "maxSteerDeg", 5, 60, 0.5).name("最大转向角").onChange((deg) => {
+    const drivingFolder = vehicleFolder.addFolder("Driving");
+    drivingFolder.add(t.power, "maxSpeed", 0, 200, 1).name("Max Speed").onChange(applyVehicleTuning);
+    drivingFolder.add(t.power, "acceleration", 0, 10, 0.1).name("Acceleration").onChange(applyVehicleTuning);
+    drivingFolder.add(t.power, "deceleration", 0, 10, 0.1).name("Braking Deceleration").onChange(applyVehicleTuning);
+    drivingFolder.close();
+
+    const handlingFolder = vehicleFolder.addFolder("Handling");
+    handlingFolder.add(params, "maxSteerDeg", 5, 60, 0.5).name("Max Steering Angle (deg)").onChange((deg) => {
         t.steering.maxSteerAngle = deg * Math.PI / 180;
         applyVehicleTuning();
     });
-    steerFolder.add(t.steering, "steerTime", 0.05, 3, 0.05).name("打满舵时间").onChange(applyVehicleTuning);
-    steerFolder.add(t.steering, "steerReturnTimeSlow", 0.05, 3, 0.05).name("低速回正时间").onChange(applyVehicleTuning);
-    steerFolder.add(t.steering, "steerReturnTimeFast", 0.05, 3, 0.05).name("高速回正时间").onChange(applyVehicleTuning);
-    steerFolder.add(t.steering, "highSpeedSteerScale", 0.15, 1, 0.01).name("高速转角比例").onChange(applyVehicleTuning);
-    steerFolder.open();
+    handlingFolder.add(t.steering, "steerTime", 0.1, 1.5, 0.05).name("Steering Response Time").decimals(2).onChange(applyVehicleTuning);
+    handlingFolder.add(t.steering, "highSpeedSteerScale", 0.1, 1, 0.01).name("High-Speed Steering Scale").decimals(2).onChange(applyVehicleTuning);
+    handlingFolder.add(t.grip, "maxG", 0.1, 3, 0.05).name("Max Lateral G").onChange(applyVehicleTuning);
+    handlingFolder.close();
 
-    const gripFolder = vehicleFolder.addFolder("抓地");
-    gripFolder.add(t.grip, "maxG", 0.1, 3, 0.05).name("侧向加速度上限").onChange(applyVehicleTuning);
-    gripFolder.add(t.grip, "sideFrictionIdle", 0, 2, 0.01).name("直线侧向摩擦").onChange(applyVehicleTuning);
-    gripFolder.add(t.grip, "sideFrictionFrontMin", 0, 2, 0.01).name("前轮摩擦下限").onChange(applyVehicleTuning);
-    gripFolder.add(t.grip, "sideFrictionRearMin", 0, 2, 0.01).name("后轮摩擦下限").onChange(applyVehicleTuning);
-    gripFolder.add(t.grip, "handbrakeRearFriction", 0, 2, 0.01).name("手刹后轮摩擦").onChange(applyVehicleTuning);
-    gripFolder.add(t.grip, "handbrakeRearDriveScale", 0, 1, 0.01).name("手刹后驱比例").onChange(applyVehicleTuning);
-    gripFolder.add(t.grip, "handbrakeReleaseTime", 0.01, 1, 0.01).name("松手刹时间").onChange(applyVehicleTuning);
-    gripFolder.add(t.grip, "wheelbaseRatio", 0.2, 1, 0.01).name("轴距比例").onChange(applyVehicleTuning);
-    gripFolder.open();
-
-    const powerFolder = vehicleFolder.addFolder("动力");
-    powerFolder.add(t.power, "maxSpeed", 10, 400, 1).name("最高速度").onChange(applyVehicleTuning);
-    powerFolder.add(t.power, "acceleration", 0.5, 40, 0.1).name("加速度").onChange(applyVehicleTuning);
-    powerFolder.add(t.power, "deceleration", 0.5, 80, 0.1).name("制动减速度").onChange(applyVehicleTuning);
-    powerFolder.open();
+    const suspensionFolder = vehicleFolder.addFolder("Suspension");
+    suspensionFolder.add(t.suspension, "restLength", 0.05, 0.5, 0.01).name("Rest Length").decimals(2).onChange(applyVehicleTuning);
+    suspensionFolder.add(t.suspension, "maxTravel", 0.05, 0.5, 0.01).name("Max Travel").decimals(2).onChange(applyVehicleTuning);
+    suspensionFolder.add(t.suspension, "stiffness", 0.1, 50, 0.1).name("Stiffness").decimals(1).onChange(applyVehicleTuning);
+    suspensionFolder.close();
 
     vehicleFolder.open();
 }
@@ -1627,6 +1782,22 @@ function animate() {
     } else {
         controls?.update();
     }
+    updateFootIKDebugPanel();
     renderer.render(scene, camera);
     stats?.update();
+}
+
+// 更新 Foot IK 示例同款的左右脚运行状态。
+function updateFootIKDebugPanel() {
+    if (!footIKDebugParams || !footIK) return;
+    footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");
+    footIKDebugParams.leftFootLand = formatFootLandTime(footIK.getFootTimeToLand("left"));
+    footIKDebugParams.leftFootIKWeight = footIK.getFootIKWeight("left");
+    footIKDebugParams.rightFootPhase = footIK.getFootPhaseDebugText("right");
+    footIKDebugParams.rightFootLand = formatFootLandTime(footIK.getFootTimeToLand("right"));
+    footIKDebugParams.rightFootIKWeight = footIK.getFootIKWeight("right");
+}
+
+function formatFootLandTime(value) {
+    return Number.isFinite(value) ? `${value.toFixed(2)}s` : "--";
 }

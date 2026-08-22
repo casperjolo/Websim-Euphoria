@@ -2,6 +2,7 @@ import {
     BufferGeometry,
     Line,
     LineBasicMaterial,
+    LineSegments,
     Mesh,
     MeshBasicMaterial,
     SphereGeometry,
@@ -27,19 +28,45 @@ const HIT_MARKER_RADIUS = 2.5;
 const SAMPLE_ORIGIN_RADIUS = 3;
 /** 设计尺度下的脚底采样命中球半径。 */
 const SAMPLE_HIT_RADIUS = 2.5;
-/** 实心调试球 / 连线（左右腿共用）。 */
+/** 支撑脚 IK 的目标球颜色。 */
+const DEBUG_IK_PLANTED_COLOR = 0x22c55e;
+/** 摆动脚防穿透 IK 的目标球颜色。 */
+const DEBUG_IK_PENETRATION_COLOR = 0x3b82f6;
+/** 未应用 IK 时的目标球颜色。 */
+const DEBUG_IK_NOT_APPLIED_COLOR = 0xef4444;
+/** 脚底采样球 / 连线（左右腿共用）。 */
 const DEBUG_SOLID_COLOR = 0x2dd4bf;
 /** 线框命中球（左右腿共用）。 */
 const DEBUG_HIT_COLOR = 0xffff66;
-/** 命中高于胶囊下端球心时的线框球颜色。 */
-const DEBUG_HIT_OVER_CAPSULE_COLOR = 0xff3333;
+/** 命中超出脚部 IK 最大上抬范围时的线框球颜色。 */
+const DEBUG_HIT_OVER_RAISE_LIMIT_COLOR = 0xff3333;
+/** 脚部 IK 最大上抬范围线框颜色。 */
+const DEBUG_RAISE_LIMIT_COLOR = 0x60a5fa;
+/** 命中超出最大上抬范围时的线框颜色。 */
+const DEBUG_RAISE_LIMIT_EXCEEDED_COLOR = 0xff3333;
+/** 每条腿的上抬范围由四条竖线和顶部四边组成。 */
+const RAISE_LIMIT_POINTS = Array.from({ length: 16 }, () => new Vector3());
+const SOLE_PERIMETER = [0, 1, 3, 2] as const;
 
-function setHitMarkerColor(mesh: Mesh, overCapsule: boolean): void {
+function setHitMarkerColor(mesh: Mesh, overRaiseLimit: boolean): void {
     const material = mesh.material;
     if (Array.isArray(material)) return;
     (material as MeshBasicMaterial).color.setHex(
-        overCapsule ? DEBUG_HIT_OVER_CAPSULE_COLOR : DEBUG_HIT_COLOR,
+        overRaiseLimit ? DEBUG_HIT_OVER_RAISE_LIMIT_COLOR : DEBUG_HIT_COLOR,
     );
+}
+
+function setIKMarkerColor(mesh: Mesh, leg: FootIKLeg, applied: boolean): void {
+    const material = mesh.material;
+    if (Array.isArray(material)) return;
+
+    let color = DEBUG_IK_NOT_APPLIED_COLOR;
+    if (applied) {
+        if (leg.planted) color = DEBUG_IK_PLANTED_COLOR;
+        else if (leg.movePenetrating) color = DEBUG_IK_PENETRATION_COLOR;
+        else color = DEBUG_IK_PLANTED_COLOR;
+    }
+    (material as MeshBasicMaterial).color.setHex(color);
 }
 
 // 创建统一 Foot IK 调试对象：IK 目标、最高命中、脚底四点（原点 + 命中 + 射线）。
@@ -63,7 +90,7 @@ export function createDebugObjects(
             leg.marker = new Mesh(
                 ikGeometry,
                 new MeshBasicMaterial({
-                    color: DEBUG_SOLID_COLOR,
+                    color: DEBUG_IK_NOT_APPLIED_COLOR,
                     depthTest: false,
                     transparent: true,
                     opacity: 0.95,
@@ -104,6 +131,21 @@ export function createDebugObjects(
             leg.rayLine.renderOrder = 28;
             leg.rayLine.frustumCulled = false;
             scene.add(leg.rayLine);
+        }
+
+        if (!leg.raiseLimitLine) {
+            leg.raiseLimitLine = new LineSegments(
+                new BufferGeometry(),
+                new LineBasicMaterial({
+                    color: DEBUG_RAISE_LIMIT_COLOR,
+                    depthTest: false,
+                    transparent: true,
+                    opacity: 0.75,
+                }),
+            );
+            leg.raiseLimitLine.renderOrder = 24;
+            leg.raiseLimitLine.frustumCulled = false;
+            scene.add(leg.raiseLimitLine);
         }
 
         for (const sample of leg.soleSamples) {
@@ -164,28 +206,36 @@ export function updateFootDebug(
     leg: FootIKLeg,
     hitPoint: Vector3,
     scale = 1,
-    capsuleSupportY = NaN,
+    maxFootRaise = 0,
 ): void {
     if (!enabled || !leg.marker || !leg.rayLine) return;
 
     const s = Math.max(1e-4, scale);
-    const hasCapsuleY = Number.isFinite(capsuleSupportY);
+    const bestSample = leg.soleSamples[leg.bestGroundSampleIndex];
+    const bestHitOverRaiseLimit = !!bestSample?.hasHit
+        && hitPoint.y - bestSample.point.y > maxFootRaise;
+    const ikApplied = leg.weight > 0.001;
 
     // 腿级：IK 目标 + 最高命中 + 命中→目标
     leg.marker.visible = true;
     leg.marker.position.copy(leg.smoothedTarget);
     leg.marker.scale.setScalar(s);
+    setIKMarkerColor(leg.marker, leg, ikApplied);
 
     if (leg.hitMarker) {
         leg.hitMarker.visible = true;
         leg.hitMarker.position.copy(hitPoint);
         leg.hitMarker.scale.setScalar(s);
-        setHitMarkerColor(leg.hitMarker, hasCapsuleY && hitPoint.y > capsuleSupportY);
+        setHitMarkerColor(leg.hitMarker, bestHitOverRaiseLimit);
     }
 
-    leg.rayLine.visible = true;
-    // 最高地面命中（线框球）→ IK 目标。
-    leg.rayLine.geometry.setFromPoints([hitPoint, leg.smoothedTarget]);
+    // 只有实际应用 IK 时才显示“最高地面命中 → IK 目标”连线。
+    leg.rayLine.visible = ikApplied;
+    if (ikApplied) {
+        leg.rayLine.geometry.setFromPoints([hitPoint, leg.smoothedTarget]);
+    }
+
+    updateRaiseLimitLine(leg, maxFootRaise);
 
     // 脚底四点：原点 + 命中 + 射线
     for (const sample of leg.soleSamples) {
@@ -201,7 +251,7 @@ export function updateFootDebug(
                 sample.marker.scale.setScalar(s);
                 setHitMarkerColor(
                     sample.marker,
-                    hasCapsuleY && sample.hitPoint.y > capsuleSupportY,
+                    sample.hitPoint.y - sample.point.y > maxFootRaise,
                 );
             }
         }
@@ -220,7 +270,8 @@ export function setDebugVisible(legs: FootIKLegs, visible: boolean): void {
         const leg = legs[side];
         if (leg.marker) leg.marker.visible = visible;
         if (leg.hitMarker) leg.hitMarker.visible = visible;
-        if (leg.rayLine) leg.rayLine.visible = visible;
+        if (leg.rayLine) leg.rayLine.visible = visible && leg.weight > 0.001;
+        if (leg.raiseLimitLine) leg.raiseLimitLine.visible = visible;
         for (const sample of leg.soleSamples) {
             if (sample.footMarker) sample.footMarker.visible = visible;
             if (sample.marker) sample.marker.visible = visible && sample.hasHit;
@@ -244,10 +295,7 @@ export function getFootPhaseDebugText(
     const progress = Number.isFinite(sideState.progress)
         ? `${Math.round(sideState.progress * 100)}%`
         : "--";
-    const land = Number.isFinite(sideState.timeToLand)
-        ? `${sideState.timeToLand.toFixed(2)}s`
-        : "--";
-    return `${clipName}: ${phase} ${progress}, land ${land}`;
+    return `${clipName}: ${phase} ${progress}`;
 }
 
 // 移除调试对象并释放对应的 GPU 资源。
@@ -260,9 +308,11 @@ export function disposeDebugObjects(legs: FootIKLegs): void {
         collectDebugObject(leg.marker, geometries, materials);
         collectDebugObject(leg.hitMarker, geometries, materials);
         collectDebugObject(leg.rayLine, geometries, materials);
+        collectDebugObject(leg.raiseLimitLine, geometries, materials);
         leg.marker = null;
         leg.hitMarker = null;
         leg.rayLine = null;
+        leg.raiseLimitLine = null;
 
         for (const sample of leg.soleSamples) {
             collectDebugObject(sample.marker, geometries, materials);
@@ -276,6 +326,35 @@ export function disposeDebugObjects(legs: FootIKLegs): void {
 
     for (const geometry of geometries) geometry.dispose();
     for (const material of materials) material.dispose();
+}
+
+// 以当前动画脚底四点为起点，画出每个采样点可上抬到的最高边界。
+function updateRaiseLimitLine(leg: FootIKLeg, maxFootRaise: number): void {
+    if (!leg.raiseLimitLine || leg.soleSamples.length < 4) return;
+
+    let cursor = 0;
+    let exceeded = false;
+    for (const sample of leg.soleSamples) {
+        RAISE_LIMIT_POINTS[cursor++].copy(sample.point);
+        RAISE_LIMIT_POINTS[cursor++].copy(sample.point).y += maxFootRaise;
+        exceeded ||= sample.hasHit && sample.hitPoint.y - sample.point.y > maxFootRaise;
+    }
+
+    for (let i = 0; i < SOLE_PERIMETER.length; i++) {
+        const from = leg.soleSamples[SOLE_PERIMETER[i]].point;
+        const to = leg.soleSamples[SOLE_PERIMETER[(i + 1) % SOLE_PERIMETER.length]].point;
+        RAISE_LIMIT_POINTS[cursor++].copy(from).setY(from.y + maxFootRaise);
+        RAISE_LIMIT_POINTS[cursor++].copy(to).setY(to.y + maxFootRaise);
+    }
+
+    leg.raiseLimitLine.visible = true;
+    leg.raiseLimitLine.geometry.setFromPoints(RAISE_LIMIT_POINTS);
+    const material = leg.raiseLimitLine.material;
+    if (!Array.isArray(material)) {
+        (material as LineBasicMaterial).color.setHex(
+            exceeded ? DEBUG_RAISE_LIMIT_EXCEEDED_COLOR : DEBUG_RAISE_LIMIT_COLOR,
+        );
+    }
 }
 
 function collectDebugObject(

@@ -120,6 +120,12 @@ export class playerController {
     activeKinematicCollider: KinematicColliderEntry | null = null;
     /** 当前站立的动态刚体。 */
     activeDynamicBody: DynamicBody | null = null;
+    /** 移动系统本帧最终采用的地面支撑；供 IK 等插件与角色接地逻辑保持一致。 */
+    private hasGroundSupport = false;
+    private readonly groundSupportHit = {
+        point: new THREE.Vector3(),
+        normal: new THREE.Vector3(0, 1, 0),
+    };
     /** 异步 BVH 构建队列。 */
     private readonly bvhWorkerPool = new BvhWorkerPool();
 
@@ -445,12 +451,10 @@ export class playerController {
             this.playerCapsule = new THREE.Mesh(
                 new THREE.CapsuleGeometry(r, Math.max(segmentLength, 1e-6), 4, 8),
                 new THREE.MeshBasicMaterial({
-                    color: new THREE.Color(1, 0, 0),
+                    color: 0xc45cff,
                     wireframe: true,
                     transparent: true,
-                    opacity: 0.9,
-                    depthTest: true,
-                    depthWrite: false,
+                    opacity: 0.7,
                     side: THREE.DoubleSide,
                 }),
             );
@@ -575,6 +579,11 @@ export class playerController {
         this.colliders.scaleKinematicContent(source, ratio);
     }
 
+    /** 运行时平移已烘焙的运动学 mesh 碰撞（本地空间，不重建 BVH）。 */
+    translateKinematicColliderContent(source: THREE.Object3D, localOffset: THREE.Vector3): void {
+        this.colliders.translateKinematicContent(source, localOffset);
+    }
+
     /** 清除碰撞体；可按 motion 过滤。 */
     clearColliders(filter?: { motion?: MotionType }): void {
         this.colliders.clear(filter);
@@ -669,6 +678,7 @@ export class playerController {
 
     /** 设置落地状态。 */
     setOnGround(val: boolean) {
+        if (!val) this.clearGroundSupport(); // 离地时立即作废上一帧支撑。
         if (this.playerIsOnGround === val) return;
         this.playerIsOnGround = val;
         this.onGroundChange?.(val);
@@ -752,6 +762,19 @@ export class playerController {
         this.vehicle.setScale(vehicle, newScale);
     }
 
+    /** 动态修改单辆车的底盘离地间隙（scale=1 基准值）。 */
+    setVehicleClearance(vehicle: VehicleInstance, clearance: number) {
+        this.vehicle.setClearance(vehicle, clearance);
+    }
+
+    /** 动态修改单辆车的底盘碰撞盒三轴尺寸比例。 */
+    setVehicleChassisSizeScale(
+        vehicle: VehicleInstance,
+        sizeScale: { x?: number; y?: number; z?: number },
+    ) {
+        this.vehicle.setChassisSizeScale(vehicle, sizeScale);
+    }
+
     /** 将全部已加载车辆缩放到同一绝对 scale。 */
     setAllVehiclesScale(newScale: number) {
         this.vehicle.setScaleAll(newScale);
@@ -770,6 +793,7 @@ export class playerController {
         }
         this.playerVelocity.set(0, 0, 0);
         this.activeDynamicBody = null;
+        this.clearGroundSupport();
         this.playerCapsule.position.copy(position ?? this.initPos);
     }
 
@@ -783,6 +807,7 @@ export class playerController {
     syncMountedPlayer(vehicle: VehicleInstance) {
         const cap = this.playerCapsule;
         if (!cap) return;
+        this.clearGroundSupport();
         if (cap.parent !== vehicle.vehicleGroup) vehicle.vehicleGroup.attach(cap);
         cap.position.copy(vehicle.driverSeatPosition).multiplyScalar(vehicle.scale);
         cap.quaternion.setFromAxisAngle(this.upVector, vehicle.driverSeatRotation);
@@ -814,6 +839,8 @@ export class playerController {
     getIsFlying() { return this.isFlying; }
     /** 获取落地状态。 */
     getIsOnGround() { return this.playerIsOnGround; }
+    /** 获取移动系统本帧最终采用的地面支撑；返回对象只读使用，不要修改其中向量。 */
+    getGroundSupport() { return this.hasGroundSupport ? this.groundSupportHit : null; }
     /** 获取本帧实际使用的 delta（已钳制 + timeScale）。 */
     getCurrentDelta() { return this.currentDelta; }
     /** 获取控制器模式。 */
@@ -830,6 +857,16 @@ export class playerController {
     getActiveKinematicCollider() { return this.activeKinematicCollider; }
     /** 获取当前站立的动态刚体。 */
     getActiveDynamicBody() { return this.activeDynamicBody; }
+
+    /** 写入移动系统最终采用的地面点和世界空间法线。 */
+    setGroundSupport(point: THREE.Vector3, normal: THREE.Vector3) {
+        this.groundSupportHit.point.copy(point);
+        this.groundSupportHit.normal.copy(normal).normalize();
+        this.hasGroundSupport = true;
+    }
+
+    /** 清除已经失效的地面支撑。 */
+    clearGroundSupport() { this.hasGroundSupport = false; }
 
     /** 移除动态刚体。 */
     removeDynamicBody(body: DynamicBody) { this.dynamics.remove(body); }
@@ -864,9 +901,17 @@ export class playerController {
 
     // --- 相机参数 ---
     /** 设置相机最近距。 */
-    setMinCamDistance(dist: number) { this.cam.minDist = dist * this.playerModelConfig.scale; }
+    setMinCamDistance(dist: number) {
+        this.cam.minDist = dist * this.playerModelConfig.scale;
+        this.cam.originMaxDist = Math.max(this.cam.originMaxDist, this.cam.minDist);
+        this.cam.maxDist = Math.max(this.cam.maxDist, this.cam.minDist);
+        this.controls.minDistance = this.cam.minDist;
+    }
     /** 设置相机最远距。 */
-    setMaxCamDistance(dist: number) { this.cam.maxDist = dist * this.playerModelConfig.scale; this.cam.originMaxDist = this.cam.maxDist; }
+    setMaxCamDistance(dist: number) {
+        this.cam.originMaxDist = Math.max(this.cam.minDist, dist * this.playerModelConfig.scale);
+        this.cam.maxDist = this.cam.originMaxDist;
+    }
     /** 设置相机看向点高度比例。 */
     setCamLookAtHeightRatio(ratio: number) { this.cam.lookAtHeightRatio = ratio; }
     /** 设置相机过肩视角横向偏移比例。 */
@@ -875,7 +920,7 @@ export class playerController {
     /** 设置鼠标模式。 */
     setThirdMouseMode(mode: 0 | 1 | 2 | 3 | 4 | 5) { this.cam.mouseMode = mode; this.cam.setPointerLock(); }
     /** 设置缩放开关。 */
-    setEnableZoom(enable: boolean) { this.cam.zoomEnabled = enable; this.controls.enableZoom = enable; }
+    setEnableZoom(enable: boolean) { this.cam.setZoomEnabled(enable); }
 
     // --- 调试 ---
     /** 切换静态碰撞线框。 */

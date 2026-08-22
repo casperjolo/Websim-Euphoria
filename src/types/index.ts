@@ -372,6 +372,16 @@ export type VehicleInstance = {
     };
     /** 底盘碰撞盒半边长（底盘局部坐标）。 */
     halfExtents: THREE.Vector3;
+    /** 当前盒底相对轮胎触地点的高度，使用 scale=1 基准值。 */
+    chassisClearance: number;
+    /** 车身顶面相对轮胎触地点的高度，使用 scale=1 基准值。 */
+    chassisTopClearance: number;
+    /** 底盘碰撞盒的 X 轴尺寸比例。 */
+    chassisSizeScaleX: number;
+    /** 底盘碰撞盒的 Y 轴尺寸比例。 */
+    chassisSizeScaleY: number;
+    /** 底盘碰撞盒的 Z 轴尺寸比例。 */
+    chassisSizeScaleZ: number;
     /** 最高速度（km/h）。 */
     maxSpeed: number;
     /** 加速度（m/s²）。 */
@@ -413,6 +423,8 @@ export type KinematicColliderEntry = {
     mesh: THREE.Mesh;
     /**相对建造时几何的额外均匀缩放。 */
     contentScale: number;
+    /** 相对建造时几何的额外本地位移。 */
+    contentOffset: THREE.Vector3;
     /** 上一帧世界矩阵。 */
     prevWorldMatrix: THREE.Matrix4;
     /** 本帧位移增量。 */

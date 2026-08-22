@@ -46,6 +46,7 @@
             }
 
             .hint-text {
+                min-width: 96px;
                 color: #e6eef6;
                 font-size: 13px;
             }
@@ -103,9 +104,13 @@
                 border-radius: 8px;
                 font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
                 font-size: 13px;
-                white-space: nowrap;
+                line-height: 1.45;
+                text-align: center;
                 backdrop-filter: blur(4px);
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+            }
+            #top-notice .credit-line {
+                white-space: nowrap;
             }
             #top-notice a {
                 color: #79c0ff;
@@ -128,42 +133,47 @@
         <div id="container"></div>
 
         <div id="top-notice">
-            Character Model:
-            <a href="https://quaternius.itch.io/universal-animation-library" target="_blank" rel="noopener noreferrer">
-                Universal Animation Library
-            </a>
-            · Vehicle:
-            <a href="https://sketchfab.com/3d-models/low-poly-cyberpunk-suv-dc48eaca64ee4d628403ca8464964780" target="_blank" rel="noopener noreferrer">
-                Low-poly cyberpunk SUV
-            </a>
-            by
-            <a href="https://sketchfab.com/vdv77" target="_blank" rel="noopener noreferrer">Boris731</a>
-            (CC BY 4.0)
+            <div class="credit-line">
+                Character Model:
+                <a href="https://quaternius.itch.io/universal-animation-library" target="_blank" rel="noopener noreferrer">Universal Animation Library</a>
+            </div>
+            <div class="credit-line">
+                Vehicle:
+                <a href="https://sketchfab.com/3d-models/low-poly-cyberpunk-suv-dc48eaca64ee4d628403ca8464964780" target="_blank" rel="noopener noreferrer">Low-poly cyberpunk SUV</a>
+            </div>
         </div>
 
         <div class="hud" role="note" aria-label="Controls">
             <div class="row hint-group">
-                <span class="hint-text">Move:</span>
+                <span class="hint-text">Move / Drive:</span>
                 <kbd>W</kbd>
                 <kbd>A</kbd>
                 <kbd>S</kbd>
                 <kbd>D</kbd>
             </div>
             <div class="row hint-group">
-                <span class="hint-text">Sprint:</span>
+                <span class="hint-text">Sprint / Drift:</span>
                 <kbd>Shift</kbd>
             </div>
             <div class="row hint-group">
-                <span class="hint-text">Jump:</span>
+                <span class="hint-text">Jump / Brake:</span>
                 <kbd>Space</kbd>
+            </div>
+            <div class="row hint-group">
+                <span class="hint-text">Enter / Exit:</span>
+                <kbd>E</kbd>
             </div>
             <div class="row hint-group">
                 <span class="hint-text">Toggle View:</span>
                 <kbd>V</kbd>
             </div>
             <div class="row hint-group">
-                <span class="hint-text">Toggle Fly Mode:</span>
+                <span class="hint-text">Toggle Fly:</span>
                 <kbd>F</kbd>
+            </div>
+            <div class="row hint-group">
+                <span class="hint-text">Reset Vehicle:</span>
+                <kbd>R</kbd>
             </div>
         </div>
         <script type="module" src="./showcase.js"></script>
