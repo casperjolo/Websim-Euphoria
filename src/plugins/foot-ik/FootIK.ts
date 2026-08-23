@@ -50,6 +50,9 @@ type FootIKGroundHit = {
     normal: Vector3;
 };
 
+/** Foot IK 不参与地面检测的动态刚体形状。 */
+const FOOT_IK_IGNORED_DYNAMIC_KINDS = ["sphere"] as const;
+
 /** 根据角色动画和地面高度修正脚部姿态的控制器插件。 */
 export class FootIK {
     /** 插件名称。 */
@@ -64,10 +67,10 @@ export class FootIK {
     private debug: boolean;
 
     // IK 距离、角度和脚掌贴合配置。
-    private maxPelvisDrop = 36;
-    private maxPelvisRaise = 36;
-    private maxFootRaise = 36;
-    private maxFootDrop = 36;
+    private maxPelvisDrop = 50;
+    private maxPelvisRaise = 50;
+    private maxFootRaise = 50;
+    private maxFootDrop = 50;
     private soleHalfWidth = 7;
     private soleToeExtend = 7;
     private soleHeelExtend = 3;
@@ -484,14 +487,18 @@ export class FootIK {
         const groundOffset = this.getFootGroundOffset(leg);
         const liftAmount = Math.max(0, groundOffset);
         const pelvisTargetOffset = this.getAlignedFootTargetOffset(leg, footWorld);
-        if (pelvisTargetOffset <= this.maxFootRaise) {
-            leg.hasPelvisTarget = true;
-            leg.pelvisTarget
-                .copy(footWorld)
-                .addScaledVector(this.up, Math.max(pelvisTargetOffset, -this.maxFootDrop));
+        // 支撑脚下探超过最大范围时，本帧交还给原动画。
+        if (leg.planted && pelvisTargetOffset < -this.maxFootDrop) {
+            leg.weight = 0;
+            leg.plantedWeight = 0;
+            leg.offsetY = 0;
+            leg.movePenetrating = false;
+            leg.smoothedTarget.copy(footWorld);
+            this.updateFootDebug(leg, hit.point);
+            return;
         }
         const targetOffset = leg.planted
-            ? Math.max(pelvisTargetOffset, -this.maxFootDrop)
+            ? pelvisTargetOffset
             : Math.max(0, pelvisTargetOffset);
         // 命中面超过脚部最大上抬范围时，本帧交还给原动画。
         if (targetOffset > this.maxFootRaise) {
@@ -513,6 +520,15 @@ export class FootIK {
             leg.smoothedTarget.copy(footWorld);
             this.updateFootDebug(leg, hit.point);
             return;
+        }
+        if (
+            pelvisTargetOffset <= this.maxFootRaise
+            && pelvisTargetOffset >= -this.maxFootDrop
+        ) {
+            leg.hasPelvisTarget = true;
+            leg.pelvisTarget
+                .copy(footWorld)
+                .addScaledVector(this.up, pelvisTargetOffset);
         }
 
         // 支撑脚允许在限制范围内双向贴地；摆动脚只在穿透时上抬。
@@ -781,8 +797,11 @@ export class FootIK {
         const capsule = this.player?.playerCapsule;
         if (!capsule) return null;
 
+        const activeBody = this.player?.getActiveDynamicBody?.();
+        const ignoreSupport = activeBody?.kind === "sphere";
+
         const getGroundSupport = this.player?.getGroundSupport;
-        if (getGroundSupport) {
+        if (getGroundSupport && !ignoreSupport) {
             const support = getGroundSupport.call(this.player);
             return support
                 ? { point: support.point, normal: support.normal }
@@ -806,7 +825,11 @@ export class FootIK {
             };
         }
 
-        const dynamicHit = this.player?.raycastDynamicGround?.(this.raycaster.ray.origin, 0.18);
+        const dynamicHit = this.player?.raycastDynamicGround?.(
+            this.raycaster.ray.origin,
+            0.18,
+            FOOT_IK_IGNORED_DYNAMIC_KINDS,
+        );
         if (!dynamicHit) return bestHit;
         const distance = y - dynamicHit.point.y;
         if (distance < this.raycaster.near || distance > this.raycaster.far) return bestHit;
@@ -1039,7 +1062,8 @@ export class FootIK {
             const sampleOffset = hit.point.y - sample.point.y;
             // 摆动脚只做防穿透上抬，不向下吸附。
             if (!leg.planted && sampleOffset < 0) continue;
-            // 超出最大上抬范围的点不参与二次接触校正。
+            // 超出脚部 IK 范围的点不参与二次接触校正。
+            if (leg.planted && sampleOffset < -this.maxFootDrop) continue;
             if (sampleOffset > this.maxFootRaise) continue;
 
             anyContactHit = true;
@@ -1047,8 +1071,10 @@ export class FootIK {
         }
 
         if (!anyContactHit) return;
+        if (leg.planted && contactOffset < -this.maxFootDrop) return;
+        if (contactOffset > this.maxFootRaise) return;
         contactOffset = leg.planted
-            ? Math.max(contactOffset, -this.maxFootDrop)
+            ? contactOffset
             : MathUtils.clamp(contactOffset, 0, this.maxFootRaise);
         if (Math.abs(contactOffset) <= this.snapEpsilon) return;
 

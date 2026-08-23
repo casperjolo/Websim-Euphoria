@@ -106,24 +106,26 @@ function collectWorldSpaceGeometries(sources: THREE.Object3D[]): THREE.BufferGeo
     return collected;
 }
 
-/** 相对 source 本地空间收集子 Mesh 几何，便于跟随 matrixWorld（跳过 name === "capsule"）。 */
-function collectLocalSpaceGeometries(source: THREE.Object3D): THREE.BufferGeometry[] {
-    const collected: THREE.BufferGeometry[] = [];
-    const invSource = new THREE.Matrix4().copy(source.matrixWorld).invert();
-    source.traverse(c => {
-        const m = c as THREE.Mesh;
-        if (!m?.isMesh || !m.geometry || c.name === "capsule" || isExcludedFromCollider(c)) return;
-        try {
-            let geom = (m.geometry as THREE.BufferGeometry).clone();
-            geom.applyMatrix4(new THREE.Matrix4().multiplyMatrices(invSource, m.matrixWorld));
-            if (geom.index) geom = geom.toNonIndexed();
-            const safe = ensureAttributesMinimal(geom);
-            if (safe) collected.push(safe);
-        } catch (e) {
-            console.warn("处理运动学网格出错：", m, e);
-        }
-    });
-    return collected;
+const _rtcTranslation = new THREE.Matrix4();
+const _rtcCenter = new THREE.Vector3();
+
+/**
+ * 把合并后的几何收到包围盒中心附近，避免大坐标留在 Float32 顶点里。
+ * 返回平移到原点的中心，调用方需把它编进 bakeInverse。
+ */
+function recenterGeometry(geometry: THREE.BufferGeometry, target: THREE.Vector3): THREE.Vector3 {
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox;
+    if (!box || box.isEmpty()) {
+        target.set(0, 0, 0);
+        return target;
+    }
+    box.getCenter(target);
+    if (target.lengthSq() === 0) return target;
+    geometry.translate(-target.x, -target.y, -target.z);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    return target;
 }
 
 /**
@@ -154,6 +156,8 @@ function makeDebugMesh(geometry: THREE.BufferGeometry, localSpace: boolean): THR
 export type BuiltMeshCollider = {
     mesh: THREE.Mesh;
     geometry: THREE.BufferGeometry;
+    /** 运动学烘焙：inv(source.matrixWorld) * T(rtcCenter)。*/
+    bakeInverse?: THREE.Matrix4;
 };
 
 /**
@@ -174,12 +178,14 @@ export function buildStaticMergedMesh(sources: THREE.Object3D | THREE.Object3D[]
 }
 
 /**
- * 合并 source 为本地空间运动学碰撞网格。
- * 仅合并几何，不挂 BVH；调用方需再走 attachBoundsTree，并每帧同步 follow 的 matrixWorld。
+ * 合并 source 为运动学碰撞网格。
+ * 先乘 matrixWorld 落到当前世界 / 局部 ENU，再绕包围盒中心收成小坐标；
+ * 调用方需再走 attachBoundsTree，并每帧用
+ * source.matrixWorld * bakeInverse 跟随。
  */
 export function buildKinematicMergedMesh(source: THREE.Object3D): BuiltMeshCollider | null {
     source.updateMatrixWorld(true);
-    let collected = collectLocalSpaceGeometries(source);
+    let collected = collectWorldSpaceGeometries([source]);
     if (!collected.length) return null;
     collected = unifiedAttribute(collected);
     const merged = BufferGeometryUtils.mergeGeometries(collected, false);
@@ -187,10 +193,13 @@ export function buildKinematicMergedMesh(source: THREE.Object3D): BuiltMeshColli
         console.error("合并运动学几何失败");
         return null;
     }
+    const rtcCenter = recenterGeometry(merged, _rtcCenter);
+    const bakeInverse = new THREE.Matrix4().copy(source.matrixWorld).invert();
+    bakeInverse.multiply(_rtcTranslation.makeTranslation(rtcCenter.x, rtcCenter.y, rtcCenter.z));
     const mesh = makeDebugMesh(merged, true);
-    mesh.matrix.copy(source.matrixWorld);
+    mesh.matrix.copy(source.matrixWorld).multiply(bakeInverse);
     mesh.updateMatrixWorld(true);
-    return { mesh, geometry: merged };
+    return { mesh, geometry: merged, bakeInverse };
 }
 
 /**

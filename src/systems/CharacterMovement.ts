@@ -297,6 +297,10 @@ export class CharacterMovement {
         // 在 IK 执行前缓存本帧最终接地结果。
         this.updateGroundSupport(groundPoint, bestHit, dynamicHit, usedShapeGround);
 
+        // 移动结束后刷新调试体，使地面射线/体积传感区与胶囊同步。
+        c.playerCapsule.updateMatrixWorld(true);
+        this.debug.refreshTransforms();
+
         // —— 角色朝向（第三人称 / 飞行） ——
         if (!c.isFirstPerson) {
             const camDirFlat = c.camDir.clone().setY(0).normalize().negate();
@@ -328,7 +332,7 @@ export class CharacterMovement {
             c.camera.position.add(lookTarget);
             c.controls.target.copy(lookTarget);
             c.controls.update();
-            // 滚轮缩放修改maxDist。
+            c.cam.applyFlySprintMaxDist();
             c.cam.updateWithRaycast(c.controls.target);
         }
 

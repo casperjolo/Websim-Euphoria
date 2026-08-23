@@ -5,6 +5,9 @@ export default defineConfig({
     base: "/three-player-controller/",
     root: resolve(__dirname, "example"),
     server: { host: true },
+    optimizeDeps: {
+        exclude: ["tellux", "three-mesh-bvh"],
+    },
     build: {
         outDir: resolve(__dirname, "docs"),
         emptyOutDir: true,

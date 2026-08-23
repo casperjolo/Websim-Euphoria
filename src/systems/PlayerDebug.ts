@@ -6,7 +6,6 @@ const HIT_COLOR = 0x66ff66;
 const FAR_HIT_COLOR = 0xffcc33;
 const MISS_COLOR = 0xff5555;
 const SENSOR_IDLE_COLOR = 0x45d7ff;
-const SENSOR_AXIS = new THREE.Vector3(0, 1, 0);
 
 /** 绘制玩家胶囊与地面探测结果。 */
 export class PlayerDebug {
@@ -17,7 +16,6 @@ export class PlayerDebug {
     private groundProbeNear = 0;
     private groundRay: THREE.Line | null = null;
     private groundHit: THREE.Mesh | null = null;
-    private groundProbeOrigin = new THREE.Vector3();
     private groundProbePoint = new THREE.Vector3();
     private hasGroundSensor = false;
     private groundSensorActive = false;
@@ -25,10 +23,11 @@ export class PlayerDebug {
     private groundSensorMaxDistance = 0;
     private groundSensorRadius = 0;
     private groundSensor: THREE.Mesh | null = null;
-    private groundSensorStart = new THREE.Vector3();
-    private groundSensorDown = new THREE.Vector3(0, -1, 0);
+    private readonly probeLocalPoint = new THREE.Vector3();
+    private readonly capsuleLocalDown = new THREE.Vector3(0, -1, 0);
+    private debugRoot: THREE.Group | null = null;
 
-    constructor(private readonly ctrl: playerController) {}
+    constructor(private readonly ctrl: playerController) { }
 
     /** 返回人物调试开关。 */
     isVisible(): boolean {
@@ -58,6 +57,15 @@ export class PlayerDebug {
         if (showSensor) this.renderGroundSensor();
     }
 
+    /**
+     * 移动结束后刷新调试体姿态，使射线/体积传感区跟随胶囊实时位置。
+     */
+    refreshTransforms(): void {
+        if (!this.visible || this.ctrl.controllerMode !== 0) return;
+        if (this.hasGroundProbe) this.renderGroundProbe();
+        if (this.hasGroundSensor) this.renderGroundSensor();
+    }
+
     /** 写入移动系统本帧实际使用的中心地面探测结果。 */
     updateGroundProbe(
         origin: THREE.Vector3,
@@ -67,18 +75,16 @@ export class PlayerDebug {
     ): void {
         this.hasGroundProbe = true;
         this.groundProbeHasHit = hitPoint !== null;
-        this.groundProbeOrigin.copy(origin);
         this.groundProbeMaxDistance = Math.max(0, maxDistance);
         this.groundProbeNear = Math.max(0, near);
         if (hitPoint) this.groundProbePoint.copy(hitPoint);
         else this.groundProbePoint.copy(origin).y -= this.groundProbeMaxDistance;
-        if (this.visible && this.ctrl.controllerMode === 0) this.renderGroundProbe();
     }
 
     /** 写入胶囊下方体积地面传感区的当前状态。 */
     updateGroundSensor(
-        start: THREE.Vector3,
-        down: THREE.Vector3,
+        _start: THREE.Vector3,
+        _down: THREE.Vector3,
         maxDistance: number,
         radius: number,
         active: boolean,
@@ -87,11 +93,8 @@ export class PlayerDebug {
         this.hasGroundSensor = maxDistance > 0 && radius > 0;
         this.groundSensorActive = active;
         this.groundSensorHasHit = hasHit;
-        this.groundSensorStart.copy(start);
-        this.groundSensorDown.copy(down).normalize();
         this.groundSensorMaxDistance = Math.max(0, maxDistance);
         this.groundSensorRadius = Math.max(0, radius);
-        if (this.visible && this.ctrl.controllerMode === 0) this.renderGroundSensor();
     }
 
     /** 清除当前地面探测显示。 */
@@ -105,39 +108,56 @@ export class PlayerDebug {
 
     /** 释放人物调试几何与材质。 */
     dispose(): void {
-        if (this.groundRay) {
-            this.groundRay.removeFromParent();
-            this.groundRay.geometry.dispose();
-            (this.groundRay.material as THREE.Material).dispose();
-            this.groundRay = null;
+        if (this.debugRoot) {
+            this.debugRoot.removeFromParent();
+            this.debugRoot.traverse((obj) => {
+                const mesh = obj as THREE.Mesh;
+                mesh.geometry?.dispose();
+                const mat = mesh.material;
+                if (mat) {
+                    if (Array.isArray(mat)) mat.forEach(m => m.dispose());
+                    else mat.dispose();
+                }
+            });
+            this.debugRoot = null;
         }
-        if (this.groundHit) {
-            this.groundHit.removeFromParent();
-            this.groundHit.geometry.dispose();
-            (this.groundHit.material as THREE.Material).dispose();
-            this.groundHit = null;
-        }
-        if (this.groundSensor) {
-            this.groundSensor.removeFromParent();
-            this.groundSensor.geometry.dispose();
-            (this.groundSensor.material as THREE.Material).dispose();
-            this.groundSensor = null;
-        }
+        this.groundRay = null;
+        this.groundHit = null;
+        this.groundSensor = null;
         this.hasGroundProbe = false;
         this.hasGroundSensor = false;
     }
 
+    private ensureDebugRoot(): THREE.Group | null {
+        const capsule = this.ctrl.playerCapsule;
+        if (!capsule) return null;
+
+        if (!this.debugRoot) {
+            this.debugRoot = new THREE.Group();
+            this.debugRoot.name = "playerDebugRoot";
+            capsule.add(this.debugRoot);
+        } else if (this.debugRoot.parent !== capsule) {
+            capsule.add(this.debugRoot);
+        }
+        return this.debugRoot;
+    }
+
     /** 按当前探测结果更新线段、命中点和颜色。 */
     private renderGroundProbe(): void {
-        this.ensureGroundProbeObjects();
+        const capsule = this.ctrl.playerCapsule;
+        const root = this.ensureDebugRoot();
+        if (!capsule || !root) return;
+
+        this.ensureGroundProbeObjects(root);
         if (!this.groundRay || !this.groundHit) return;
 
+        this.worldToCapsuleLocal(this.groundProbePoint, this.probeLocalPoint);
         const positions = this.groundRay.geometry.getAttribute("position") as THREE.BufferAttribute;
-        positions.setXYZ(0, this.groundProbeOrigin.x, this.groundProbeOrigin.y, this.groundProbeOrigin.z);
-        positions.setXYZ(1, this.groundProbePoint.x, this.groundProbePoint.y, this.groundProbePoint.z);
+        positions.setXYZ(0, 0, 0, 0);
+        positions.setXYZ(1, this.probeLocalPoint.x, this.probeLocalPoint.y, this.probeLocalPoint.z);
         positions.needsUpdate = true;
 
-        const distance = this.groundProbeOrigin.y - this.groundProbePoint.y;
+        const distance = capsule.position.y - this.groundProbePoint.y;
         const hitInRange = this.groundProbeHasHit
             && distance >= this.groundProbeNear
             && distance <= this.groundProbeMaxDistance;
@@ -147,21 +167,25 @@ export class PlayerDebug {
 
         this.groundHit.visible = this.groundProbeHasHit;
         if (this.groundProbeHasHit) {
-            this.groundHit.position.copy(this.groundProbePoint);
+            this.groundHit.position.copy(this.probeLocalPoint);
             this.groundHit.scale.setScalar(Math.max(0.001, this.ctrl.playerModelConfig.scale));
             (this.groundHit.material as THREE.MeshBasicMaterial).color.setHex(color);
         }
     }
 
-    /** 按当前状态更新体积地面传感区。 */
+    /** 按当前状态更新体积地面传感区（锚定在胶囊 segment.end）。 */
     private renderGroundSensor(): void {
-        this.ensureGroundSensorObject();
+        const capsule = this.ctrl.playerCapsule;
+        const root = this.ensureDebugRoot();
+        const segEnd = capsule?.capsuleInfo?.segment.end;
+        if (!capsule || !root || !segEnd) return;
+
+        this.ensureGroundSensorObject(root);
         if (!this.groundSensor) return;
 
         const distance = Math.max(this.groundSensorMaxDistance, 1e-6);
-        this.groundSensor.position.copy(this.groundSensorStart)
-            .addScaledVector(this.groundSensorDown, distance * 0.5);
-        this.groundSensor.quaternion.setFromUnitVectors(SENSOR_AXIS, this.groundSensorDown);
+        this.groundSensor.position.copy(segEnd).addScaledVector(this.capsuleLocalDown, distance * 0.5);
+        this.groundSensor.quaternion.identity();
         this.groundSensor.scale.set(this.groundSensorRadius, distance, this.groundSensorRadius);
 
         const material = this.groundSensor.material as THREE.MeshBasicMaterial;
@@ -174,8 +198,14 @@ export class PlayerDebug {
         this.groundSensor.visible = this.hasGroundSensor;
     }
 
+    private worldToCapsuleLocal(world: THREE.Vector3, target: THREE.Vector3): THREE.Vector3 {
+        target.copy(world);
+        this.ctrl.playerCapsule.worldToLocal(target);
+        return target;
+    }
+
     /** 延迟创建地面射线和命中标记。 */
-    private ensureGroundProbeObjects(): void {
+    private ensureGroundProbeObjects(root: THREE.Group): void {
         if (!this.groundRay) {
             this.groundRay = new THREE.Line(
                 new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
@@ -189,7 +219,9 @@ export class PlayerDebug {
             this.groundRay.name = "playerGroundRayDebug";
             this.groundRay.renderOrder = 30;
             this.groundRay.frustumCulled = false;
-            this.ctrl.scene.add(this.groundRay);
+            root.add(this.groundRay);
+        } else if (this.groundRay.parent !== root) {
+            root.add(this.groundRay);
         }
 
         if (!this.groundHit) {
@@ -206,19 +238,24 @@ export class PlayerDebug {
             this.groundHit.name = "playerGroundRayHitDebug";
             this.groundHit.renderOrder = 31;
             this.groundHit.frustumCulled = false;
-            this.ctrl.scene.add(this.groundHit);
+            root.add(this.groundHit);
+        } else if (this.groundHit.parent !== root) {
+            root.add(this.groundHit);
         }
     }
 
     /** 延迟创建体积地面传感区线框。 */
-    private ensureGroundSensorObject(): void {
-        if (this.groundSensor) return;
+    private ensureGroundSensorObject(root: THREE.Group): void {
+        if (this.groundSensor) {
+            if (this.groundSensor.parent !== root) root.add(this.groundSensor);
+            return;
+        }
         this.groundSensor = new THREE.Mesh(
             new THREE.CylinderGeometry(1, 1, 1, 16, 1, true),
             new THREE.MeshBasicMaterial({
                 color: SENSOR_IDLE_COLOR,
                 wireframe: true,
-                depthTest: true,
+                depthTest: false,
                 depthWrite: false,
                 transparent: true,
                 opacity: 0.4,
@@ -228,6 +265,6 @@ export class PlayerDebug {
         this.groundSensor.name = "playerGroundVolumeDebug";
         this.groundSensor.renderOrder = 29;
         this.groundSensor.frustumCulled = false;
-        this.ctrl.scene.add(this.groundSensor);
+        root.add(this.groundSensor);
     }
 }

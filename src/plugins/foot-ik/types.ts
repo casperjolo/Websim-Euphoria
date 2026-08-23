@@ -18,6 +18,9 @@ export type BoneRef = Bone | string;
 /** 左右脚标识。 */
 export type FootIKSide = "left" | "right";
 
+/** Foot IK 地面检测时忽略的动态刚体形状。 */
+export type FootIKIgnoredDynamicKind = "sphere" | "box";
+
 /** FootIK 使用的控制器字段；实际传入对象仍是 playerController。 */
 export type FootIKPlayer = {
     /** Three.js 场景。 */
@@ -27,12 +30,18 @@ export type FootIKPlayer = {
     /** 返回动态刚体列表；用于判断当前是否存在可参与脚底检测的动态地面。 */
     getDynamicBodies?: () => unknown[];
     /** 从世界坐标向下检测动态刚体，并过滤法线过陡、不可站立的表面。 */
-    raycastDynamicGround?: (origin: Vector3, minNormalY?: number) => {
+    raycastDynamicGround?: (
+        origin: Vector3,
+        minNormalY?: number,
+        excludeKinds?: readonly FootIKIgnoredDynamicKind[],
+    ) => {
         /** 动态刚体表面的世界空间命中点。 */
         point: Vector3;
         /** 命中面的世界空间单位法线。 */
         normal: Vector3;
     } | null;
+    /** 当前站立的动态刚体；站在球体上时 Foot IK 会忽略该支撑。 */
+    getActiveDynamicBody?: () => { kind: FootIKIgnoredDynamicKind } | null;
     /** 角色移动系统本帧最终采用的支撑点；可来自射线或体积探测。 */
     getGroundSupport?: () => {
         /** 控制器实际用于贴地的世界空间支撑点。 */
@@ -118,13 +127,13 @@ export type FootIKOptions = {
     debug?: boolean;
     /** 是否启用插件，默认 true。 */
     enabled?: boolean;
-    /** 骨盆最大下沉距离基准值（按 scale 缩放），默认 36。 */
+    /** 骨盆最大下沉距离基准值（按 scale 缩放），默认 50。 */
     maxPelvisDrop?: number;
-    /** 双脚同处高台面时的骨盆最大上抬距离基准值（按 scale 缩放），默认 36。 */
+    /** 双脚同处高台面时的骨盆最大上抬距离基准值（按 scale 缩放），默认 50。 */
     maxPelvisRaise?: number;
-    /** 脚部 IK 最大上抬距离基准值（按 scale 缩放），默认 36。 */
+    /** 脚部 IK 最大上抬距离基准值（按 scale 缩放）；超出时放弃 IK，默认 50。 */
     maxFootRaise?: number;
-    /** 支撑脚 IK 最大下探距离基准值（按 scale 缩放），默认 36。 */
+    /** 支撑脚 IK 最大下探距离基准值（按 scale 缩放）；超出时放弃 IK，默认 50。 */
     maxFootDrop?: number;
     /** 虚拟脚底左右半宽基准值（按 scale 缩放），默认 7。 */
     soleHalfWidth?: number;

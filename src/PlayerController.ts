@@ -12,7 +12,7 @@ import { InputSystem } from "./systems/InputSystem";
 import { VehicleSystem } from "./systems/VehicleSystem";
 import { DynamicBodySystem } from "./systems/DynamicBodySystem";
 import { ColliderRegistry } from "./systems/ColliderRegistry";
-import type { DynamicBody } from "./collision/DynamicBody";
+import type { DynamicBody, DynamicBodyKind } from "./collision/DynamicBody";
 import type { ColliderDesc, ColliderHandle } from "./collision/colliderDesc";
 import type { MotionType } from "./collision/CollisionWorld";
 import { applyCapsuleCollision, createCollisionTemps, type CollisionTemps } from "./utils/capsuleCollision";
@@ -871,8 +871,12 @@ export class playerController {
     /** 移除动态刚体。 */
     removeDynamicBody(body: DynamicBody) { this.dynamics.remove(body); }
     /** 从指定世界坐标向下查询动态刚体表面。 */
-    raycastDynamicGround(origin: THREE.Vector3, minNormalY?: number) {
-        return this.dynamics.raycastGround(origin, minNormalY);
+    raycastDynamicGround(
+        origin: THREE.Vector3,
+        minNormalY?: number,
+        excludeKinds?: readonly DynamicBodyKind[],
+    ) {
+        return this.dynamics.raycastGround(origin, minNormalY, excludeKinds);
     }
     /** 全部动态刚体。 */
     getDynamicBodies(): DynamicBody[] { return this.dynamics.list; }
@@ -911,6 +915,7 @@ export class playerController {
     setMaxCamDistance(dist: number) {
         this.cam.originMaxDist = Math.max(this.cam.minDist, dist * this.playerModelConfig.scale);
         this.cam.maxDist = this.cam.originMaxDist;
+        this.cam.clearFlySprintMaxDistBoost();
     }
     /** 设置相机看向点高度比例。 */
     setCamLookAtHeightRatio(ratio: number) { this.cam.lookAtHeightRatio = ratio; }

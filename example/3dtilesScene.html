@@ -72,33 +72,31 @@
                 gap: 6px;
             }
 
-            .model-credit {
+            #top-notice {
                 position: fixed;
-                top: 10px;
+                top: 12px;
                 left: 50%;
                 transform: translateX(-50%);
                 z-index: 9999;
-                font-size: 12px;
+                background: rgba(0, 0, 0, 0.45);
                 color: #e6eef6;
-                background: rgba(0, 0, 0, 0.35);
-                padding: 6px 12px;
-                border-radius: 999px;
+                padding: 7px 16px;
+                border-radius: 8px;
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+                font-size: 13px;
+                line-height: 1.45;
+                text-align: center;
                 backdrop-filter: blur(4px);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-                font-family:
-                    system-ui,
-                    -apple-system,
-                    "Segoe UI",
-                    Roboto,
-                    Arial;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
             }
-
-            .model-credit a {
-                color: #6ecbff;
+            #top-notice .credit-line {
+                white-space: nowrap;
+            }
+            #top-notice a {
+                color: #79c0ff;
                 text-decoration: none;
             }
-
-            .model-credit a:hover {
+            #top-notice a:hover {
                 text-decoration: underline;
             }
 
@@ -120,6 +118,25 @@
                 }
             }
 
+            #google-attributions {
+                position: fixed;
+                left: 88px;
+                bottom: 0;
+                z-index: 9998;
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 8px;
+                min-height: 48px;
+                max-width: min(520px, calc(100vw - 160px));
+                color: #e6eef6;
+                font: 12px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+            }
+
+            #google-attributions img {
+                height: 18px;
+            }
+
             @media (hover: none) and (pointer: coarse), (max-width: 768px) {
                 .hud,
                 .source {
@@ -134,23 +151,19 @@
 
         <div class="hud" role="note" aria-label="Controls">
             <div class="row hint-group">
-                <span class="hint-text">Move / Drive:</span>
+                <span class="hint-text">Move:</span>
                 <kbd>W</kbd>
                 <kbd>A</kbd>
                 <kbd>S</kbd>
                 <kbd>D</kbd>
             </div>
             <div class="row hint-group">
-                <span class="hint-text">Sprint / Drift:</span>
+                <span class="hint-text">Sprint:</span>
                 <kbd>Shift</kbd>
             </div>
             <div class="row hint-group">
-                <span class="hint-text">Jump / Brake:</span>
+                <span class="hint-text">Jump:</span>
                 <kbd>Space</kbd>
-            </div>
-            <div class="row hint-group">
-                <span class="hint-text">Enter / Exit:</span>
-                <kbd>E</kbd>
             </div>
             <div class="row hint-group">
                 <span class="hint-text">Toggle View:</span>
@@ -160,24 +173,25 @@
                 <span class="hint-text">Toggle Fly:</span>
                 <kbd>F</kbd>
             </div>
-            <div class="row hint-group">
-                <span class="hint-text">Reset Vehicle:</span>
-                <kbd>R</kbd>
+        </div>
+
+        <div id="top-notice">
+            <div class="credit-line">
+                Powered by:
+                <a href="https://mapsplatform.google.com/resources/blog/create-immersive-3d-map-experiences-photorealistic-3d-tiles/" target="_blank" rel="noopener noreferrer">Google Photorealistic 3D Tiles</a>
+                &
+                <a href="https://ion.cesium.com/" target="_blank" rel="noopener noreferrer">Cesium Ion</a>
+            </div>
+            <div class="credit-line">
+                3D Tiles Loader:
+                <a href="https://github.com/NASA-AMMOS/3DTilesRendererJS" target="_blank" rel="noopener noreferrer">3DTilesRendererJS</a>
+                ·
+                Globe:
+                <a href="https://github.com/cyanfish-x/tellux" target="_blank" rel="noopener noreferrer">Tellux</a>
             </div>
         </div>
 
-        <div class="model-credit">
-            Powered by
-            <a href="https://mapsplatform.google.com/resources/blog/create-immersive-3d-map-experiences-photorealistic-3d-tiles/">Google Photorealistic 3D Tiles</a>&<a href="https://ion.cesium.com/"
-                >Cesium Ion</a
-            >
-            <br />
-            3D Tiles Loader -
-            <a href="https://github.com/NASA-AMMOS/3DTilesRendererJS">3DTilesRendererJS</a>
-            <br />
-            Collider generation -
-            <a href="https://github.com/hh-hang/collider-forge" target="_blank" rel="noopener noreferrer">collider-forge</a>
-        </div>
+        <aside id="google-attributions" aria-label="Map data attributions"></aside>
 
         <a class="source" href="https://github.com/hh-hang/three-player-controller/blob/master/example/3dtilesScene.js" target="_blank" rel="noopener noreferrer">
             <img src="./img/source.svg" alt="" />

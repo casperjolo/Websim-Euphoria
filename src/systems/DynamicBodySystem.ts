@@ -7,7 +7,7 @@ import { ContactManifold } from "../collision/contacts/ContactManifold";
 import { contactSkinForExtent, type RawContact } from "../collision/contacts/ContactPoint";
 import { reduceContacts } from "../collision/contacts/contactReducer";
 import { ContactImpulseSolver } from "../collision/solver/ContactImpulseSolver";
-import { DynamicBody } from "../collision/DynamicBody";
+import { DynamicBody, type DynamicBodyKind } from "../collision/DynamicBody";
 import {
     collectSphereVsMeshContacts,
     collideSphereVsObb,
@@ -311,11 +311,16 @@ export class DynamicBodySystem {
     }
 
     /** 从指定世界坐标向下查询最高的动态表面。 */
-    raycastGround(origin: THREE.Vector3, minNormalY = SUPPORT_Y): DynamicGroundHit | null {
+    raycastGround(
+        origin: THREE.Vector3,
+        minNormalY = SUPPORT_Y,
+        excludeKinds?: readonly DynamicBodyKind[],
+    ): DynamicGroundHit | null {
         let bestY = -Infinity;
         let bestBody: DynamicBody | null = null;
 
         for (const body of this.list) {
+            if (excludeKinds?.includes(body.kind)) continue;
             let hit = false;
             if (isBoxBody(body)) hit = this.raycastBoxGround(origin, body, minNormalY);
             else if (isSphereBody(body)) hit = this.raycastSphereGround(origin, body, minNormalY);

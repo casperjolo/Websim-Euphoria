@@ -419,12 +419,14 @@ export type VehicleWheelColliderUserData = {
 export type KinematicColliderEntry = {
     /** 原始物体。 */
     source: THREE.Object3D;
-    /** BVH 网格，使用本地空间几何。 */
+    /** BVH 网格；顶点是世界烘焙后绕 RTC 中心的小坐标。 */
     mesh: THREE.Mesh;
     /**相对建造时几何的额外均匀缩放。 */
     contentScale: number;
-    /** 相对建造时几何的额外本地位移。 */
+    /** 相对 source 本地空间的额外位移。 */
     contentOffset: THREE.Vector3;
+    /** inv(source.matrixWorld_bake) * T(rtcCenter)；预置 mesh 时为单位阵。 */
+    bakeInverse: THREE.Matrix4;
     /** 上一帧世界矩阵。 */
     prevWorldMatrix: THREE.Matrix4;
     /** 本帧位移增量。 */

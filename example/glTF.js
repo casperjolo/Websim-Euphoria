@@ -995,13 +995,13 @@ function initGUI() {
     const movementFolder = characterFolder.addFolder("Movement");
     movementFolder.add(params, "gravity", -6000, 0, 50).name("Gravity").decimals(0).onChange((value) => player?.setGravity(value));
     movementFolder.add(params, "jumpHeight", 0, 2000, 10).name("Jump Height").decimals(0).onChange((value) => player?.setJumpHeight(value));
-    movementFolder.add(params, "playerSpeed", 0, 10000, 10).name("Walk Speed").decimals(0).onChange((value) => player?.setPlayerSpeed(value));
-    movementFolder.add(params, "playerRunSpeed", 0, 10000, 10).name("Run Speed").decimals(0).onChange((value) => player?.setPlayerRunSpeed(value));
-    movementFolder.add(params, "flySpeed", 0, 5000, 10).name("Fly Speed").decimals(0).onChange((value) => player?.setPlayerFlySpeed(value));
-    movementFolder.add(params, "playerAcceleration", 1, 100, 1).name("Acceleration").decimals(0).onChange((value) => {
+    movementFolder.add(params, "playerSpeed", 0, 20000, 10).name("Walk Speed").decimals(0).onChange((value) => player?.setPlayerSpeed(value));
+    movementFolder.add(params, "playerRunSpeed", 0, 20000, 10).name("Run Speed").decimals(0).onChange((value) => player?.setPlayerRunSpeed(value));
+    movementFolder.add(params, "flySpeed", 0, 20000, 10).name("Fly Speed").decimals(0).onChange((value) => player?.setPlayerFlySpeed(value));
+    movementFolder.add(params, "playerAcceleration", 1, 20000, 1).name("Acceleration").decimals(0).onChange((value) => {
         if (player) player.playerAcceleration = value;
     });
-    movementFolder.add(params, "playerDeceleration", 1, 100, 1).name("Deceleration").decimals(0).onChange((value) => {
+    movementFolder.add(params, "playerDeceleration", 1, 20000, 1).name("Deceleration").decimals(0).onChange((value) => {
         if (player) player.playerDeceleration = value;
     });
     movementFolder.add(params, "timeScale", 0, 3, 0.05).name("Time Scale").decimals(2).onChange((value) => {

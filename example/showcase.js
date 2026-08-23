@@ -3,7 +3,7 @@ import {
     AmbientLight,
     BoxGeometry,
     BufferGeometry,
-    Clock,
+    Timer,
     Color,
     CylinderGeometry,
     DirectionalLight,
@@ -153,7 +153,8 @@ function tintMaterial(baseMat, hex) {
 }
 
 const scene = new Scene();
-const animClock = new Clock();
+const animTimer = new Timer();
+let scaledAnimTime = 0;
 
 let camera;
 let renderer;
@@ -184,6 +185,7 @@ async function init() {
     renderer.shadowMap.type = VSMShadowMap;
     renderer.setAnimationLoop(animate);
     container.appendChild(renderer.domElement);
+    animTimer.connect(document);
 
     // 帧率
     stats = new Stats();
@@ -1563,10 +1565,10 @@ function createDebugPanel() {
         rightFootPhase: "",
         rightFootLand: "--",
         rightFootIKWeight: 0,
-        maxPelvisRaise: roundedValue(footIKOptions.maxPelvisRaise, 36, 0),
-        maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 36, 0),
-        maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 36, 0),
-        maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 36, 0),
+        maxPelvisRaise: roundedValue(footIKOptions.maxPelvisRaise, 50, 0),
+        maxPelvisDrop: roundedValue(footIKOptions.maxPelvisDrop, 50, 0),
+        maxFootRaise: roundedValue(footIKOptions.maxFootRaise, 50, 0),
+        maxFootDrop: roundedValue(footIKOptions.maxFootDrop, 50, 0),
         soleHalfWidth: roundedValue(footIKOptions.soleHalfWidth, 7),
         soleToeExtend: roundedValue(footIKOptions.soleToeExtend, 7),
         soleHeelExtend: roundedValue(footIKOptions.soleHeelExtend, 3),
@@ -1578,6 +1580,8 @@ function createDebugPanel() {
     const applyFootIKOptions = (patch) => {
         footIK?.configure(patch);
     };
+
+    footIK?.setDebugEnabled(params.footIKDebug && params.footIKEnabled);
 
     const gui = new GUI({ title: "Showcase Controls", width: 320 });
     Object.assign(gui.domElement.style, {
@@ -1610,19 +1614,19 @@ function createDebugPanel() {
     movementFolder.add(params, "jumpHeight", 0, 2000, 10).name("Jump Height").decimals(0).onChange((value) => {
         player?.setJumpHeight(value);
     });
-    movementFolder.add(params, "playerSpeed", 0, 10000, 10).name("Walk Speed").decimals(0).onChange((value) => {
+    movementFolder.add(params, "playerSpeed", 0, 20000, 10).name("Walk Speed").decimals(0).onChange((value) => {
         player?.setPlayerSpeed(value);
     });
-    movementFolder.add(params, "playerRunSpeed", 0, 10000, 10).name("Run Speed").decimals(0).onChange((value) => {
+    movementFolder.add(params, "playerRunSpeed", 0, 20000, 10).name("Run Speed").decimals(0).onChange((value) => {
         player?.setPlayerRunSpeed(value);
     });
-    movementFolder.add(params, "flySpeed", 0, 5000, 10).name("Fly Speed").decimals(0).onChange((value) => {
+    movementFolder.add(params, "flySpeed", 0, 20000, 10).name("Fly Speed").decimals(0).onChange((value) => {
         player?.setPlayerFlySpeed(value);
     });
-    movementFolder.add(params, "playerAcceleration", 1, 100, 1).name("Acceleration").decimals(0).onChange((value) => {
+    movementFolder.add(params, "playerAcceleration", 1, 20000, 1).name("Acceleration").decimals(0).onChange((value) => {
         if (player) player.playerAcceleration = value;
     });
-    movementFolder.add(params, "playerDeceleration", 1, 100, 1).name("Deceleration").decimals(0).onChange((value) => {
+    movementFolder.add(params, "playerDeceleration", 1, 20000, 1).name("Deceleration").decimals(0).onChange((value) => {
         if (player) player.playerDeceleration = value;
     });
     movementFolder.add(params, "timeScale", 0, 3, 0.05).name("Time Scale").decimals(2).onChange((value) => {
@@ -1772,14 +1776,17 @@ function onResize() {
 }
 
 // 每帧调用
-function animate() {
-    const t = animClock.getElapsedTime();
-    updateGlowPortal(t);
+function animate(timestamp) {
+    animTimer.update(timestamp);
+    const rawDelta = Math.min(animTimer.getDelta(), 1 / 40);
     if (player) {
-        updateKinematicPlatforms(t);
+        scaledAnimTime += rawDelta * player.timeScale;
+        updateGlowPortal(scaledAnimTime);
+        updateKinematicPlatforms(scaledAnimTime);
         updateTrapScale();
-        player.update();
+        player.update(rawDelta);
     } else {
+        updateGlowPortal(animTimer.getElapsed());
         controls?.update();
     }
     updateFootIKDebugPanel();
@@ -1787,7 +1794,7 @@ function animate() {
     stats?.update();
 }
 
-// 更新 Foot IK 示例同款的左右脚运行状态。
+// 更新 Foot IK 运行状态只读字段。
 function updateFootIKDebugPanel() {
     if (!footIKDebugParams || !footIK) return;
     footIKDebugParams.leftFootPhase = footIK.getFootPhaseDebugText("left");

@@ -9,7 +9,7 @@ import {
 } from "../collision/colliderBuild";
 import type { KinematicColliderEntry } from "../types";
 
-let warnedDynamicMesh = false; 
+let warnedDynamicMesh = false;
 
 /**
  * 统一碰撞体注册：按 ColliderDesc 创建 / 移除，并维护运动学跟随。
@@ -155,7 +155,7 @@ export class ColliderRegistry {
         }
     }
 
-    /** 将 follow 世界矩阵（含 contentOffset / contentScale）写入碰撞 mesh。 */
+    /** 将 follow 世界矩阵（含 contentOffset / bakeInverse / contentScale）写入碰撞 mesh。 */
     private writeKinematicMeshMatrix(entry: KinematicColliderEntry): void {
         entry.source.updateMatrixWorld(true);
         entry.mesh.matrix.copy(entry.source.matrixWorld);
@@ -168,6 +168,7 @@ export class ColliderRegistry {
                 ),
             );
         }
+        entry.mesh.matrix.multiply(entry.bakeInverse);
         const s = entry.contentScale;
         if (s !== 1) {
             entry.mesh.matrix.scale(this._contentScale.set(s, s, s));
@@ -339,6 +340,7 @@ export class ColliderRegistry {
                 mesh,
                 contentScale: 1,
                 contentOffset: new THREE.Vector3(),
+                bakeInverse: new THREE.Matrix4(),
                 prevWorldMatrix: new THREE.Matrix4().copy(follow?.matrixWorld ?? mesh.matrixWorld),
                 deltaPos: new THREE.Vector3(),
                 deltaRotY: 0,
@@ -378,12 +380,19 @@ export class ColliderRegistry {
         }
 
         const followTarget = follow ?? root;
+        followTarget.updateMatrixWorld(true);
+        // verts 已在世界空间收心
+        const bakeInverse = new THREE.Matrix4()
+            .copy(followTarget.matrixWorld)
+            .invert()
+            .multiply(built.mesh.matrix);
         const entry: KinematicColliderEntry = {
             source: followTarget,
             mesh: built.mesh,
             contentScale: 1,
             contentOffset: new THREE.Vector3(),
-            prevWorldMatrix: new THREE.Matrix4().copy(followTarget.matrixWorld),
+            bakeInverse,
+            prevWorldMatrix: new THREE.Matrix4().copy(built.mesh.matrixWorld),
             deltaPos: new THREE.Vector3(),
             deltaRotY: 0,
             ready: !desc.useWorker, // Worker 时先不可用，onReady 再打开

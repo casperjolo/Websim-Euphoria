@@ -24,6 +24,8 @@ export class CameraSystem {
     private _springResult = new THREE.Vector3();
     private zoomWheelElement: HTMLElement | SVGElement | null = null;
     private readonly boundZoomWheel: EventListener = (event) => this.onZoomWheel(event as WheelEvent);
+    private _flySprintMaxDistBoost = false;
+    private _flySprintSavedMaxDist = 0;
 
     raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3()); // 相机碰撞射线
     centerRay = new THREE.Raycaster(); // 屏幕中心射线
@@ -180,9 +182,38 @@ export class CameraSystem {
     setZoomEnabled(enabled: boolean) {
         this.zoomEnabled = enabled;
         this.ctrl.controls.enableZoom = false;
+        this._flySprintMaxDistBoost = false;
         this.maxDist = enabled
             ? Math.max(this.maxDist, this.minDist)
             : this.originMaxDist;
+    }
+
+    /** 非弹簧第三人称飞行加速时拉远相机，否则恢复默认最远距离。 */
+    applyFlySprintMaxDist(): void {
+        const boost = !this.enableSpringCamera
+            && !this.ctrl.isFirstPerson
+            && this.ctrl.controllerMode === 0
+            && this.ctrl.isFlying
+            && this.ctrl.input.shift;
+
+        if (!this.zoomEnabled) {
+            this._flySprintMaxDistBoost = false;
+            this.maxDist = this.originMaxDist * (boost ? 2 : 1);
+            return;
+        }
+
+        if (boost && !this._flySprintMaxDistBoost) {
+            this._flySprintSavedMaxDist = this.maxDist;
+            this.maxDist *= 2;
+            this._flySprintMaxDistBoost = true;
+        } else if (!boost && this._flySprintMaxDistBoost) {
+            this.maxDist = this._flySprintSavedMaxDist;
+            this._flySprintMaxDistBoost = false;
+        }
+    }
+
+    clearFlySprintMaxDistBoost(): void {
+        this._flySprintMaxDistBoost = false;
     }
 
     /** 绑定到渲染画布，使普通鼠标与 Pointer Lock 状态共用同一滚轮入口。 */
