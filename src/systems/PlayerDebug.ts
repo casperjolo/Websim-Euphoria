@@ -168,7 +168,9 @@ export class PlayerDebug {
         this.groundHit.visible = this.groundProbeHasHit;
         if (this.groundProbeHasHit) {
             this.groundHit.position.copy(this.probeLocalPoint);
-            this.groundHit.scale.setScalar(Math.max(0.001, this.ctrl.playerModelConfig.scale));
+            const sy = Math.max(1e-6, capsule.scale.y || 1);
+            const localRadius = (capsule.capsuleInfo?.radius ?? 0) / sy;
+            this.groundHit.scale.setScalar(Math.max(1e-6, localRadius * 0.05));
             (this.groundHit.material as THREE.MeshBasicMaterial).color.setHex(color);
         }
     }

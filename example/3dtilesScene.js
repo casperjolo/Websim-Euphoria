@@ -610,6 +610,8 @@ async function ensurePlayer() {
     player.setPlayerCapsuleDebug(guiParams.playerCapsuleDebug);
     player.setColliderDebug(guiParams.colliderDebug);
     applySpeedMode(player);
+    // 启用实际太阳光、天空光和环境反射。
+    viewer.atmosphere?.setPostProcessMaterialLights?.(true);
     return player;
 }
 

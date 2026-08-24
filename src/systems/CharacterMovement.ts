@@ -196,12 +196,15 @@ export class CharacterMovement {
             }
         }
 
-        // 调试圆柱始终显示实际尺寸；是否启用回退和是否命中分别控制其状态颜色。
+        // 调试圆柱挂在 capsule 下，传局部尺寸，由父级 scale 变换到世界尺度。
+        const capsuleScale = c.playerCapsule.scale;
+        const sy = capsuleScale.y || 1;
+        const sxz = Math.max(1e-6, Math.min(capsuleScale.x || 1, capsuleScale.z || 1));
         this.debug.updateGroundSensor(
             this.groundProbeStart,
             this.groundProbeDown,
-            maxProbeDistance,
-            sensorRadius,
+            maxProbeDistance / sy,
+            sensorRadius / sxz,
             useShapeProbe,
             usedShapeGround,
         );
