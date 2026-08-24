@@ -1,9 +1,10 @@
 import * as THREE from "three";
-import type { RigidBody } from "@dimforge/rapier3d-compat";
+import type { BVHVehicleController } from "../utils/vehiclePhysics/BVHVehicleController";
+import type { VehicleRigidBody } from "../utils/vehiclePhysics/VehicleRigidBody";
 
 // ==================== 玩家配置 ====================
 
-/** 已加载的模型来源（玩家/车辆共用结构）。 */
+/** 已加载的模型来源（玩家使用）。 */
 export type LoadedModelSource = {
     /** 已加载的模型根节点。 */
     model: THREE.Object3D;
@@ -13,7 +14,7 @@ export type LoadedModelSource = {
     url?: never;
 };
 
-/** 旧版 glTF 模型路径来源（玩家/车辆共用结构）。 */
+/** 旧版 glTF 模型路径来源（玩家使用）。 */
 export type LegacyModelSource = {
     /**
      * 模型路径（GLB/GLTF）。
@@ -159,10 +160,8 @@ export type PlayerControllerOptions = {
     maxCamDistance?: number;
     /** 相机看向点高度比例（0 为底部，1 为顶部），默认 0.8。 */
     camLookAtHeightRatio?: number;
-    /** 静态碰撞体来源；未传时遍历整个场景。 */
-    staticCollider?: THREE.Object3D | THREE.Object3D[];
-    /** 初始化时注册的动态碰撞体。 */
-    dynamicCollider?: THREE.Object3D | THREE.Object3D[];
+    /** 初始化时批量创建的碰撞体；未传则不自动建碰撞，需事后 `addCollider`。 */
+    colliders?: import("../collision/colliderDesc").ColliderDesc[];
     /** 移动端是否显示虚拟控制 UI，默认 true。 */
     isShowMobileControls?: boolean;
     /** 移动端按钮显隐配置。 */
@@ -189,18 +188,118 @@ export type PlayerControllerOptions = {
 
 // ==================== 车辆配置 ====================
 
-/** 已加载的车辆模型来源。 */
-export type LoadedVehicleModelSource = LoadedModelSource;
+/** 已加载的车辆模型来源（车辆不使用动画片段）。 */
+export type LoadedVehicleModelSource = {
+    /** 已加载的模型根节点。 */
+    model: THREE.Object3D;
+    /** 已加载模型与旧模型路径不能同时使用。 */
+    url?: never;
+};
 
 /** 旧版 glTF 车辆模型来源。 */
-export type LegacyVehicleModelSource = LegacyModelSource;
+export type LegacyVehicleModelSource = {
+    /**
+     * 模型路径（GLB/GLTF）。
+     * @deprecated 请在外部加载模型，并传入 model。
+     */
+    url: string;
+    /** 模型路径与已加载模型不能同时使用。 */
+    model?: never;
+};
 
 /** 车辆模型来源。 */
 export type VehicleModelSource = LoadedVehicleModelSource | LegacyVehicleModelSource;
 
+/** 底盘碰撞盒与阻尼。 */
+export type VehicleChassisOptions = {
+    /** 密度，质量 = 碰撞盒体积 × 密度，默认 1。 */
+    density?: number;
+    /** 线阻尼，默认 0.05。 */
+    linearDamping?: number;
+    /** 角阻尼，默认 0.5。 */
+    angularDamping?: number;
+    /** 盒底相对轮胎触地点的高度（随 scale 缩放）；不传则盒底至少罩到轮心。 */
+    clearance?: number;
+    /**
+     * 相对自动 AABB 的尺寸比例，默认 1。
+     * X/Z 绕水平中心缩放；Y 从盒底向上缩放，不改变底盘离地高度。
+     */
+    sizeScale?: {
+        x?: number;
+        y?: number;
+        z?: number;
+    };
+};
+
+/** 悬挂与轮胎。 */
+export type VehicleSuspensionOptions = {
+    /** 静止长度（米，随 scale 缩放）；不传则取 max(轮直径 × 0.2, 静载下沉 × 1.2)。 */
+    restLength?: number;
+    /** 最大行程（米，随 scale 缩放），默认 0.35。 */
+    maxTravel?: number;
+    /** 刚度（质量归一化），默认 18。 */
+    stiffness?: number;
+    /** 压缩阻尼，默认 2.1。 */
+    compression?: number;
+    /** 回弹阻尼，默认 2.5。 */
+    relaxation?: number;
+    /** 单轮最大悬挂力，默认 6000。 */
+    maxForce?: number;
+    /** 纵向抓地，默认 8。 */
+    frictionSlip?: number;
+    /** 侧向摩擦刚度，默认 1。 */
+    sideFrictionStiffness?: number;
+    /** 侧向力对侧倾的影响，默认 0.12。 */
+    rollInfluence?: number;
+};
+
+/** 转向手感。 */
+export type VehicleSteeringOptions = {
+    /** 最大转向角（弧度），默认 π/5。 */
+    maxSteerAngle?: number;
+    /** 打满舵时间（秒），默认 0.45。 */
+    steerTime?: number;
+    /** 低速回正时间（秒），默认 0.55。 */
+    steerReturnTimeSlow?: number;
+    /** 高速回正时间（秒），默认 0.4。 */
+    steerReturnTimeFast?: number;
+    /** 最高车速时转向角相对满舵的比例，默认 0.3。 */
+    highSpeedSteerScale?: number;
+};
+
+/** 过弯抓地与手刹。 */
+export type VehicleGripOptions = {
+    /** 侧向加速度上限（g），默认 1.2。 */
+    maxG?: number;
+    /** 直线侧向摩擦，默认 1。 */
+    sideFrictionIdle?: number;
+    /** 满载前轮侧向摩擦下限，默认 0.55。 */
+    sideFrictionFrontMin?: number;
+    /** 满载后轮侧向摩擦下限，默认 0.45。 */
+    sideFrictionRearMin?: number;
+    /** 手刹后轮侧向摩擦，默认 0.35。 */
+    handbrakeRearFriction?: number;
+    /** 手刹时后驱比例，默认 0.65。 */
+    handbrakeRearDriveScale?: number;
+    /** 松手刹恢复时间（秒），默认 0.15。 */
+    handbrakeReleaseTime?: number;
+    /** 轴距相对车长比例，默认 0.55。 */
+    wheelbaseRatio?: number;
+};
+
+/** 动力。 */
+export type VehiclePowerOptions = {
+    /** 最高速度基准（km/h，按 scale 缩放），默认 100。 */
+    maxSpeed?: number;
+    /** 加速度基准（m/s²，按 scale 缩放），默认 5。 */
+    acceleration?: number;
+    /** 制动减速度基准（m/s²，按 scale 缩放），默认 5。 */
+    deceleration?: number;
+};
+
 /** 车辆模型、物理和驾驶参数。 */
 export type VehicleOptions = VehicleModelSource & {
-    /** 车辆初始世界坐标。 */
+    /** 车辆初始世界坐标；y 为最低轮底对齐高度。 */
     position: THREE.Vector3;
     /** 车轮节点名，顺序为左前、右前、左后、右后。 */
     wheelsNames: string[];
@@ -208,22 +307,33 @@ export type VehicleOptions = VehicleModelSource & {
     scale?: number;
     /** 驾驶位胶囊中心，使用车辆底盘局部坐标。 */
     driverSeatPosition: THREE.Vector3;
-    /** 驾驶位相对车辆底盘局部的水平旋转（弧度），默认 0。 */
+    /** 驾驶位相对底盘局部的水平旋转（弧度），默认 0。 */
     driverSeatRotation?: number;
-    /** 底盘高度比例，默认 0.2。 */
-    chassisRatio?: number;
-    /** 悬挂静止长度比例，默认 0.2。 */
-    suspensionRestLengthRatio?: number;
+    /** 模型绕 Y 旋转（弧度），默认 -π/2。 */
+    modelRotation?: number;
     /** 驾驶时镜头是否跟随车辆朝向，默认 true。 */
     followVehicleDirection?: boolean;
-    /** 车辆质量基准（kg，按 scale 缩放），默认 1500。 */
-    mass?: number;
-    /** 最高速度基准（km/h，按 scale 缩放），默认 300。 */
-    maxSpeed?: number;
-    /** 加速度基准（m/s²，按 scale 缩放），默认 8。 */
-    acceleration?: number;
-    /** 制动减速度基准（m/s²，按 scale 缩放），默认 8。 */
-    deceleration?: number;
+    /** 调试显示。 */
+    debug?: {
+        /** 是否显示底盘物理盒，默认 false。 */
+        showPhysicsBox?: boolean;
+        /** 是否显示车轮射线，默认 false。 */
+        showWheelRays?: boolean;
+        /** 是否显示车轮 Y 向活动范围，默认 false。 */
+        showWheelTravel?: boolean;
+        /** 是否显示车轮动态碰撞球，默认 false。 */
+        showWheelSpheres?: boolean;
+    };
+    /** 底盘碰撞盒与阻尼。 */
+    chassis?: VehicleChassisOptions;
+    /** 悬挂与轮胎。 */
+    suspension?: VehicleSuspensionOptions;
+    /** 转向手感。 */
+    steering?: VehicleSteeringOptions;
+    /** 过弯抓地与手刹。 */
+    grip?: VehicleGripOptions;
+    /** 动力。 */
+    power?: VehiclePowerOptions;
 };
 
 /** 已加载车辆的运行时对象。 */
@@ -231,37 +341,60 @@ export type VehicleInstance = {
     /** 车辆模型组。 */
     vehicleGroup: THREE.Group;
     /** 底盘刚体。 */
-    chassisBody: RigidBody;
-    /** Rapier 车辆控制器。 */
-    vehicleController: any;
+    chassisBody: VehicleRigidBody;
+    /** BVH 车辆控制器。 */
+    vehicleController: BVHVehicleController;
     /** 同步车轮视觉的回调。 */
-    updateWheelVisuals: () => void;
+    updateWheelVisuals: (delta?: number) => void;
     /** 销毁车辆控制器的回调。 */
     destroyVehicleController: () => void;
     /** 车辆缩放。 */
     scale: number;
-    /** 车辆模型归一化缩放。 */
-    modelScale: number;
     /** 驾驶位胶囊中心，使用车辆底盘局部坐标。 */
     driverSeatPosition: THREE.Vector3;
     /** 驾驶位相对车辆底盘局部的水平旋转（弧度）。 */
     driverSeatRotation: number;
     /** 由前后轮中心推算的车辆底盘本地前向。 */
     forwardLocal: THREE.Vector3;
-    /** 底盘高度比例。 */
-    chassisRatio: number;
-    /** 悬挂静止长度比例。 */
-    suspensionRestLengthRatio: number;
+    /** 驻车时侧向摩擦。 */
+    sideFrictionStiffness: number;
+    /** 转向参数。 */
+    steering: {
+        maxSteerAngle: number;
+        steerTime: number;
+        steerReturnTimeSlow: number;
+        steerReturnTimeFast: number;
+        highSpeedSteerScale: number;
+    };
+    /** 抓地预算。 */
+    grip: {
+        maxG: number;
+        sideFrictionIdle: number;
+        sideFrictionFrontMin: number;
+        sideFrictionRearMin: number;
+        handbrakeRearFriction: number;
+        handbrakeRearDriveScale: number;
+        handbrakeReleaseTime: number;
+        wheelbaseRatio: number;
+    };
     /** 车辆尺寸（长、宽、高）。 */
     size: {
         l: number;
         w: number;
         h: number;
     };
-    /** 底盘碰撞盒半边长（Rapier 局部坐标）。 */
+    /** 底盘碰撞盒半边长（底盘局部坐标）。 */
     halfExtents: THREE.Vector3;
-    /** 车辆质量（kg）。 */
-    mass: number;
+    /** 当前盒底相对轮胎触地点的高度，使用 scale=1 基准值。 */
+    chassisClearance: number;
+    /** 车身顶面相对轮胎触地点的高度，使用 scale=1 基准值。 */
+    chassisTopClearance: number;
+    /** 底盘碰撞盒的 X 轴尺寸比例。 */
+    chassisSizeScaleX: number;
+    /** 底盘碰撞盒的 Y 轴尺寸比例。 */
+    chassisSizeScaleY: number;
+    /** 底盘碰撞盒的 Z 轴尺寸比例。 */
+    chassisSizeScaleZ: number;
     /** 最高速度（km/h）。 */
     maxSpeed: number;
     /** 加速度（m/s²）。 */
@@ -272,18 +405,51 @@ export type VehicleInstance = {
     followVehicleDirection: boolean;
     /** 物理盒体调试网格。 */
     physicsBoxMesh?: THREE.Mesh;
+    /** 车轮射线调试。 */
+    wheelRayDebug?: THREE.Group;
+    /** 车轮 Y 向活动范围调试。 */
+    wheelTravelDebug?: THREE.Group;
+    /** 车轮动态碰撞球线框调试。 */
+    wheelSphereDebug?: THREE.Group;
+    /** CollisionWorld 中底盘动态碰撞体 id。 */
+    chassisColliderId?: number;
+    /** CollisionWorld 中车模运动学网格 id。 */
+    meshColliderId?: number;
+    /**
+     * 仅与动态刚体碰撞的车轮球 collider id（与车轮一一对应）。
+     * 运动学登记，无独立质量；冲量回写到底盘。
+     */
+    wheelColliderIds?: number[];
 };
 
-/** 动态碰撞体的 BVH 与帧间变换数据。 */
-export type DynamicColliderEntry = {
+/** 车轮球在 CollisionWorld.userData 上的挂载数据。 */
+export type VehicleWheelColliderUserData = {
+    vehicle: VehicleInstance;
+    wheelIndex: number;
+};
+
+/** 运动学碰撞体的 BVH 与帧间变换数据。 */
+export type KinematicColliderEntry = {
     /** 原始物体。 */
     source: THREE.Object3D;
-    /** BVH 网格，使用本地空间几何。 */
+    /** BVH 网格；顶点是世界烘焙后绕 RTC 中心的小坐标。 */
     mesh: THREE.Mesh;
+    /**相对建造时几何的额外均匀缩放。 */
+    contentScale: number;
+    /** 相对 source 本地空间的额外位移。 */
+    contentOffset: THREE.Vector3;
+    /** inv(source.matrixWorld_bake) * T(rtcCenter)；预置 mesh 时为单位阵。 */
+    bakeInverse: THREE.Matrix4;
     /** 上一帧世界矩阵。 */
     prevWorldMatrix: THREE.Matrix4;
     /** 本帧位移增量。 */
     deltaPos: THREE.Vector3;
     /** 本帧 Y 轴旋转增量，单位为弧度。 */
     deltaRotY: number;
+    /** Worker / 同步 BVH 是否已就绪。 */
+    ready: boolean;
+    /** 用于作废过期的异步 BVH 构建结果。 */
+    buildId: number;
+    /** CollisionWorld 中的运动学碰撞体 id。 */
+    worldId: number;
 };

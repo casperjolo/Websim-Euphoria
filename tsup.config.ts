@@ -9,7 +9,11 @@ export default defineConfig({
     dts: true,
     sourcemap: true,
     clean: true,
-    external: ["three", "three-mesh-bvh", "@dimforge/rapier3d-compat"],
+    external: [
+        "three",
+        "three-mesh-bvh",
+        "three-mesh-bvh/src/workers/GenerateMeshBVHWorker.js",
+    ],
     target: "es2020",
     minify: false,
 });

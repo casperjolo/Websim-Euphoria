@@ -1,4 +1,4 @@
-﻿import * as THREE from "three";
+import * as THREE from "three";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
@@ -149,7 +149,10 @@ async function init() {
         enableOverShoulderView: true,
         mouseSensitivity: MOUSE_SENSITIVITY,
         camLookAtHeightRatio: 0.9,
-        keyMap: { toggleFly: null }, 
+        keyMap: { toggleFly: null },
+        colliders: [
+            { motion: "static", shape: { kind: "mesh", source: mapScene } },
+        ],
     });
 
     localPlayer.getPlayerModel()?.traverse((c) => {
@@ -188,7 +191,7 @@ async function init() {
     // ==================== 8. 丧尸管理器 ====================
     zombieManager = new ZombieManager(scene, {
         loader: gltfLoader,
-        collider: localPlayer.getCollider(),
+        colliders: localPlayer.getColliderMeshes(),
         modelUrl: base + "./glb/zombie.glb",
         scale: 0.01,
         walkAnim: "walking",

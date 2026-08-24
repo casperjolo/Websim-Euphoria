@@ -1,4 +1,4 @@
-import type { playerController } from "../playerController";
+import type { playerController } from "../PlayerController";
 
 /** 控制器插件的生命周期接口。 */
 export interface PlayerPlugin {

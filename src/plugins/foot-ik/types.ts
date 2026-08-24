@@ -4,6 +4,7 @@ import type {
     Bone,
     Line3,
     Line,
+    LineSegments,
     Mesh,
     Object3D,
     Quaternion,
@@ -17,31 +18,77 @@ export type BoneRef = Bone | string;
 /** 左右脚标识。 */
 export type FootIKSide = "left" | "right";
 
+/** Foot IK 地面检测时忽略的动态刚体形状。 */
+export type FootIKIgnoredDynamicKind = "sphere" | "box";
+
 /** FootIK 使用的控制器字段；实际传入对象仍是 playerController。 */
 export type FootIKPlayer = {
+    /** Three.js 场景。 */
     scene: Scene;
-    collider: Object3D | null;
+    /** 返回可供脚底射线检测的静态与运动学碰撞网格。 */
+    getColliderMeshes: () => Mesh[];
+    /** 返回动态刚体列表；用于判断当前是否存在可参与脚底检测的动态地面。 */
+    getDynamicBodies?: () => unknown[];
+    /** 从世界坐标向下检测动态刚体，并过滤法线过陡、不可站立的表面。 */
+    raycastDynamicGround?: (
+        origin: Vector3,
+        minNormalY?: number,
+        excludeKinds?: readonly FootIKIgnoredDynamicKind[],
+    ) => {
+        /** 动态刚体表面的世界空间命中点。 */
+        point: Vector3;
+        /** 命中面的世界空间单位法线。 */
+        normal: Vector3;
+    } | null;
+    /** 当前站立的动态刚体；站在球体上时 Foot IK 会忽略该支撑。 */
+    getActiveDynamicBody?: () => { kind: FootIKIgnoredDynamicKind } | null;
+    /** 角色移动系统本帧最终采用的支撑点；可来自射线或体积探测。 */
+    getGroundSupport?: () => {
+        /** 控制器实际用于贴地的世界空间支撑点。 */
+        point: Vector3;
+        /** 实际支撑面的世界空间单位法线。 */
+        normal: Vector3;
+    } | null;
+    /** 玩家碰撞胶囊；其世界位置同时作为角色根节点和骨盆支撑参考。 */
     playerCapsule: Mesh & {
+        /** 胶囊几何参数；尚未完成玩家初始化时可能不存在。 */
         capsuleInfo?: {
+            /** 胶囊半径，使用当前角色缩放后的世界尺度。 */
             radius: number;
+            /** 胶囊中心轴线段，保存于胶囊本地空间。 */
             segment: Line3;
         };
     };
+    /** 玩家可见模型根节点；Foot IK 从该节点中查找骨盆和腿部骨骼。 */
     playerModel: Object3D | null;
+    /** 角色当前是否接地；未接地时跳过脚底贴合与骨盆补偿。 */
     playerIsOnGround: boolean;
+    /** 角色是否处于飞行模式；飞行时不执行 Foot IK。 */
     isFlying?: boolean;
+    /** Foot IK 需要使用的玩家缩放和移动动画名称配置。 */
     playerModelConfig: {
+        /** 玩家当前整体缩放，用于同步射线长度、容差和脚底尺寸。 */
         scale: number;
+        /** 默认向前行走动画名称。 */
         walkAnim: string;
+        /** 默认向前奔跑动画名称。 */
         runAnim: string;
+        /** 可选的左向移动动画名称。 */
         leftWalkAnim?: string;
+        /** 可选的右向移动动画名称。 */
         rightWalkAnim?: string;
+        /** 可选的后退动画名称。 */
         backwardAnim?: string;
     };
+    /** 当前玩家动画资源与正在播放的动画动作。 */
     animation: {
+        /** 用于建立脚步着地相位数据库的全部动画片段。 */
         clips: AnimationClip[];
+        /** 当前动画动作；用于读取动画名称、播放时间和脚步相位。 */
         state?: AnimationAction;
     };
+    /** 0 步行 / 1 载具；载具模式时跳过贴地 IK。 */
+    getControllerMode?: () => number;
 };
 
 /** 单条腿参与 IK 的骨骼配置。 */
@@ -73,14 +120,21 @@ export type FootIKSkeletonConfig = {
 export type FootIKOptions = {
     /** 腿部骨骼绑定；未传时根据骨骼名自动匹配。 */
     skeleton?: FootIKSkeletonConfig;
-    /** 是否显示 IK 目标和射线，默认 false。 */
+    /**
+     * 是否显示统一调试对象，默认 false。
+     * 包含：IK 目标、最高地面命中、脚底四点（采样原点 + 命中 + 射线）。
+     */
     debug?: boolean;
-    /** 是否显示 foot-local 脚底采样点，默认 false。 */
-    soleSampleDebug?: boolean;
     /** 是否启用插件，默认 true。 */
     enabled?: boolean;
-    /** 骨盆最大下沉距离基准值（按 scale 缩放），默认 20。 */
+    /** 骨盆最大下沉距离基准值（按 scale 缩放），默认 50。 */
     maxPelvisDrop?: number;
+    /** 双脚同处高台面时的骨盆最大上抬距离基准值（按 scale 缩放），默认 50。 */
+    maxPelvisRaise?: number;
+    /** 脚部 IK 最大上抬距离基准值（按 scale 缩放）；超出时放弃 IK，默认 50。 */
+    maxFootRaise?: number;
+    /** 支撑脚 IK 最大下探距离基准值（按 scale 缩放）；超出时放弃 IK，默认 50。 */
+    maxFootDrop?: number;
     /** 虚拟脚底左右半宽基准值（按 scale 缩放），默认 7。 */
     soleHalfWidth?: number;
     /** 脚尖采样点向前延伸距离基准值（按 scale 缩放），默认 7。 */
@@ -100,14 +154,10 @@ export type FootIKOptions = {
     minKneeBend?: number;
     /** 膝盖最大弯曲角，单位为弧度，默认 145°。 */
     maxKneeBend?: number;
+    /** 骨盆可达性计算保留的膝盖弯曲角，单位为弧度，默认 15°。 */
+    pelvisKneeBend?: number;
     /** 移动时脚底穿透触发阈值基准值（按 scale 缩放），默认 0.1。 */
     moveLiftThreshold?: number;
-    /** mesh 台阶视觉补偿最大下移距离基准值（按 scale 缩放），默认 36。 */
-    maxMeshStepDrop?: number;
-    /** mesh 台阶视觉补偿最大上抬距离基准值（双脚同平面高于胶囊时，按 scale 缩放），默认 36。 */
-    maxMeshStepRaise?: number;
-    /** 判定双脚处于同一支撑平面的最大高度差基准值（按 scale 缩放），默认 8。 */
-    meshStepCoplanarThreshold?: number;
     /** 单个移动动画的脚步相位采样数，默认 96。 */
     footPhaseSampleCount?: number;
     /** 脚步相位接地高度阈值基准值（按 scale 缩放），默认 5。 */
@@ -126,11 +176,14 @@ export type FootIKProbeSample = {
     hasHit: boolean;
 };
 
-// 固定在 foot 本地空间中的脚底采样点。
+// 固定在 foot 本地空间中的脚底采样点
 export type FootIKSoleSample = FootIKProbeSample & {
     local: Vector3;
+    /** 地面命中调试球（线框）。 */
     marker: Mesh | null;
+    /** 采样原点 → 命中点。 */
     rayLine: Line | null;
+    /** 脚底采样原点调试球（实心）。 */
     footMarker: Mesh | null;
 };
 
@@ -141,13 +194,17 @@ export type FootIKLeg = {
     lower: Bone | null;
     foot: Bone | null;
     toe: Bone | null;
-    color: number;
     ready: boolean;
     smoothedTarget: Vector3;
+    pelvisTarget: Vector3;
+    hasPelvisTarget: boolean;
     hitPoint: Vector3;
     hitNormal: Vector3;
+    supportPoint: Vector3;
+    supportNormal: Vector3;
     footSamplePoint: Vector3;
     soleSamples: FootIKSoleSample[];
+    bestGroundSampleIndex: number;
     offsetY: number;
     movePenetrating: boolean;
     weight: number;
@@ -156,7 +213,9 @@ export type FootIKLeg = {
     lastPole: Vector3;
     hasLastPole: boolean;
     marker: Mesh | null;
+    hitMarker: Mesh | null;
     rayLine: Line | null;
+    raiseLimitLine: LineSegments | null;
 };
 
 // 已完成必要骨骼绑定的腿链。

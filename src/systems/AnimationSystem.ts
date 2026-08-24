@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { playerController } from "../playerController";
+import type { playerController } from "../PlayerController";
 
 export class AnimationSystem {
     private ctrl: playerController; // 主控制器引用
@@ -264,8 +264,8 @@ export class AnimationSystem {
             }
         }
 
-        // 恢复相机距离
-        this.ctrl.cam.maxDist = this.ctrl.cam.originMaxDist;
+        // 未启用缩放时恢复默认距离；飞行加速时拉远；启用缩放后保留滚轮选择的 maxDist。
+        this.ctrl.cam.applyFlySprintMaxDist();
 
         if (this.ctrl.controllerMode === 1) return;
 
@@ -276,8 +276,6 @@ export class AnimationSystem {
             if (fwd) {
                 if (shift) {
                     this.playByName("flying");
-                    // 加速飞行时，拉远相机
-                    if (!this.ctrl.cam.enableSpringCamera) this.ctrl.cam.maxDist = this.ctrl.cam.originMaxDist * 2;
                 } else {
                     this.playByName("flyHoverForward");
                 }

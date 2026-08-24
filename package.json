@@ -1,6 +1,6 @@
 {
     "name": "three-player-controller",
-    "version": "0.6.0",
+    "version": "0.6.1",
     "description": "Third-person / first-person player controller for three.js (three-mesh-bvh based)",
     "author": "hh-hang",
     "license": "MIT",
@@ -30,14 +30,8 @@
         "build:example": "vite build"
     },
     "peerDependencies": {
-        "@dimforge/rapier3d-compat": ">=0.12.0",
         "three": ">=0.159.0",
         "three-mesh-bvh": ">=0.7.8"
-    },
-    "peerDependenciesMeta": {
-        "@dimforge/rapier3d-compat": {
-            "optional": true
-        }
     },
     "devDependencies": {
         "@sparkjsdev/spark": "^2.1.0",
@@ -45,6 +39,7 @@
         "@types/three": "^0.184.0",
         "3d-tiles-renderer": "^0.4.24",
         "rimraf": "^6.0.0",
+        "tellux": "^0.2.0",
         "tsup": "^8.0.1",
         "typescript": "^5.9.3",
         "vite": "^7.3.0"
