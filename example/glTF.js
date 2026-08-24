@@ -281,7 +281,6 @@ async function loadVehicleConfig(extra = {}) {
     return {
         ...rest,
         model: gltf.scene,
-        animations: gltf.animations,
         ...extra,
     };
 }

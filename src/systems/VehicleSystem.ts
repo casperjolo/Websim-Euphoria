@@ -18,7 +18,7 @@ export class VehicleSystem {
         debug: { showPhysicsBox: false, showWheelRays: false, showWheelTravel: false, showWheelSpheres: false }, // 调试显示
         chassis: { density: 1, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
-        power: { acceleration: 5, deceleration: 5, maxSpeed: 300 }, // 动力参数
+        power: { acceleration: 5, deceleration: 5, maxSpeed: 100 }, // 动力参数
         steering: { maxSteerAngle: Math.PI / 5, steerTime: 0.45, steerReturnTimeSlow: 0.55, steerReturnTimeFast: 0.4, highSpeedSteerScale: 0.3 }, // 转向：打满/回正时间（秒），高速收舵
         grip: {
             maxG: 1.2,

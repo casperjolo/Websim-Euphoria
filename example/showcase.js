@@ -887,7 +887,6 @@ async function spawnShowcaseVehicles(gltfLoader) {
         const model = gltf.scene.clone(true);
         await player.loadVehicleModel({
             model,
-            animations: gltf.animations,
             scale: VEHICLE_SCALE_NORMAL,
             position: spawnPos.clone(),
             wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],

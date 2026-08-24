@@ -928,19 +928,19 @@ export class playerController {
     setEnableZoom(enable: boolean) { this.cam.setZoomEnabled(enable); }
 
     // --- 调试 ---
-    /** 切换静态碰撞线框。 */
+    /** 设置静态碰撞线框。 */
     setColliderDebug(debug: boolean) {
         this.colliders.setDebugVisible(debug);
     }
-    /** 切换玩家胶囊线框。 */
+    /** 设置玩家胶囊线框。 */
     setPlayerCapsuleDebug(debug: boolean) {
         this.playerDebug.setVisible(debug);
     }
-    /** 切换动态刚体碰撞线框。 */
+    /** 设置动态刚体碰撞线框。 */
     setDynamicBodyDebug(debug: boolean) {
         this.dynamics.setDebugVisible(debug);
     }
-    /** 切换车辆底盘物理盒。 */
+    /** 设置车辆底盘物理盒。 */
     setVehiclePhysicsDebug(debug: boolean) {
         this.vehicle.setPhysicsDebugVisible(debug);
     }

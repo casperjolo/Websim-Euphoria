@@ -4,7 +4,7 @@ import type { VehicleRigidBody } from "../utils/vehiclePhysics/VehicleRigidBody"
 
 // ==================== 玩家配置 ====================
 
-/** 已加载的模型来源（玩家/车辆共用结构）。 */
+/** 已加载的模型来源（玩家使用）。 */
 export type LoadedModelSource = {
     /** 已加载的模型根节点。 */
     model: THREE.Object3D;
@@ -14,7 +14,7 @@ export type LoadedModelSource = {
     url?: never;
 };
 
-/** 旧版 glTF 模型路径来源（玩家/车辆共用结构）。 */
+/** 旧版 glTF 模型路径来源（玩家使用）。 */
 export type LegacyModelSource = {
     /**
      * 模型路径（GLB/GLTF）。
@@ -188,11 +188,24 @@ export type PlayerControllerOptions = {
 
 // ==================== 车辆配置 ====================
 
-/** 已加载的车辆模型来源。 */
-export type LoadedVehicleModelSource = LoadedModelSource;
+/** 已加载的车辆模型来源（车辆不使用动画片段）。 */
+export type LoadedVehicleModelSource = {
+    /** 已加载的模型根节点。 */
+    model: THREE.Object3D;
+    /** 已加载模型与旧模型路径不能同时使用。 */
+    url?: never;
+};
 
 /** 旧版 glTF 车辆模型来源。 */
-export type LegacyVehicleModelSource = LegacyModelSource;
+export type LegacyVehicleModelSource = {
+    /**
+     * 模型路径（GLB/GLTF）。
+     * @deprecated 请在外部加载模型，并传入 model。
+     */
+    url: string;
+    /** 模型路径与已加载模型不能同时使用。 */
+    model?: never;
+};
 
 /** 车辆模型来源。 */
 export type VehicleModelSource = LoadedVehicleModelSource | LegacyVehicleModelSource;
@@ -276,7 +289,7 @@ export type VehicleGripOptions = {
 
 /** 动力。 */
 export type VehiclePowerOptions = {
-    /** 最高速度基准（km/h，按 scale 缩放），默认 300。 */
+    /** 最高速度基准（km/h，按 scale 缩放），默认 100。 */
     maxSpeed?: number;
     /** 加速度基准（m/s²，按 scale 缩放），默认 5。 */
     acceleration?: number;
