@@ -211,7 +211,7 @@ export class PlayerDebug {
                 new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
                 new THREE.LineBasicMaterial({
                     color: MISS_COLOR,
-                    depthTest: false,
+                    depthTest: true,
                     transparent: true,
                     opacity: 0.9,
                 }),
@@ -230,7 +230,7 @@ export class PlayerDebug {
                 new THREE.MeshBasicMaterial({
                     color: HIT_COLOR,
                     wireframe: true,
-                    depthTest: false,
+                    depthTest: true,
                     transparent: true,
                     opacity: 0.9,
                 }),
@@ -255,8 +255,8 @@ export class PlayerDebug {
             new THREE.MeshBasicMaterial({
                 color: SENSOR_IDLE_COLOR,
                 wireframe: true,
-                depthTest: false,
-                depthWrite: false,
+                depthTest: true,
+                depthWrite: true,
                 transparent: true,
                 opacity: 0.4,
                 side: THREE.DoubleSide,
