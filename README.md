@@ -45,7 +45,7 @@ npm install
 npm run dev
 ```
 
-浏览器访问 `http://localhost:5173/three-player-controller/`。
+浏览器访问 `http://localhost:5173/`，根路径会打开 Euphoria City 主菜单。
 
 # 快速开始
 

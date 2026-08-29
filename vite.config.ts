@@ -2,7 +2,8 @@ import { resolve } from "path";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-    base: "/three-player-controller/",
+    // Relative URLs keep the scene working on GitHub Pages forks and Arena previews.
+    base: "./",
     root: resolve(__dirname, "example"),
     server: {
         host: true,

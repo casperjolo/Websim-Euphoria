@@ -45,7 +45,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/three-player-controller/` in your browser.
+Open `http://localhost:5173/` in your browser. The root route opens the Euphoria City main menu.
 
 # Quick Start
 

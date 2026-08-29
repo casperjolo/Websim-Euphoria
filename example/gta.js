@@ -1,8 +1,6 @@
 import * as THREE from "three";
 import { MapControls } from "three/examples/jsm/controls/MapControls.js";
-import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { playerController } from "../src/PlayerController";
 
 const base = import.meta.env.BASE_URL.endsWith("/")
@@ -106,7 +104,7 @@ function loadModel(url, label, start, end) {
                 const ratio = event.total > 0 ? event.loaded / event.total : 0.5;
                 setLoading(start + (end - start) * ratio, label, "Streaming city data…");
             },
-            (error) => reject(error),
+            (error) => reject(new Error(`${label} failed: ${error?.message ?? "GLB request failed"}`, { cause: error })),
         );
     });
 }
@@ -169,15 +167,9 @@ function setupRenderer() {
 }
 
 function setupLoader() {
+    // The three GTA assets are self-contained GLBs. Keep the sandbox offline-friendly
+    // instead of depending on remote Draco/Basis decoder downloads.
     gltfLoader = new GLTFLoader();
-    const draco = new DRACOLoader();
-    draco.setDecoderPath("https://unpkg.com/three@0.180.0/examples/jsm/libs/draco/");
-    gltfLoader.setDRACOLoader(draco);
-
-    const ktx2 = new KTX2Loader();
-    ktx2.setTranscoderPath("https://unpkg.com/three@0.180.0/examples/jsm/libs/basis/");
-    ktx2.detectSupport(renderer);
-    gltfLoader.setKTX2Loader(ktx2);
 }
 
 function prepareScene(model) {
@@ -538,7 +530,8 @@ async function init() {
         }, 450);
     } catch (error) {
         console.error("Euphoria City failed to initialize", error);
-        setLoading(100, "City services offline", "Could not load the local GLB assets. Check the dev server and refresh.");
+        const reason = error instanceof Error ? error.message : "Unknown asset error";
+        setLoading(100, "City services offline", `Could not load local GLB assets · ${reason}`);
         dom.loadingFill.style.background = "#ff654e";
     }
 }
