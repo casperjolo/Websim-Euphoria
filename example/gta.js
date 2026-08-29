@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { MapControls } from "three/examples/jsm/controls/MapControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { retargetClip } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { playerController } from "../src/PlayerController";
 
 const base = import.meta.env.BASE_URL.endsWith("/")
@@ -11,6 +10,14 @@ const asset = (path) => `${base}${path.replace(/^\.\//, "")}`;
 
 const PLAYER_SCALE = 0.01;
 const FRED_RETARGET_SCALE = 0.01;
+// Josh is authored facing the opposite local forward axis from Fred. Apply
+// this basis change before writing world-space motion onto Fred's rig.
+const FRED_SOURCE_TO_TARGET_BASIS = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0),
+    Math.PI,
+);
+const FRED_TARGET_TO_SOURCE_BASIS = FRED_SOURCE_TO_TARGET_BASIS.clone().invert();
+const FRED_FIRST_FRAME_NEUTRAL_CLIPS = new Set(["idle", "idle1", "idle2", "walk", "run"]);
 const FRED_BONE_MAP = Object.freeze({
     SKEL_Pelvis_00: "mixamorigHips",
     SKEL_L_Thigh_01: "mixamorigLeftUpLeg",
@@ -463,41 +470,12 @@ function findSkinnedMesh(model) {
     return result;
 }
 
-function createFredLocalOffsets(target, sourceModel) {
-    const offsets = {};
-    const sourceQuaternion = new THREE.Quaternion();
-    const targetQuaternion = new THREE.Quaternion();
-
-    sourceModel.updateMatrixWorld(true);
-    target.updateMatrixWorld(true);
-
-    for (const [targetName, sourceName] of Object.entries(FRED_BONE_MAP)) {
-        const targetBone = target.getObjectByName(targetName);
-        const sourceBone = sourceModel.getObjectByName(sourceName);
-        if (!targetBone || !sourceBone) {
-            throw new Error(`Fred retarget mapping missing: ${targetName} → ${sourceName}`);
-        }
-
-        // SkeletonUtils transfers world rotations. This offset converts the
-        // Mixamo rest-pose axes into Fred's rest-pose axes before each track is
-        // written, which is required because the two rigs use different bone
-        // coordinate frames.
-        targetBone.getWorldQuaternion(targetQuaternion);
-        sourceBone.getWorldQuaternion(sourceQuaternion);
-        offsets[targetName] = new THREE.Matrix4().makeRotationFromQuaternion(
-            sourceQuaternion.clone().invert().multiply(targetQuaternion),
-        );
-    }
-
-    return offsets;
-}
-
 function makeRetargetableClip(sourceClip) {
     if (sourceClip.duration > 0) return sourceClip;
 
     // A few of Josh's hover clips are single-key, zero-duration poses.
-    // SkeletonUtils samples by duration, so give those poses two identical
-    // keys over a tiny interval before retargeting them.
+    // Give those poses two identical keys over a tiny interval so that the
+    // sampler below can use the same path for static and animated clips.
     const frame = 1 / 30;
     const tracks = sourceClip.tracks.map((track) => {
         const valueSize = track.getValueSize();
@@ -510,28 +488,230 @@ function makeRetargetableClip(sourceClip) {
     return new THREE.AnimationClip(`${sourceClip.name} static source`, frame * 2, tracks);
 }
 
+/**
+ * Fred and Josh do not share a bind pose: Josh is a T-pose Mixamo rig while
+ * Fred is an A-pose rigid-body rig. A fixed world-space offset is not enough
+ * here because it applies the arm and leg deltas in the wrong coordinate
+ * frame. Retarget each sampled world-space delta from the source clip's
+ * reference pose, convert it through the source/target basis, and apply it to
+ * Fred's bind pose.
+ *
+ * The ordinary standing clips use their first frame as the reference pose so
+ * Fred keeps a stable A-pose baseline. Poses that intentionally start seated,
+ * airborne, or in a special action keep Josh's bind pose as their reference so
+ * that their absolute posture is not discarded.
+ */
+function retargetFredClip(model, sourceModel, sourceClip, targetBones, sourceBindPose, sourceBindWorld, targetRestPose) {
+    const preparedClip = makeRetargetableClip(sourceClip);
+    const sourceMixer = new THREE.AnimationMixer(sourceModel);
+    const sourceAction = sourceMixer.clipAction(preparedClip).play();
+    const duration = preparedClip.duration;
+    const frameCount = Math.max(2, Math.round(duration * 30));
+    const frameDelta = duration / (frameCount - 1);
+    const sourceFirstWorld = new Map();
+    const sourceFirstPosition = new Map();
+    const tracks = new Map();
+    const useFirstFrameNeutral = FRED_FIRST_FRAME_NEUTRAL_CLIPS.has(sourceClip.name);
+    const sourceToTarget = FRED_SOURCE_TO_TARGET_BASIS;
+    const targetToSource = FRED_TARGET_TO_SOURCE_BASIS;
+
+    // Restore the source bind pose before each clip. Some of the short flight
+    // clips only animate a subset of the mapped bones.
+    for (const [sourceBone, bindPose] of sourceBindPose) {
+        sourceBone.position.copy(bindPose.position);
+        sourceBone.quaternion.copy(bindPose.quaternion);
+        sourceBone.scale.copy(bindPose.scale);
+    }
+    sourceModel.updateMatrixWorld(true);
+
+    // Reset Fred manually. Skeleton.pose() assumes a skinned target; Fred's
+    // virtual skeleton is attached to rigid body nodes and must keep its
+    // original root transform.
+    for (const { targetBone } of targetBones) {
+        const rest = targetRestPose.get(targetBone);
+        targetBone.position.copy(rest.localPosition);
+        targetBone.quaternion.copy(rest.localQuaternion);
+        targetBone.scale.copy(rest.localScale);
+        tracks.set(targetBone, {
+            times: new Float32Array(frameCount),
+            values: new Float32Array(frameCount * 4),
+            previous: null,
+        });
+    }
+    model.updateMatrixWorld(true);
+
+    sourceMixer.setTime(0);
+    sourceModel.updateMatrixWorld(true);
+    for (const { sourceBone } of targetBones) {
+        sourceFirstWorld.set(sourceBone, sourceBone.getWorldQuaternion(new THREE.Quaternion()));
+        sourceFirstPosition.set(sourceBone, sourceBone.getWorldPosition(new THREE.Vector3()));
+    }
+
+    const hipPair = targetBones.find(({ targetBone }) => targetBone.name === "SKEL_Pelvis_00");
+    const hipPositionTrack = hipPair ? {
+        times: new Float32Array(frameCount),
+        values: new Float32Array(frameCount * 3),
+    } : null;
+
+    for (let frame = 0; frame < frameCount; frame += 1) {
+        const time = frame * frameDelta;
+        // A repeated action wraps exactly at its duration. Sample just before
+        // that boundary so the final key is the final source pose, not frame 0.
+        sourceMixer.setTime(duration > 0 ? Math.min(time, duration - 1e-7) : 0);
+        sourceModel.updateMatrixWorld(true);
+
+        for (const { targetBone, sourceBone } of targetBones) {
+            const data = tracks.get(targetBone);
+            const reference = useFirstFrameNeutral
+                ? sourceFirstWorld.get(sourceBone)
+                : sourceBindWorld.get(sourceBone).quaternion;
+            const sourceWorld = sourceBone.getWorldQuaternion(new THREE.Quaternion());
+            const sourceDelta = sourceWorld.multiply(reference.clone().invert());
+            const desiredWorld = sourceToTarget.clone()
+                .multiply(sourceDelta)
+                .multiply(targetToSource)
+                .multiply(targetRestPose.get(targetBone).worldQuaternion);
+            const parentWorld = targetBone.parent?.getWorldQuaternion(new THREE.Quaternion())
+                ?? new THREE.Quaternion();
+            const targetQuaternion = parentWorld.invert().multiply(desiredWorld).normalize();
+
+            // Quaternion and negative quaternion represent the same rotation,
+            // but alternating signs create unnecessary interpolation jumps.
+            if (data.previous && data.previous.dot(targetQuaternion) < 0) {
+                targetQuaternion.set(
+                    -targetQuaternion.x,
+                    -targetQuaternion.y,
+                    -targetQuaternion.z,
+                    -targetQuaternion.w,
+                );
+            }
+            data.previous = targetQuaternion.clone();
+            data.times[frame] = time;
+            targetQuaternion.toArray(data.values, frame * 4);
+            targetBone.quaternion.copy(targetQuaternion);
+            targetBone.updateMatrixWorld(true);
+        }
+
+        if (hipPair && hipPositionTrack) {
+            const { targetBone, sourceBone } = hipPair;
+            const reference = useFirstFrameNeutral
+                ? sourceFirstPosition.get(sourceBone)
+                : sourceBindWorld.get(sourceBone).position;
+            const sourcePosition = sourceBone.getWorldPosition(new THREE.Vector3());
+            const delta = sourcePosition.sub(reference)
+                .applyQuaternion(sourceToTarget)
+                .multiplyScalar(FRED_RETARGET_SCALE);
+            const targetWorldPosition = targetRestPose.get(targetBone).worldPosition.clone().add(delta);
+            const parentMatrix = targetBone.parent?.matrixWorld
+                ?? new THREE.Matrix4();
+            const targetPosition = targetWorldPosition.applyMatrix4(
+                parentMatrix.clone().invert(),
+            );
+            targetPosition.toArray(hipPositionTrack.values, frame * 3);
+            hipPositionTrack.times[frame] = time;
+        }
+    }
+
+    sourceAction.stop();
+    sourceMixer.uncacheAction(preparedClip);
+
+    const convertedTracks = [];
+    if (hipPositionTrack && hipPair) {
+        convertedTracks.push(new THREE.VectorKeyframeTrack(
+            `.bones[${hipPair.targetBone.name}].position`,
+            hipPositionTrack.times,
+            hipPositionTrack.values,
+        ));
+    }
+    for (const { targetBone } of targetBones) {
+        const data = tracks.get(targetBone);
+        convertedTracks.push(new THREE.QuaternionKeyframeTrack(
+            `.bones[${targetBone.name}].quaternion`,
+            data.times,
+            data.values,
+        ));
+    }
+
+    // Leave Fred in his original rigid bind pose while the controller creates
+    // its mixer and selects the initial idle action.
+    for (const { targetBone } of targetBones) {
+        const rest = targetRestPose.get(targetBone);
+        targetBone.position.copy(rest.localPosition);
+        targetBone.quaternion.copy(rest.localQuaternion);
+        targetBone.scale.copy(rest.localScale);
+    }
+    model.updateMatrixWorld(true);
+
+    return new THREE.AnimationClip(sourceClip.name, -1, convertedTracks);
+}
+
 function retargetFredAnimations(model, sourceModel, sourceAnimations) {
-    const sourceMesh = findSkinnedMesh(sourceModel);
-    if (!sourceMesh) throw new Error("Josh animation source has no skinned mesh");
+    if (!findSkinnedMesh(sourceModel)) throw new Error("Josh animation source has no skinned mesh");
     if (!sourceAnimations?.length) throw new Error("Josh animation source has no clips");
 
-    const localOffsets = createFredLocalOffsets(model, sourceModel);
-    const animations = sourceAnimations.map((sourceClip) => {
-        const clip = retargetClip(model, sourceMesh, makeRetargetableClip(sourceClip), {
-            names: FRED_BONE_MAP,
-            localOffsets,
-            hip: "mixamorigHips",
-            scale: FRED_RETARGET_SCALE,
-            useFirstFramePosition: true,
-            fps: 30,
+    model.updateMatrixWorld(true);
+
+    const targetRestPose = new Map();
+    model.traverse((object) => {
+        if (!object.isBone) return;
+        targetRestPose.set(object, {
+            localPosition: object.position.clone(),
+            localQuaternion: object.quaternion.clone(),
+            localScale: object.scale.clone(),
+            worldQuaternion: object.getWorldQuaternion(new THREE.Quaternion()),
+            worldPosition: object.getWorldPosition(new THREE.Vector3()),
         });
-        clip.name = sourceClip.name;
-        return clip;
     });
 
-    // Do not leave the target in the last sampled source pose while the
-    // controller creates its mixer and chooses the initial idle action.
-    model.skeleton.pose();
+    const sourceBindPose = new Map();
+    const sourceBindWorld = new Map();
+    sourceModel.updateMatrixWorld(true);
+    sourceModel.traverse((object) => {
+        if (!object.isBone) return;
+        sourceBindPose.set(object, {
+            position: object.position.clone(),
+            quaternion: object.quaternion.clone(),
+            scale: object.scale.clone(),
+        });
+        sourceBindWorld.set(object, {
+            quaternion: object.getWorldQuaternion(new THREE.Quaternion()),
+            position: object.getWorldPosition(new THREE.Vector3()),
+        });
+    });
+
+    const targetBones = [];
+    for (const [targetName, sourceName] of Object.entries(FRED_BONE_MAP)) {
+        const targetBone = model.getObjectByName(targetName);
+        const sourceBone = sourceModel.getObjectByName(sourceName);
+        if (!targetBone || !sourceBone) {
+            throw new Error(`Fred retarget mapping missing: ${targetName} → ${sourceName}`);
+        }
+        targetBones.push({ targetBone, sourceBone });
+    }
+    targetBones.sort((a, b) => {
+        const depth = (bone) => {
+            let value = 0;
+            for (let parent = bone.parent; parent; parent = parent.parent) value += 1;
+            return value;
+        };
+        return depth(a.targetBone) - depth(b.targetBone);
+    });
+
+    const animations = sourceAnimations.map((sourceClip) => (
+        retargetFredClip(
+            model,
+            sourceModel,
+            sourceClip,
+            targetBones,
+            sourceBindPose,
+            sourceBindWorld,
+            targetRestPose,
+        )
+    ));
+
+    // The target bones were restored after sampling. Keep the original
+    // rigid-body bind transforms; Skeleton.pose() is only safe for a skinned
+    // target and would move Fred's root transform in this virtual skeleton.
     model.updateMatrixWorld(true);
     return animations;
 }
