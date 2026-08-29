@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <meta name="theme-color" content="#10131a" />
+        <title>Euphoria City · Web Sandbox</title>
+        <style>
+            @import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+            :root {
+                --ink: #11141b;
+                --cream: #f4f0e8;
+                --paper: #fffaf1;
+                --acid: #d7f25b;
+                --coral: #ff654e;
+                --blue: #83b9ff;
+                --muted: rgba(244, 240, 232, 0.62);
+                --line: rgba(244, 240, 232, 0.18);
+                --panel: rgba(16, 19, 26, 0.78);
+                --mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                --display: "Barlow Condensed", Impact, sans-serif;
+                --sans: "Space Grotesk", system-ui, sans-serif;
+            }
+
+            * { box-sizing: border-box; }
+            html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--ink); }
+            body { color: var(--cream); font-family: var(--sans); user-select: none; }
+            button { font: inherit; }
+
+            #container,
+            #container canvas {
+                position: fixed;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+            }
+            #container { z-index: 0; background: #1a2430; }
+            #container canvas { display: block; outline: none; }
+
+            .grain,
+            .vignette {
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                z-index: 2;
+            }
+            .grain {
+                opacity: 0.085;
+                mix-blend-mode: screen;
+                background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.8'/%3E%3C/svg%3E");
+            }
+            .vignette { background: radial-gradient(circle at 50% 48%, transparent 42%, rgba(4, 7, 11, 0.52) 120%); }
+
+            .hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+            .hud > * { pointer-events: auto; }
+
+            .topbar {
+                position: absolute;
+                top: max(22px, env(safe-area-inset-top));
+                left: max(24px, env(safe-area-inset-left));
+                right: max(24px, env(safe-area-inset-right));
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 24px;
+            }
+            .brand-lockup { display: flex; align-items: flex-start; gap: 12px; }
+            .brand-mark {
+                display: grid;
+                place-items: center;
+                width: 38px;
+                height: 38px;
+                margin-top: 2px;
+                border: 2px solid var(--acid);
+                color: var(--acid);
+                font: 800 21px/1 var(--display);
+                transform: rotate(-8deg);
+            }
+            .eyebrow {
+                color: var(--acid);
+                font: 500 11px/1 var(--mono);
+                letter-spacing: 0.24em;
+                text-transform: uppercase;
+            }
+            .brand {
+                margin-top: 2px;
+                color: var(--paper);
+                font: 800 clamp(32px, 4.1vw, 58px)/0.82 var(--display);
+                letter-spacing: -0.035em;
+                text-transform: uppercase;
+            }
+            .brand span { color: var(--coral); }
+            .brand-sub {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-top: 9px;
+                color: var(--muted);
+                font: 500 10px/1 var(--mono);
+                letter-spacing: 0.09em;
+                text-transform: uppercase;
+            }
+            .live-dot {
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: var(--acid);
+                box-shadow: 0 0 12px var(--acid);
+            }
+
+            .top-stats { display: flex; align-items: flex-start; gap: 12px; }
+            .stat {
+                min-width: 94px;
+                padding: 10px 13px 9px;
+                border-top: 1px solid var(--line);
+                background: linear-gradient(120deg, rgba(16, 19, 26, 0.72), rgba(16, 19, 26, 0.34));
+                backdrop-filter: blur(12px);
+            }
+            .stat-label {
+                color: var(--muted);
+                font: 500 9px/1 var(--mono);
+                letter-spacing: 0.15em;
+                text-transform: uppercase;
+            }
+            .stat-value {
+                margin-top: 5px;
+                color: var(--paper);
+                font: 700 18px/1 var(--display);
+                letter-spacing: 0.03em;
+            }
+            .stat-value.cash { color: var(--acid); }
+            .wanted { min-width: 127px; }
+            #wanted-stars { display: inline-flex; gap: 3px; margin-left: 5px; color: rgba(244,240,232,.23); font-size: 14px; }
+            #wanted-stars .active { color: var(--coral); text-shadow: 0 0 10px rgba(255, 101, 78, .52); }
+
+            .mission-card {
+                position: absolute;
+                top: 148px;
+                left: max(24px, env(safe-area-inset-left));
+                width: min(348px, calc(100vw - 48px));
+                padding: 15px 17px 16px;
+                border-left: 3px solid var(--coral);
+                background: linear-gradient(100deg, var(--panel), rgba(16, 19, 26, 0.34));
+                backdrop-filter: blur(12px);
+                transition: transform .3s ease, opacity .3s ease;
+            }
+            .mission-card.complete { border-left-color: var(--acid); }
+            .mission-kicker { color: var(--coral); font: 500 10px/1 var(--mono); letter-spacing: .17em; text-transform: uppercase; }
+            .mission-card.complete .mission-kicker { color: var(--acid); }
+            .mission-title { margin-top: 7px; color: var(--paper); font: 700 26px/.9 var(--display); letter-spacing: .02em; text-transform: uppercase; }
+            .mission-detail { margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.42; }
+            .mission-footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 13px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+            #mission-reward { color: var(--acid); }
+
+            .right-rail {
+                position: absolute;
+                top: 148px;
+                right: max(24px, env(safe-area-inset-right));
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 10px;
+            }
+            .district-tag {
+                padding: 7px 10px;
+                border: 1px solid var(--line);
+                color: var(--muted);
+                background: rgba(16, 19, 26, .38);
+                font: 500 9px/1 var(--mono);
+                letter-spacing: .17em;
+                text-transform: uppercase;
+                backdrop-filter: blur(8px);
+            }
+            .district-tag strong { color: var(--paper); font-weight: 500; }
+            .radio {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 10px;
+                color: var(--muted);
+                background: rgba(16, 19, 26, .48);
+                font: 500 9px/1 var(--mono);
+                letter-spacing: .1em;
+                text-transform: uppercase;
+                backdrop-filter: blur(8px);
+            }
+            .radio-bars { display: flex; gap: 2px; align-items: flex-end; height: 12px; }
+            .radio-bars i { display: block; width: 2px; background: var(--acid); animation: equalize 1s ease-in-out infinite alternate; }
+            .radio-bars i:nth-child(1) { height: 5px; animation-delay: -.8s; }
+            .radio-bars i:nth-child(2) { height: 11px; animation-delay: -.2s; }
+            .radio-bars i:nth-child(3) { height: 7px; animation-delay: -.55s; }
+            .radio-bars i:nth-child(4) { height: 9px; animation-delay: -.1s; }
+            @keyframes equalize { to { transform: scaleY(.3); opacity: .55; } }
+
+            .bottom-left { position: absolute; bottom: max(24px, env(safe-area-inset-bottom)); left: max(24px, env(safe-area-inset-left)); display: flex; align-items: flex-end; gap: 14px; }
+            .minimap-shell { position: relative; width: 174px; height: 174px; filter: drop-shadow(0 11px 18px rgba(0,0,0,.3)); }
+            #minimap { width: 174px; height: 174px; border: 1px solid rgba(244,240,232,.35); border-radius: 50%; background: rgba(10,14,20,.72); }
+            .map-label { position: absolute; color: rgba(244,240,232,.55); font: 500 8px/1 var(--mono); letter-spacing: .16em; }
+            .map-label.n { top: 11px; left: 50%; transform: translateX(-50%); }
+            .map-label.w { top: 50%; left: 11px; transform: translateY(-50%); }
+            .map-label.e { top: 50%; right: 11px; transform: translateY(-50%); }
+            .map-label.s { bottom: 11px; left: 50%; transform: translateX(-50%); }
+            .map-coords { position: absolute; left: 15px; bottom: 13px; color: rgba(244,240,232,.68); font: 500 8px/1 var(--mono); letter-spacing: .05em; }
+
+            .controls-card { max-width: 210px; padding-bottom: 3px; color: var(--muted); font: 500 9px/1.7 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+            .control-row { display: flex; align-items: center; gap: 7px; }
+            kbd { display: inline-grid; place-items: center; min-width: 20px; height: 19px; padding: 0 5px; border: 1px solid rgba(244,240,232,.33); border-bottom-width: 2px; color: var(--paper); background: rgba(16,19,26,.64); font: 500 9px/1 var(--mono); }
+            .control-row span { white-space: nowrap; }
+
+            .vehicle-card {
+                position: absolute;
+                right: max(24px, env(safe-area-inset-right));
+                bottom: max(24px, env(safe-area-inset-bottom));
+                display: none;
+                align-items: flex-end;
+                gap: 14px;
+                min-width: 218px;
+                padding: 14px 15px 12px;
+                border-right: 3px solid var(--acid);
+                background: linear-gradient(110deg, rgba(16,19,26,.4), var(--panel));
+                backdrop-filter: blur(12px);
+            }
+            .vehicle-card.visible { display: flex; }
+            .vehicle-name { color: var(--acid); font: 500 10px/1 var(--mono); letter-spacing: .17em; text-transform: uppercase; }
+            .vehicle-state { margin-top: 4px; color: var(--paper); font: 700 20px/.9 var(--display); text-transform: uppercase; }
+            .vehicle-meta { margin-top: 8px; color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+            .speed-wrap { display: flex; align-items: baseline; gap: 4px; }
+            #speed-value { color: var(--paper); font: 800 46px/.78 var(--display); letter-spacing: -.03em; }
+            .speed-unit { color: var(--coral); font: 500 9px/1 var(--mono); letter-spacing: .1em; }
+            .gear { min-width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid var(--line); color: var(--acid); font: 500 11px/1 var(--mono); }
+
+            .prompt {
+                position: absolute;
+                left: 50%;
+                bottom: max(29px, env(safe-area-inset-bottom));
+                transform: translateX(-50%) translateY(10px);
+                display: flex;
+                align-items: center;
+                gap: 9px;
+                padding: 9px 13px;
+                color: var(--paper);
+                background: rgba(16,19,26,.8);
+                border: 1px solid var(--line);
+                font: 500 10px/1 var(--mono);
+                letter-spacing: .1em;
+                text-transform: uppercase;
+                opacity: 0;
+                transition: opacity .2s ease, transform .2s ease;
+                pointer-events: none;
+                backdrop-filter: blur(10px);
+            }
+            .prompt.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+            .prompt kbd { border-color: var(--acid); color: var(--acid); }
+
+            .toast {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%) scale(.96);
+                width: min(420px, calc(100vw - 48px));
+                padding: 15px 20px;
+                text-align: center;
+                color: var(--paper);
+                border-top: 2px solid var(--acid);
+                border-bottom: 1px solid var(--line);
+                background: rgba(16,19,26,.82);
+                font: 500 11px/1.5 var(--mono);
+                letter-spacing: .1em;
+                text-transform: uppercase;
+                opacity: 0;
+                transition: opacity .25s ease, transform .25s ease;
+                pointer-events: none;
+                backdrop-filter: blur(14px);
+            }
+            .toast.visible { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            .toast strong { display: block; margin-bottom: 4px; color: var(--acid); font: 700 24px/.9 var(--display); letter-spacing: .03em; }
+
+            .crosshair { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; transform: translate(-50%, -50%); display: none; }
+            .crosshair::before, .crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,.8); }
+            .crosshair::before { left: 3px; top: 0; width: 2px; height: 8px; }
+            .crosshair::after { left: 0; top: 3px; width: 8px; height: 2px; }
+
+            #loading,
+            #start-screen {
+                position: fixed;
+                inset: 0;
+                z-index: 20;
+                display: grid;
+                place-items: center;
+                background: #10131a;
+            }
+            #loading { align-content: center; gap: 24px; transition: opacity .45s ease; }
+            #loading.fade-out { opacity: 0; pointer-events: none; }
+            .loading-inner { width: min(390px, calc(100vw - 48px)); }
+            .loading-brand { color: var(--paper); font: 800 46px/.78 var(--display); letter-spacing: -.03em; text-transform: uppercase; }
+            .loading-brand span { color: var(--coral); }
+            .loading-line { display: flex; justify-content: space-between; margin-top: 32px; color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+            .loading-track { height: 3px; margin-top: 10px; overflow: hidden; background: rgba(244,240,232,.14); }
+            #loading-fill { width: 0%; height: 100%; background: var(--acid); transition: width .25s ease; }
+            #loading-detail { margin-top: 10px; color: rgba(244,240,232,.4); font: 500 9px/1.4 var(--mono); }
+
+            #start-screen { display: none; background: rgba(16,19,26,.44); backdrop-filter: blur(5px); }
+            .start-panel { width: min(530px, calc(100vw - 48px)); padding: 30px; border: 1px solid rgba(244,240,232,.24); background: rgba(16,19,26,.84); box-shadow: 0 22px 70px rgba(0,0,0,.35); }
+            .start-kicker { color: var(--acid); font: 500 10px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase; }
+            .start-title { margin-top: 10px; color: var(--paper); font: 800 clamp(52px, 10vw, 94px)/.75 var(--display); letter-spacing: -.04em; text-transform: uppercase; }
+            .start-title span { color: var(--coral); }
+            .start-copy { max-width: 340px; margin-top: 20px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+            .start-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
+            .start-hint { color: var(--muted); font: 500 9px/1.5 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+            #start-btn { appearance: none; border: 0; cursor: pointer; padding: 13px 19px; color: var(--ink); background: var(--acid); font: 700 12px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; transition: transform .16s ease, background .16s ease; }
+            #start-btn:hover { background: var(--paper); transform: translateY(-2px); }
+            #start-btn:active { transform: translateY(0); }
+
+            @media (max-width: 760px) {
+                .topbar { top: max(16px, env(safe-area-inset-top)); left: 16px; right: 16px; }
+                .brand-mark { width: 30px; height: 30px; font-size: 17px; }
+                .brand { font-size: 39px; }
+                .brand-sub { margin-top: 6px; font-size: 8px; }
+                .top-stats { gap: 6px; }
+                .stat { min-width: 0; padding: 8px 9px; }
+                .stat-label { font-size: 8px; }
+                .stat-value { font-size: 16px; }
+                .wanted { display: none; }
+                .mission-card { top: 112px; left: 16px; width: min(300px, calc(100vw - 32px)); padding: 11px 13px 12px; }
+                .mission-title { font-size: 22px; }
+                .right-rail { top: 112px; right: 16px; }
+                .radio { display: none; }
+                .bottom-left { left: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
+                .minimap-shell, #minimap { width: 132px; height: 132px; }
+                .controls-card { display: none; }
+                .vehicle-card { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); min-width: 188px; padding: 11px 12px 10px; }
+                #speed-value { font-size: 38px; }
+                .prompt { bottom: max(16px, env(safe-area-inset-bottom)); font-size: 9px; }
+                .vehicle-card.visible ~ .prompt { bottom: 106px; }
+                .start-panel { padding: 22px; }
+                .start-footer { align-items: flex-end; flex-direction: column; }
+                .start-hint { align-self: flex-start; }
+            }
+
+            @media (pointer: coarse) {
+                .controls-card { display: none; }
+                .mission-card { top: 104px; }
+            }
+        </style>
+    </head>
+    <body>
+        <div id="container" aria-label="Euphoria City 3D world"></div>
+        <div class="grain"></div>
+        <div class="vignette"></div>
+
+        <div class="hud" aria-live="polite">
+            <header class="topbar">
+                <div class="brand-lockup">
+                    <div class="brand-mark">E</div>
+                    <div>
+                        <div class="eyebrow">A Websim sandbox</div>
+                        <div class="brand">Euphoria <span>City</span></div>
+                        <div class="brand-sub"><i class="live-dot"></i> Free roam · South Bank district</div>
+                    </div>
+                </div>
+                <div class="top-stats">
+                    <div class="stat">
+                        <div class="stat-label">Time</div>
+                        <div class="stat-value" id="clock">19:42</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Cash</div>
+                        <div class="stat-value cash" id="cash">$2,450</div>
+                    </div>
+                    <div class="stat wanted">
+                        <div class="stat-label">Wanted <span id="wanted-stars">★★★★★</span></div>
+                        <div class="stat-value" id="wanted-label">CLEAN</div>
+                    </div>
+                </div>
+            </header>
+
+            <section class="mission-card" id="mission-card">
+                <div class="mission-kicker" id="mission-kicker">Current objective</div>
+                <div class="mission-title" id="mission-title">Get the sedan</div>
+                <div class="mission-detail" id="mission-detail">The city is quiet. Find your ride and take the long way through the junction.</div>
+                <div class="mission-footer"><span id="mission-progress">01 / 03</span><span id="mission-reward">Reward +$250</span></div>
+            </section>
+
+            <div class="right-rail">
+                <div class="district-tag">Sector <strong>SB-04</strong> · 0.7 km</div>
+                <div class="radio"><span class="radio-bars"><i></i><i></i><i></i><i></i></span> EUPHORIA FM · 94.7</div>
+            </div>
+
+            <div class="bottom-left">
+                <div class="minimap-shell">
+                    <canvas id="minimap" width="348" height="348" aria-label="Minimap"></canvas>
+                    <span class="map-label n">N</span><span class="map-label w">W</span><span class="map-label e">E</span><span class="map-label s">S</span>
+                    <span class="map-coords" id="map-coords">X 021 · Y 015</span>
+                </div>
+                <div class="controls-card">
+                    <div class="control-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move / drive</span></div>
+                    <div class="control-row"><kbd>SHIFT</kbd><span>Sprint / handbrake</span></div>
+                    <div class="control-row"><kbd>E</kbd><span>Enter / exit car</span></div>
+                    <div class="control-row"><kbd>V</kbd><span>Change camera</span></div>
+                </div>
+            </div>
+
+            <section class="vehicle-card" id="vehicle-card">
+                <div>
+                    <div class="vehicle-name">Personal vehicle</div>
+                    <div class="vehicle-state" id="vehicle-state">Sedan · Street spec</div>
+                    <div class="vehicle-meta" id="vehicle-meta">Handbrake ready · R reset</div>
+                </div>
+                <div>
+                    <div class="speed-wrap"><strong id="speed-value">0</strong><span class="speed-unit">KM/H</span></div>
+                    <div class="gear" id="gear-value">P</div>
+                </div>
+            </section>
+
+            <div class="prompt" id="prompt"><kbd>E</kbd><span id="prompt-text">Enter vehicle</span></div>
+            <div class="toast" id="toast"><strong id="toast-title">Welcome to Euphoria</strong><span id="toast-copy">The city is yours.</span></div>
+            <div class="crosshair" id="crosshair"></div>
+        </div>
+
+        <div id="loading">
+            <div class="loading-inner">
+                <div class="eyebrow">Initializing city services</div>
+                <div class="loading-brand">Euphoria <span>City</span></div>
+                <div class="loading-line"><span id="loading-label">Loading South Bank</span><span id="loading-percent">0%</span></div>
+                <div class="loading-track"><div id="loading-fill"></div></div>
+                <div id="loading-detail">Preparing streets, vehicles and collision data…</div>
+            </div>
+        </div>
+
+        <div id="start-screen">
+            <section class="start-panel">
+                <div class="start-kicker">Three.js open-world prototype · Build 01</div>
+                <div class="start-title">Own the <span>night.</span></div>
+                <p class="start-copy">A small city sandbox built from the controller, vehicle physics and GLB assets in this repository. Walk the block, borrow the sedan and make your own route.</p>
+                <div class="start-footer">
+                    <div class="start-hint">WASD move · Mouse look<br />E enter car · V camera · R reset</div>
+                    <button id="start-btn" type="button">Enter city&nbsp; →</button>
+                </div>
+            </section>
+        </div>
+
+        <script type="module" src="./gta.js"></script>
+    </body>
+</html>

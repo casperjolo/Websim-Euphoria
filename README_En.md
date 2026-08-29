@@ -28,6 +28,7 @@ A lightweight first-person / third-person player controller for three.js. It pro
 
 [![Online Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.png)](https://hh-hang.github.io/three-player-controller/index.html)
 
+- [Euphoria City Sandbox](https://hh-hang.github.io/three-player-controller/gta.html)
 - [Showcase](https://hh-hang.github.io/three-player-controller/showcase.html)
 - [Foot IK](https://hh-hang.github.io/three-player-controller/footIK.html)
 - [FPS Game](https://hh-hang.github.io/three-player-controller/shooting/shooting.html)
