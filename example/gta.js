@@ -19,52 +19,17 @@ const state = {
     ready: false,
     started: false,
     elapsed: 0,
-    missionIndex: 0,
     cash: 2450,
     wanted: 0,
-    waypoint: new THREE.Vector3(),
-    waypointGroundY: spawn.y,
-    waypointReady: false,
     lastHudUpdate: 0,
     lastMapUpdate: 0,
-    missionCooldown: 0,
+    selectedMenu: "free-roam",
 };
-
-const missions = [
-    {
-        title: "Get the sedan",
-        detail: "The city is quiet. Find your ride and take the long way through the junction.",
-        reward: 250,
-        radius: 2.1,
-        marker: "RIDE",
-    },
-    {
-        title: "South Bank run",
-        detail: "Take the sedan to the green beacon. Keep it clean and keep moving.",
-        target: new THREE.Vector3(-1.32, 4, 14.83),
-        reward: 500,
-        radius: 2.7,
-        marker: "RUN",
-    },
-    {
-        title: "Loop the junction",
-        detail: "One more stop. Cross the junction, then the city opens up.",
-        target: new THREE.Vector3(-19.85, 4, 8.77),
-        reward: 750,
-        radius: 2.7,
-        marker: "GO",
-    },
-];
 
 let camera;
 let renderer;
 let controls;
 let gltfLoader;
-let marker;
-let markerSprite;
-let markerTexture;
-let markerRing;
-let markerBeam;
 let lastFrame = performance.now();
 let toastTimer;
 
@@ -77,12 +42,8 @@ const dom = {
     loadingDetail: document.querySelector("#loading-detail"),
     startScreen: document.querySelector("#start-screen"),
     startButton: document.querySelector("#start-btn"),
-    missionCard: document.querySelector("#mission-card"),
-    missionKicker: document.querySelector("#mission-kicker"),
-    missionTitle: document.querySelector("#mission-title"),
-    missionDetail: document.querySelector("#mission-detail"),
-    missionProgress: document.querySelector("#mission-progress"),
-    missionReward: document.querySelector("#mission-reward"),
+    menuNote: document.querySelector("#menu-note"),
+    menuOptions: [...document.querySelectorAll("[data-menu]")],
     wantedStars: document.querySelector("#wanted-stars"),
     wantedLabel: document.querySelector("#wanted-label"),
     cash: document.querySelector("#cash"),
@@ -100,6 +61,29 @@ const dom = {
     map: document.querySelector("#minimap"),
     mapCoords: document.querySelector("#map-coords"),
     crosshair: document.querySelector("#crosshair"),
+};
+
+const menuContent = {
+    "free-roam": {
+        note: "A living district, one set of wheels and no scripted route. Walk the block or take the sedan wherever the road leads.",
+        action: "Enter free roam",
+        available: true,
+    },
+    story: {
+        note: "Story mode is reserved for the next chapter. For now, South Bank is open and the streets are yours.",
+        action: "Story mode · coming soon",
+        available: false,
+    },
+    options: {
+        note: "Cinematic presentation is active. Use V to change the camera, R to reset the vehicle and E to get in or out.",
+        action: "Enter free roam",
+        available: true,
+    },
+    credits: {
+        note: "A web sandbox built with Three.js, the player controller, vehicle physics and the GLB assets in this repository.",
+        action: "Enter free roam",
+        available: true,
+    },
 };
 
 function setLoading(progress, label, detail) {
@@ -320,113 +304,6 @@ function setupVehicle(modelGltf) {
     });
 }
 
-function groundYAt(x, z, fallback = spawn.y) {
-    if (!state.map) return fallback;
-    const raycaster = new THREE.Raycaster(
-        new THREE.Vector3(x, fallback + 70, z),
-        new THREE.Vector3(0, -1, 0),
-        0,
-        140,
-    );
-    const hits = raycaster.intersectObject(state.map, true);
-    return hits[0]?.point.y ?? fallback;
-}
-
-function makeMarkerTexture(label) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 76;
-    const context = canvas.getContext("2d");
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = "rgba(16, 19, 26, .86)";
-    context.fillRect(2, 2, 252, 72);
-    context.strokeStyle = "#d7f25b";
-    context.lineWidth = 4;
-    context.strokeRect(2, 2, 252, 72);
-    context.fillStyle = "#f4f0e8";
-    context.font = "700 34px Barlow Condensed, Impact, sans-serif";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(label, 128, 38);
-    return new THREE.CanvasTexture(canvas);
-}
-
-function createMarker() {
-    marker = new THREE.Group();
-    marker.name = "mission-marker";
-    marker.renderOrder = 20;
-
-    markerRing = new THREE.Mesh(
-        new THREE.TorusGeometry(1.05, 0.055, 8, 36),
-        new THREE.MeshBasicMaterial({ color: 0xd7f25b, transparent: true, opacity: 0.94 }),
-    );
-    markerRing.rotation.x = Math.PI / 2;
-    markerRing.renderOrder = 20;
-
-    markerBeam = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.035, 0.09, 3.3, 8),
-        new THREE.MeshBasicMaterial({ color: 0xd7f25b, transparent: true, opacity: 0.22, depthWrite: false }),
-    );
-    markerBeam.position.y = 1.65;
-    markerBeam.renderOrder = 19;
-
-    markerTexture = makeMarkerTexture("RIDE");
-    markerSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: markerTexture,
-        transparent: true,
-        depthWrite: false,
-        depthTest: false,
-    }));
-    markerSprite.scale.set(2.35, 0.7, 1);
-    markerSprite.position.y = 3.55;
-    markerSprite.renderOrder = 22;
-
-    marker.add(markerRing, markerBeam, markerSprite);
-    scene.add(marker);
-}
-
-function setMarkerLabel(label) {
-    if (!markerSprite) return;
-    markerTexture?.dispose();
-    markerTexture = makeMarkerTexture(label);
-    markerSprite.material.map = markerTexture;
-    markerSprite.material.needsUpdate = true;
-}
-
-function updateMarker(dt) {
-    if (!marker || !state.player || !state.started || state.missionIndex >= missions.length) {
-        if (marker) marker.visible = false;
-        return;
-    }
-
-    const mission = missions[state.missionIndex];
-    let target;
-    let targetY;
-    if (state.missionIndex === 0 && state.vehicle) {
-        target = state.vehicle.vehicleGroup.position;
-        targetY = target.y;
-    } else {
-        target = mission.target;
-        targetY = state.waypointGroundY;
-    }
-
-    marker.position.set(target.x, targetY + 0.05, target.z);
-    marker.rotation.y += dt * 0.85;
-    markerRing.rotation.z += dt * 1.35;
-    markerBeam.scale.y = 0.92 + Math.sin(state.elapsed * 3.2) * 0.08;
-    markerSprite.material.opacity = 0.88 + Math.sin(state.elapsed * 4) * 0.1;
-    marker.visible = true;
-}
-
-function setMissionWaypoint() {
-    const mission = missions[state.missionIndex];
-    if (!mission?.target) return;
-    state.waypoint.copy(mission.target);
-    state.waypointGroundY = groundYAt(state.waypoint.x, state.waypoint.z, state.waypoint.y);
-    state.waypointReady = true;
-    setMarkerLabel(mission.marker);
-}
-
 function showToast(title, copy, duration = 3200) {
     dom.toastTitle.textContent = title;
     dom.toastCopy.textContent = copy;
@@ -435,44 +312,17 @@ function showToast(title, copy, duration = 3200) {
     toastTimer = window.setTimeout(() => dom.toast.classList.remove("visible"), duration);
 }
 
-function updateMissionUI() {
-    const mission = missions[state.missionIndex];
-    if (!mission) {
-        dom.missionCard.classList.add("complete");
-        dom.missionKicker.textContent = "All clear · Free roam";
-        dom.missionTitle.textContent = "City unlocked";
-        dom.missionDetail.textContent = "You made the run. Take the car anywhere, explore the scene or reset it with R.";
-        dom.missionProgress.textContent = "03 / 03";
-        dom.missionReward.textContent = "+$1,500 banked";
-        setMarkerLabel("FREE");
-        return;
-    }
-
-    dom.missionCard.classList.toggle("complete", false);
-    dom.missionKicker.textContent = state.missionIndex === 0 ? "Current objective" : "Active job · South Bank";
-    dom.missionTitle.textContent = mission.title;
-    dom.missionDetail.textContent = mission.detail;
-    dom.missionProgress.textContent = `${String(state.missionIndex + 1).padStart(2, "0")} / 03`;
-    dom.missionReward.textContent = `Reward +$${mission.reward.toLocaleString()}`;
-}
-
-function advanceMission() {
-    const completed = missions[state.missionIndex];
-    if (!completed) return;
-    state.cash += completed.reward;
-    state.missionIndex += 1;
-    state.missionCooldown = 1.2;
-    state.wanted = state.missionIndex >= missions.length ? 0 : 1;
-    updateMissionUI();
-    setMissionWaypoint();
-
-    if (state.missionIndex >= missions.length) {
-        showToast("Run complete", "The city is yours. Free roam unlocked.", 5000);
-    } else if (state.missionIndex === 1) {
-        showToast("Ride acquired", "South Bank is waiting. Follow the green beacon.");
-    } else {
-        showToast("Checkpoint cleared", "Nice line. One last stop at the junction.");
-    }
+function selectMenuItem(key) {
+    const content = menuContent[key] ?? menuContent["free-roam"];
+    state.selectedMenu = key;
+    dom.menuOptions.forEach((button) => {
+        const active = button.dataset.menu === key;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+    });
+    dom.menuNote.textContent = content.note;
+    dom.startButton.textContent = `${content.action}  →`;
+    dom.startButton.disabled = !content.available;
 }
 
 function updatePrompt() {
@@ -580,26 +430,6 @@ function drawMinimap() {
         context.stroke();
     }
 
-    const mission = missions[state.missionIndex];
-    const target = state.missionIndex === 0 && state.vehicle
-        ? state.vehicle.vehicleGroup.position
-        : mission?.target;
-    if (target) {
-        const point = toMap(target.x, target.z);
-        const distance = Math.hypot(point.x - center, point.y - center);
-        if (distance < radius - 7) {
-            context.beginPath();
-            context.arc(point.x, point.y, 9 + Math.sin(state.elapsed * 4) * 2, 0, Math.PI * 2);
-            context.strokeStyle = "#d7f25b";
-            context.lineWidth = 3;
-            context.stroke();
-            context.beginPath();
-            context.arc(point.x, point.y, 3, 0, Math.PI * 2);
-            context.fillStyle = "#d7f25b";
-            context.fill();
-        }
-    }
-
     const heading = new THREE.Vector3(0, 0, -1).applyQuaternion(state.player.getPlayerCapsule().quaternion);
     context.save();
     context.translate(center, center);
@@ -630,7 +460,6 @@ function drawMinimap() {
 function updateHUD(dt) {
     state.lastHudUpdate += dt;
     state.lastMapUpdate += dt;
-    state.missionCooldown = Math.max(0, state.missionCooldown - dt);
 
     if (state.lastHudUpdate > 0.08) {
         state.lastHudUpdate = 0;
@@ -644,17 +473,6 @@ function updateHUD(dt) {
         state.lastMapUpdate = 0;
         drawMinimap();
     }
-}
-
-function checkMissionProgress() {
-    if (!state.started || !state.player || state.missionCooldown > 0) return;
-    const mission = missions[state.missionIndex];
-    if (!mission || state.missionIndex === 0 || state.player.getControllerMode() !== 1) return;
-
-    const position = state.player.getPosition();
-    if (!position) return;
-    const distance = Math.hypot(position.x - mission.target.x, position.z - mission.target.z);
-    if (distance <= mission.radius) advanceMission();
 }
 
 function onResize() {
@@ -675,9 +493,7 @@ function animate(now = performance.now()) {
 
     if (state.player && state.started) {
         state.player.update(dt);
-        checkMissionProgress();
         updateHUD(dt);
-        updateMarker(dt);
     }
 
     renderer.render(scene, camera);
@@ -700,10 +516,15 @@ async function init() {
             object.receiveShadow = true;
         });
 
+        state.player.onViewChange = (isFirstPerson) => {
+            dom.crosshair.style.display = isFirstPerson ? "block" : "none";
+        };
+        state.player.onVehicleEnter = () => showToast("Vehicle entered", "South Bank is open. Take the city at your own pace.");
+        state.player.onVehicleExit = () => showToast("On foot", "The sedan is parked where you left it.", 1800);
+
         const vehicleGltf = await loadModel(asset("glb/sedan.glb"), "Loading street vehicle", 74, 96);
         await setupVehicle(vehicleGltf);
-        createMarker();
-        updateMissionUI();
+        selectMenuItem("free-roam");
         updateWantedUI();
         setLoading(100, "City services online", "South Bank is ready to explore");
 
@@ -722,14 +543,22 @@ async function init() {
     }
 }
 
+dom.menuOptions.forEach((button) => {
+    button.addEventListener("click", () => selectMenuItem(button.dataset.menu));
+});
+
 dom.startButton.addEventListener("click", () => {
-    if (!state.ready || state.started) return;
+    if (!state.ready) return;
+    if (state.selectedMenu !== "free-roam" && !menuContent[state.selectedMenu].available) return;
+    if (state.selectedMenu !== "free-roam") selectMenuItem("free-roam");
+    if (state.started) return;
+
     state.started = true;
     dom.startScreen.style.display = "none";
     document.body.style.cursor = "none";
     state.player.onAllEvent();
     renderer.domElement.focus();
-    showToast("Welcome to Euphoria", "Find the marked sedan to start your first run.");
+    showToast("Welcome to Euphoria", "Free roam is live. The city is yours.");
 });
 
 window.addEventListener("keydown", (event) => {
@@ -747,13 +576,10 @@ window.addEventListener("pointerlockchange", () => {
 
 window.addEventListener("resize", onResize);
 
-rendererSafeLoop();
-function rendererSafeLoop() {
-    // The loop starts immediately so the loading screen has a live background while assets stream in.
-    requestAnimationFrame(function loop(now) {
-        animate(now);
-        requestAnimationFrame(loop);
-    });
-}
+// The loop starts immediately so the loading screen has a live background while assets stream in.
+requestAnimationFrame(function loop(now) {
+    animate(now);
+    requestAnimationFrame(loop);
+});
 
 init();

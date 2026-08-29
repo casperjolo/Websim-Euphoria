@@ -19,12 +19,6 @@ export default defineConfig({
             input: {
                 main: resolve(__dirname, "example", "index.html"),
                 gta: resolve(__dirname, "example", "gta.html"),
-                gltf: resolve(__dirname, "example", "glTF.html"),
-                tiles: resolve(__dirname, "example", "3dtilesScene.html"),
-                dgs: resolve(__dirname, "example", "3dgs.html"),
-                shooting: resolve(__dirname, "example", "shooting", "shooting.html"),
-                footik: resolve(__dirname, "example", "footIK.html"),
-                showcase: resolve(__dirname, "example", "showcase.html"),
             },
         },
     },
