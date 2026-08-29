@@ -28,7 +28,7 @@ A lightweight first-person / third-person player controller for three.js. It pro
 
 [![Online Demo](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.png)](https://hh-hang.github.io/three-player-controller/index.html)
 
-- [Euphoria City Sandbox](https://hh-hang.github.io/three-player-controller/gta.html)
+- [Euphoria City Gridbox Test Level](https://hh-hang.github.io/three-player-controller/gta.html)
 
 # Installation
 
@@ -45,7 +45,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/` in your browser. The root route opens the Euphoria City main menu.
+Open `http://localhost:5173/` in your browser. The root route opens the Euphoria City gridbox test level.
 
 # Quick Start
 

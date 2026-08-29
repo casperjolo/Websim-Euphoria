@@ -4,7 +4,7 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
         <meta name="theme-color" content="#10131a" />
-        <title>Euphoria City · Web Sandbox</title>
+        <title>Euphoria City · Gridbox Test Range</title>
         <style>
             @import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
@@ -262,16 +262,17 @@
             .crosshair::before { left: 3px; top: 0; width: 2px; height: 8px; }
             .crosshair::after { left: 0; top: 3px; width: 8px; height: 2px; }
 
-            #loading,
-            #start-screen {
+            #loading {
                 position: fixed;
                 inset: 0;
                 z-index: 20;
                 display: grid;
                 place-items: center;
+                align-content: center;
+                gap: 24px;
                 background: #10131a;
+                transition: opacity .45s ease;
             }
-            #loading { align-content: center; gap: 24px; transition: opacity .45s ease; }
             #loading.fade-out { opacity: 0; pointer-events: none; }
             .loading-inner { width: min(390px, calc(100vw - 48px)); }
             .loading-brand { color: var(--paper); font: 800 46px/.78 var(--display); letter-spacing: -.03em; text-transform: uppercase; }
@@ -280,128 +281,6 @@
             .loading-track { height: 3px; margin-top: 10px; overflow: hidden; background: rgba(244,240,232,.14); }
             #loading-fill { width: 0%; height: 100%; background: var(--acid); transition: width .25s ease; }
             #loading-detail { margin-top: 10px; color: rgba(244,240,232,.4); font: 500 9px/1.4 var(--mono); }
-
-            #start-screen {
-                display: none;
-                overflow: hidden;
-                align-items: stretch;
-                justify-items: stretch;
-                background:
-                    radial-gradient(circle at 72% 42%, rgba(176, 65, 37, .2), transparent 27%),
-                    linear-gradient(110deg, rgba(8, 11, 15, .96) 0%, rgba(12, 15, 19, .8) 47%, rgba(8, 11, 15, .56) 100%);
-                backdrop-filter: blur(3px) saturate(.75);
-            }
-            #start-screen::before {
-                content: "";
-                position: absolute;
-                inset: 0;
-                pointer-events: none;
-                opacity: .48;
-                background:
-                    linear-gradient(90deg, rgba(0,0,0,.54), transparent 56%),
-                    repeating-linear-gradient(120deg, transparent 0 90px, rgba(244,240,232,.025) 91px, transparent 92px);
-            }
-            #start-screen::after {
-                content: "";
-                position: absolute;
-                right: 6vw;
-                bottom: 5vh;
-                width: 39vw;
-                height: 1px;
-                background: linear-gradient(90deg, transparent, var(--coral), transparent);
-                opacity: .75;
-                transform: rotate(-21deg);
-                transform-origin: right center;
-                pointer-events: none;
-            }
-            .start-panel {
-                position: relative;
-                z-index: 1;
-                display: flex;
-                flex-direction: column;
-                width: 100%;
-                min-height: 100%;
-                padding: clamp(24px, 4vw, 56px) clamp(26px, 6vw, 96px) clamp(20px, 3vw, 42px);
-                background: linear-gradient(90deg, rgba(10,13,17,.34), transparent 64%);
-            }
-            .menu-topline,
-            .menu-footer {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 24px;
-                color: rgba(244,240,232,.48);
-                font: 500 9px/1 var(--mono);
-                letter-spacing: .16em;
-                text-transform: uppercase;
-            }
-            .menu-topline { padding-bottom: 14px; border-bottom: 1px solid rgba(244,240,232,.16); }
-            .menu-topline strong { color: var(--acid); font-weight: 500; }
-            .menu-layout {
-                display: grid;
-                grid-template-columns: minmax(260px, .9fr) minmax(340px, .75fr);
-                align-items: center;
-                gap: clamp(56px, 11vw, 180px);
-                width: min(1260px, 100%);
-                flex: 1;
-                margin: 0 auto;
-            }
-            .menu-copy { max-width: 560px; }
-            .start-kicker { color: var(--acid); font: 500 10px/1 var(--mono); letter-spacing: .23em; text-transform: uppercase; }
-            .start-title {
-                margin-top: 17px;
-                color: var(--paper);
-                font: 900 clamp(78px, 12vw, 174px)/.72 var(--display);
-                letter-spacing: -.055em;
-                text-transform: uppercase;
-                text-shadow: 0 7px 28px rgba(0,0,0,.3);
-            }
-            .start-title span { display: block; color: var(--coral); }
-            .start-copy { max-width: 380px; margin-top: 27px; color: rgba(244,240,232,.68); font-size: 13px; line-height: 1.6; }
-            .menu-location { display: flex; align-items: center; gap: 10px; margin-top: 30px; color: rgba(244,240,232,.48); font: 500 9px/1.4 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
-            .menu-location::before { content: ""; display: block; width: 24px; height: 1px; background: var(--coral); }
-            .menu-content { width: min(420px, 100%); justify-self: end; }
-            .menu-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid rgba(244,240,232,.2); color: var(--paper); font: 700 14px/1 var(--display); letter-spacing: .15em; text-transform: uppercase; }
-            .menu-heading span { color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .12em; }
-            .menu-nav { display: flex; flex-direction: column; margin-top: 9px; }
-            .menu-option {
-                appearance: none;
-                display: grid;
-                grid-template-columns: 35px minmax(0, 1fr) auto;
-                align-items: center;
-                gap: 12px;
-                width: 100%;
-                padding: 16px 10px 15px 0;
-                border: 0;
-                border-bottom: 1px solid rgba(244,240,232,.12);
-                color: rgba(244,240,232,.58);
-                background: transparent;
-                text-align: left;
-                cursor: pointer;
-                font: 700 24px/.8 var(--display);
-                letter-spacing: .04em;
-                text-transform: uppercase;
-                transition: color .16s ease, padding .16s ease, background .16s ease;
-            }
-            .menu-option:hover,
-            .menu-option.active { padding-left: 10px; color: var(--paper); background: linear-gradient(90deg, rgba(255,101,78,.15), transparent); }
-            .menu-option::before { content: ""; width: 0; height: 2px; background: var(--coral); transition: width .16s ease; }
-            .menu-option:hover::before,
-            .menu-option.active::before { width: 20px; }
-            .menu-option .menu-index { color: var(--coral); font: 500 10px/1 var(--mono); letter-spacing: .08em; }
-            .menu-option .menu-state { color: rgba(244,240,232,.36); font: 500 8px/1 var(--mono); letter-spacing: .12em; }
-            .menu-option.active .menu-state { color: var(--acid); }
-            .menu-option:focus-visible { outline: 1px solid var(--acid); outline-offset: 3px; }
-            .menu-note { min-height: 55px; margin-top: 17px; color: rgba(244,240,232,.56); font: 500 11px/1.55 var(--mono); }
-            .menu-actions { display: flex; align-items: center; gap: 16px; margin-top: 22px; padding-top: 18px; border-top: 1px solid rgba(244,240,232,.16); }
-            .menu-action-hint { color: rgba(244,240,232,.38); font: 500 8px/1.45 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-            #start-btn { appearance: none; border: 0; cursor: pointer; min-width: 190px; padding: 14px 18px; color: var(--ink); background: var(--acid); font: 700 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; transition: transform .16s ease, background .16s ease, opacity .16s ease; }
-            #start-btn:hover { background: var(--paper); transform: translateY(-2px); }
-            #start-btn:active { transform: translateY(0); }
-            #start-btn:disabled { cursor: not-allowed; color: rgba(244,240,232,.43); background: rgba(244,240,232,.12); }
-            #start-btn:disabled:hover { transform: none; background: rgba(244,240,232,.12); }
-            .menu-footer { padding-top: 15px; border-top: 1px solid rgba(244,240,232,.16); }
-            .menu-footer strong { color: rgba(244,240,232,.7); font-weight: 500; }
 
             @media (max-width: 760px) {
                 .topbar { top: max(16px, env(safe-area-inset-top)); left: 16px; right: 16px; }
@@ -422,18 +301,6 @@
                 #speed-value { font-size: 38px; }
                 .prompt { bottom: max(16px, env(safe-area-inset-bottom)); font-size: 9px; }
                 .vehicle-card.visible ~ .prompt { bottom: 106px; }
-                .start-panel { padding: 22px 20px 18px; }
-                .menu-topline span:last-child { display: none; }
-                .menu-layout { grid-template-columns: 1fr; align-content: center; gap: 34px; }
-                .menu-copy { max-width: 520px; }
-                .start-title { margin-top: 12px; font-size: clamp(70px, 19vw, 132px); }
-                .start-copy { margin-top: 18px; }
-                .menu-location { margin-top: 19px; }
-                .menu-content { justify-self: stretch; width: 100%; }
-                .menu-option { padding-top: 12px; padding-bottom: 12px; font-size: 22px; }
-                .menu-note { min-height: 43px; margin-top: 13px; font-size: 10px; }
-                .menu-actions { margin-top: 15px; padding-top: 13px; }
-                .menu-footer span:last-child { display: none; }
             }
 
             @media (pointer: coarse) {
@@ -510,56 +377,15 @@
 
         <div id="loading">
             <div class="loading-inner">
-                <div class="eyebrow">Initializing city services</div>
-                <div class="loading-brand">Euphoria <span>City</span></div>
-                <div class="loading-line"><span id="loading-label">Loading South Bank</span><span id="loading-percent">0%</span></div>
+                <div class="eyebrow">Initializing mechanic test range</div>
+                <div class="loading-brand">Gridbox <span>Level</span></div>
+                <div class="loading-line"><span id="loading-label">Building test range</span><span id="loading-percent">0%</span></div>
                 <div class="loading-track"><div id="loading-fill"></div></div>
-                <div id="loading-detail">Preparing streets, vehicles and collision data…</div>
+                <div id="loading-detail">Preparing boxes, platforms and dynamic bodies…</div>
             </div>
         </div>
 
-        <div id="start-screen" aria-label="Euphoria City main menu">
-            <section class="start-panel">
-                <div class="menu-topline">
-                    <span><strong>EUPHORIA STUDIOS</strong> · WEB EDITION</span>
-                    <span>South Bank / 19:42 / Signal 94.7</span>
-                </div>
-                <div class="menu-layout">
-                    <div class="menu-copy">
-                        <div class="start-kicker">An open city prototype · Build 01</div>
-                        <div class="start-title">Euphoria <span>City</span></div>
-                        <p class="start-copy">A living street sandbox built for the web. Take a walk, borrow the sedan and make South Bank your own.</p>
-                        <div class="menu-location">South Bank district · Port of Euphoria</div>
-                    </div>
-                    <div class="menu-content">
-                        <div class="menu-heading"><span>Main menu</span><span>Use mouse to select</span></div>
-                        <nav class="menu-nav" aria-label="Main menu">
-                            <button class="menu-option active" type="button" data-menu="free-roam" aria-selected="true">
-                                <span class="menu-index">01</span><span>Free roam</span><span class="menu-state">READY</span>
-                            </button>
-                            <button class="menu-option" type="button" data-menu="story" aria-selected="false">
-                                <span class="menu-index">02</span><span>Story mode</span><span class="menu-state">SOON</span>
-                            </button>
-                            <button class="menu-option" type="button" data-menu="options" aria-selected="false">
-                                <span class="menu-index">03</span><span>Options</span><span class="menu-state">LIVE</span>
-                            </button>
-                            <button class="menu-option" type="button" data-menu="credits" aria-selected="false">
-                                <span class="menu-index">04</span><span>Credits</span><span class="menu-state">WEB</span>
-                            </button>
-                        </nav>
-                        <div class="menu-note" id="menu-note">A living district, one set of wheels and no scripted route. Walk the block or take the sedan wherever the road leads.</div>
-                        <div class="menu-actions">
-                            <button id="start-btn" type="button">Enter free roam&nbsp; →</button>
-                            <div class="menu-action-hint">Click to select<br />Esc releases mouse</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="menu-footer">
-                    <span><strong>WASD</strong> move · <strong>E</strong> enter / exit · <strong>V</strong> camera · <strong>R</strong> reset</span>
-                    <span>Built with Three.js · Collision-ready city stream</span>
-                </div>
-            </section>
-        </div>
+
 
         <script type="module" src="./gta.js"></script>
     </body>

@@ -28,7 +28,7 @@
 
 [![在线示例](https://github.com/hh-hang/three-player-controller/blob/master/example/public/img/readme/preview.png)](https://hh-hang.github.io/three-player-controller/index.html)
 
-- [Euphoria City Sandbox](https://hh-hang.github.io/three-player-controller/gta.html)
+- [Euphoria City Gridbox 测试关卡](https://hh-hang.github.io/three-player-controller/gta.html)
 
 # 安装
 
@@ -45,7 +45,7 @@ npm install
 npm run dev
 ```
 
-浏览器访问 `http://localhost:5173/`，根路径会打开 Euphoria City 主菜单。
+浏览器访问 `http://localhost:5173/`，根路径会打开 Euphoria City 网格盒测试关卡。
 
 # 快速开始
 
