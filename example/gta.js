@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { MapControls } from "three/examples/jsm/controls/MapControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { retargetClip } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { playerController } from "../src/PlayerController";
 
 const base = import.meta.env.BASE_URL.endsWith("/")
@@ -9,6 +10,36 @@ const base = import.meta.env.BASE_URL.endsWith("/")
 const asset = (path) => `${base}${path.replace(/^\.\//, "")}`;
 
 const PLAYER_SCALE = 0.01;
+const FRED_RETARGET_SCALE = 0.01;
+const FRED_BONE_MAP = Object.freeze({
+    SKEL_Pelvis_00: "mixamorigHips",
+    SKEL_L_Thigh_01: "mixamorigLeftUpLeg",
+    SKEL_L_Calf_02: "mixamorigLeftLeg",
+    SKEL_L_Foot_03: "mixamorigLeftFoot",
+    SKEL_L_Foot_end_021: "mixamorigLeftToeBase",
+    SKEL_R_Thigh_04: "mixamorigRightUpLeg",
+    SKEL_R_Calf_05: "mixamorigRightLeg",
+    SKEL_R_Foot_06: "mixamorigRightFoot",
+    SKEL_R_Foot_end_022: "mixamorigRightToeBase",
+    SKEL_Spine_Root_07: "mixamorigSpine",
+    SKEL_Spine1_08: "mixamorigSpine1",
+    SKEL_Spine2_09: "mixamorigSpine2",
+    // Fred has one extra spine joint; reuse the upper Mixamo spine orientation.
+    SKEL_Spine3_010: "mixamorigSpine2",
+    SKEL_L_Clavicle_011: "mixamorigLeftShoulder",
+    SKEL_L_UpperArm_012: "mixamorigLeftArm",
+    SKEL_L_Forearm_013: "mixamorigLeftForeArm",
+    SKEL_L_Hand_014: "mixamorigLeftHand",
+    SKEL_L_Hand_end_023: "mixamorigLeftHand",
+    SKEL_R_Clavicle_015: "mixamorigRightShoulder",
+    SKEL_R_UpperArm_016: "mixamorigRightArm",
+    SKEL_R_Forearm_017: "mixamorigRightForeArm",
+    SKEL_R_Hand_018: "mixamorigRightHand",
+    SKEL_R_Hand_end_024: "mixamorigRightHand",
+    SKEL_Neck_1_019: "mixamorigNeck",
+    SKEL_Head_020: "mixamorigHead",
+    SKEL_Head_end_025: "mixamorigHead",
+});
 const LEVEL_SIZE = 96;
 const HALF_LEVEL = LEVEL_SIZE / 2;
 const spawn = new THREE.Vector3(-32, 3, -34);
@@ -399,6 +430,112 @@ function createTestLevel() {
     addBeacon(new THREE.Vector3(0, 0, 0), 0x83b9ff);
 }
 
+/**
+ * Fred is exported as a rigid-body rig: every visible part is parented to a
+ * Bone, but there is no SkinnedMesh for Three.js to bind animation tracks to.
+ * A virtual Skeleton gives AnimationMixer's `.bones[...]` bindings a target
+ * while keeping Fred's original rigid mesh hierarchy intact.
+ */
+function prepareFredRetargetTarget(model) {
+    model.updateMatrixWorld(true);
+
+    // Fred's source file is centered around the pelvis. The controller expects
+    // the model origin to be at the feet when it positions the visual model.
+    const bindBounds = new THREE.Box3().setFromObject(model);
+    model.position.y -= bindBounds.min.y;
+    model.updateMatrixWorld(true);
+
+    const bones = [];
+    model.traverse((object) => {
+        if (object.isBone) bones.push(object);
+    });
+    if (!bones.length) throw new Error("Fred retarget target has no bones");
+
+    model.skeleton = new THREE.Skeleton(bones);
+    return model;
+}
+
+function findSkinnedMesh(model) {
+    let result = null;
+    model.traverse((object) => {
+        if (!result && object.isSkinnedMesh) result = object;
+    });
+    return result;
+}
+
+function createFredLocalOffsets(target, sourceModel) {
+    const offsets = {};
+    const sourceQuaternion = new THREE.Quaternion();
+    const targetQuaternion = new THREE.Quaternion();
+
+    sourceModel.updateMatrixWorld(true);
+    target.updateMatrixWorld(true);
+
+    for (const [targetName, sourceName] of Object.entries(FRED_BONE_MAP)) {
+        const targetBone = target.getObjectByName(targetName);
+        const sourceBone = sourceModel.getObjectByName(sourceName);
+        if (!targetBone || !sourceBone) {
+            throw new Error(`Fred retarget mapping missing: ${targetName} → ${sourceName}`);
+        }
+
+        // SkeletonUtils transfers world rotations. This offset converts the
+        // Mixamo rest-pose axes into Fred's rest-pose axes before each track is
+        // written, which is required because the two rigs use different bone
+        // coordinate frames.
+        targetBone.getWorldQuaternion(targetQuaternion);
+        sourceBone.getWorldQuaternion(sourceQuaternion);
+        offsets[targetName] = new THREE.Matrix4().makeRotationFromQuaternion(
+            sourceQuaternion.clone().invert().multiply(targetQuaternion),
+        );
+    }
+
+    return offsets;
+}
+
+function makeRetargetableClip(sourceClip) {
+    if (sourceClip.duration > 0) return sourceClip;
+
+    // A few of Josh's hover clips are single-key, zero-duration poses.
+    // SkeletonUtils samples by duration, so give those poses two identical
+    // keys over a tiny interval before retargeting them.
+    const frame = 1 / 30;
+    const tracks = sourceClip.tracks.map((track) => {
+        const valueSize = track.getValueSize();
+        const firstValues = track.values.slice(0, valueSize);
+        const values = new track.values.constructor(valueSize * 2);
+        values.set(firstValues, 0);
+        values.set(firstValues, valueSize);
+        return new track.constructor(track.name, new Float32Array([0, frame]), values);
+    });
+    return new THREE.AnimationClip(`${sourceClip.name} static source`, frame * 2, tracks);
+}
+
+function retargetFredAnimations(model, sourceModel, sourceAnimations) {
+    const sourceMesh = findSkinnedMesh(sourceModel);
+    if (!sourceMesh) throw new Error("Josh animation source has no skinned mesh");
+    if (!sourceAnimations?.length) throw new Error("Josh animation source has no clips");
+
+    const localOffsets = createFredLocalOffsets(model, sourceModel);
+    const animations = sourceAnimations.map((sourceClip) => {
+        const clip = retargetClip(model, sourceMesh, makeRetargetableClip(sourceClip), {
+            names: FRED_BONE_MAP,
+            localOffsets,
+            hip: "mixamorigHips",
+            scale: FRED_RETARGET_SCALE,
+            useFirstFramePosition: true,
+            fps: 30,
+        });
+        clip.name = sourceClip.name;
+        return clip;
+    });
+
+    // Do not leave the target in the last sampled source pose while the
+    // controller creates its mixer and chooses the initial idle action.
+    model.skeleton.pose();
+    model.updateMatrixWorld(true);
+    return animations;
+}
+
 function configurePlayerModel(model, animations) {
     return {
         model,
@@ -417,18 +554,18 @@ function configurePlayerModel(model, animations) {
         flyHoverUpAnim: "flyHoverUp",
         flyHoverDownAnim: "flyHoverDown",
         drivingAnim: "Driving_Loop",
-        headBoneName: "mixamorigHead",
+        headBoneName: "SKEL_Head_020",
         rotateY: Math.PI,
     };
 }
 
-function setupPlayer(modelGltf) {
+function setupPlayer(modelGltf, animations) {
     state.player = new playerController();
     return state.player.init({
         scene,
         camera,
         controls,
-        playerModelConfig: configurePlayerModel(modelGltf.scene, modelGltf.animations),
+        playerModelConfig: configurePlayerModel(modelGltf.scene, animations),
         initPos: spawn,
         minCamDistance: 5,
         maxCamDistance: 260,
@@ -851,8 +988,17 @@ async function init() {
         createTestLevel();
         setLoading(8, "Building gridbox", "Creating static test colliders…");
 
-        const playerGltf = await loadModel(asset("glb/josh.glb"), "Loading test character", 8, 60);
-        await setupPlayer(playerGltf);
+        // Josh remains loaded only as the Mixamo animation source. Fred is the
+        // sole visible player model in the gridbox experience.
+        const animationSourceGltf = await loadModel(asset("glb/josh.glb"), "Loading motion library", 8, 34);
+        const playerGltf = await loadModel(asset("glb/Fred.glb"), "Loading Fred character", 34, 60);
+        prepareFredRetargetTarget(playerGltf.scene);
+        const fredAnimations = retargetFredAnimations(
+            playerGltf.scene,
+            animationSourceGltf.scene,
+            animationSourceGltf.animations,
+        );
+        await setupPlayer(playerGltf, fredAnimations);
         state.player.getPlayerModel()?.traverse((object) => {
             if (!object.isMesh) return;
             object.castShadow = true;
